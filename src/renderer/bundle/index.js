@@ -4236,9 +4236,11 @@ Suno 音乐生成`,
 	              className: `wanjuan-app-nav-tab relative flex-1 py-4 text-base font-bold flex items-center justify-center gap-2 ${activeView === `canvas` ? `wanjuan-app-nav-tab-active` : `wanjuan-app-nav-tab-idle`}`,
               children: jsxs(`span`, {
                 className: `wanjuan-app-nav-click-zone`,
-                children: [jsx(`span`, {
-                  className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-canvas`,
-                  children: `🎨`,
+                children: [jsx(Palette, {
+                  className: `wanjuan-app-nav-icon`,
+                  size: 16,
+                  strokeWidth: 1.8,
+                  "aria-hidden": `true`,
                 }), jsx(`span`, {
                   children: wanjuanT(`画布`),
                 })],
@@ -4249,9 +4251,11 @@ Suno 音乐生成`,
 	              className: `wanjuan-app-nav-tab relative flex-1 py-4 text-base font-bold flex items-center justify-center gap-2 ${activeView === `transit` ? `wanjuan-app-nav-tab-active` : `wanjuan-app-nav-tab-idle`}`,
               children: jsxs(`span`, {
                 className: `wanjuan-app-nav-click-zone`,
-                children: [jsx(`span`, {
-                  className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-resources`,
-                  children: `🗂️`,
+                children: [jsx(FolderOpen, {
+                  className: `wanjuan-app-nav-icon`,
+                  size: 16,
+                  strokeWidth: 1.8,
+                  "aria-hidden": `true`,
                 }), jsx(`span`, {
                   children: wanjuanT(`资源`),
                 })],
@@ -4262,9 +4266,11 @@ Suno 音乐生成`,
 	              className: `wanjuan-app-nav-tab relative flex-1 py-4 text-base font-bold flex items-center justify-center gap-2 ${activeView === `agents` ? `wanjuan-app-nav-tab-active` : `wanjuan-app-nav-tab-idle`}`,
               children: jsxs(`span`, {
                 className: `wanjuan-app-nav-click-zone`,
-                children: [jsx(`span`, {
-                  className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-agents`,
-                  children: `💡`,
+                children: [jsx(Sparkles, {
+                  className: `wanjuan-app-nav-icon`,
+                  size: 16,
+                  strokeWidth: 1.8,
+                  "aria-hidden": `true`,
                 }), jsx(`span`, {
                   children: wanjuanT(`智能体`),
                 })],
@@ -4277,9 +4283,11 @@ Suno 音乐生成`,
 	              className: `wanjuan-workspace-nav-tab wanjuan-app-nav-tab relative flex-1 py-4 text-base font-bold flex items-center justify-center gap-2 wanjuan-app-nav-tab-idle`,
               children: jsxs(`span`, {
                 className: `wanjuan-app-nav-click-zone`,
-                children: [jsx(`span`, {
-                  className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-workspace`,
-                  children: `🗃️`,
+                children: [jsx(Inbox, {
+                  className: `wanjuan-app-nav-icon`,
+                  size: 16,
+                  strokeWidth: 1.8,
+                  "aria-hidden": `true`,
                 }), jsx(`span`, {
                   children: wanjuanT(`工作空间`),
                 })],
@@ -4291,9 +4299,11 @@ Suno 音乐生成`,
               children: [
                 jsxs(`span`, {
                   className: `wanjuan-app-nav-click-zone`,
-                  children: [jsx(`span`, {
-                    className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-settings`,
-                    children: `⚙️`,
+                  children: [jsx(Settings, {
+                    className: `wanjuan-app-nav-icon`,
+                    size: 16,
+                    strokeWidth: 1.8,
+                    "aria-hidden": `true`,
                   }), jsx(`span`, {
                     children: wanjuanT(`设置`),
                   })],

@@ -1,6 +1,17 @@
 /** WanJuanSettingsSectionB：自 WanJuanAppRoot render 抽出的 JSX 段，props 传入，行为不变。 */
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  BrainCircuit,
+  CloudUpload,
+  DatabaseBackup,
+  KeyRound,
+  Orbit,
+  Palette,
+  Puzzle,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
 import { extractJsonBlock, formatExtensionToolError, formatStorageBytes, normalizeThemeMode } from "../lib/app-utils";
 import { WANJUAN_CUSTOM_EMPTY_GLOBAL_CONFIG_ID } from "../lib/global-config";
 import { WANJUAN_JIXIN_DEFAULT_API_URL } from "../lib/jixin-catalog";
@@ -320,9 +331,11 @@ export function WanJuanSettingsSectionB(props: any) {
                       onClick: () => setActiveSettingsTab(`account`),
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `account` ? `wanjuan-settings-nav-item-active bg-[#252525] text-sky-300 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
                       children: [
-                        jsx(`span`, {
-                          className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-account`,
-                          children: `👤`,
+                        jsx(UserRound, {
+                          className: `wanjuan-settings-nav-icon`,
+                          size: 16,
+                          strokeWidth: 1.8,
+                          "aria-hidden": `true`,
                         }),
                         settingsT(`我的账号`),
                       ],
@@ -335,9 +348,11 @@ export function WanJuanSettingsSectionB(props: any) {
                       onClick: () => setActiveSettingsTab(`oneStop`),
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `oneStop` ? `wanjuan-settings-nav-item-active bg-[#252525] text-emerald-300 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
 	                    children: [
-                        jsx(`span`, {
-                          className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-one-stop`,
-                          children: `🌐`,
+                        jsx(Orbit, {
+                          className: `wanjuan-settings-nav-icon`,
+                          size: 16,
+                          strokeWidth: 1.8,
+                          "aria-hidden": `true`,
                         }),
                         settingsT(`一站式中心`),
                       ],
@@ -347,9 +362,11 @@ export function WanJuanSettingsSectionB(props: any) {
                       title: enterpriseSettingsManaged ? settingsT(`由企业网关管理`) : ``,
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${enterpriseSettingsManaged ? `wanjuan-settings-nav-item-managed` : ``} ${activeSettingsTab === `api` ? `wanjuan-settings-nav-item-active bg-[#252525] text-cyan-300 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
                       children: [
-                        jsx(`span`, {
-                          className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-api`,
-                          children: `🔐`,
+                        jsx(KeyRound, {
+                          className: `wanjuan-settings-nav-icon`,
+                          size: 16,
+                          strokeWidth: 1.8,
+                          "aria-hidden": `true`,
                         }),
 	                        settingsT(`API 配置`),
                         enterpriseSettingsManaged && jsx(`span`, { className: `wanjuan-settings-managed-lock`, children: `🔒` }),
@@ -360,9 +377,11 @@ export function WanJuanSettingsSectionB(props: any) {
                       title: enterpriseSettingsManaged ? settingsT(`由企业网关管理`) : ``,
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${enterpriseSettingsManaged ? `wanjuan-settings-nav-item-managed` : ``} ${activeSettingsTab === `models` ? `wanjuan-settings-nav-item-active bg-[#252525] text-purple-400 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
                       children: [
-                        jsx(`span`, {
-                          className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-models`,
-                          children: `🧠`,
+                        jsx(BrainCircuit, {
+                          className: `wanjuan-settings-nav-icon`,
+                          size: 16,
+                          strokeWidth: 1.8,
+                          "aria-hidden": `true`,
                         }),
 	                        settingsT(`模型配置`),
                         enterpriseSettingsManaged && jsx(`span`, { className: `wanjuan-settings-managed-lock`, children: `🔒` }),
@@ -372,9 +391,11 @@ export function WanJuanSettingsSectionB(props: any) {
                       onClick: () => selectSettingsTab(`cloud`),
                       title: enterpriseSettingsManaged ? settingsT(`由企业网关管理`) : ``,
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${enterpriseSettingsManaged ? `wanjuan-settings-nav-item-managed` : ``} ${activeSettingsTab === `cloud` ? `wanjuan-settings-nav-item-active bg-[#252525] text-cyan-400 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
-                      children: [jsx(`span`, {
-                        className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-cloud`,
-                        children: `☁️`
+                      children: [jsx(CloudUpload, {
+                        className: `wanjuan-settings-nav-icon`,
+                        size: 16,
+                        strokeWidth: 1.8,
+                        "aria-hidden": `true`,
 	                      }), settingsT(`上传与直链`), enterpriseSettingsManaged && jsx(`span`, { className: `wanjuan-settings-managed-lock`, children: `🔒` })],
                     }),
 	                    jsx(`div`, {
@@ -384,17 +405,21 @@ export function WanJuanSettingsSectionB(props: any) {
 	                    jsxs(`button`, {
 	                      onClick: () => setActiveSettingsTab(`generation`),
 	                      className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `generation` ? `wanjuan-settings-nav-item-active bg-[#252525] text-green-400 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
-	                      children: [jsx(`span`, {
-	                        className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-generation`,
-	                        children: `✨`
+	                      children: [jsx(Sparkles, {
+	                        className: `wanjuan-settings-nav-icon`,
+	                        size: 16,
+	                        strokeWidth: 1.8,
+	                        "aria-hidden": `true`,
 	                      }), settingsT(`生成与下载`)],
 	                    }),
 	                    jsxs(`button`, {
 	                      onClick: () => setActiveSettingsTab(`extensions`),
 	                      className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1.5 flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `extensions` ? `wanjuan-settings-nav-item-active bg-[#252525] text-rose-300 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
-	                      children: [jsx(`span`, {
-	                        className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-extensions`,
-	                        children: `🧩`
+	                      children: [jsx(Puzzle, {
+	                        className: `wanjuan-settings-nav-icon`,
+	                        size: 16,
+	                        strokeWidth: 1.8,
+	                        "aria-hidden": `true`,
 	                      }), settingsT(`本地工具`)],
 	                    }),
 	                    jsx(`div`, {
@@ -404,9 +429,11 @@ export function WanJuanSettingsSectionB(props: any) {
 	                    jsxs(`button`, {
 	                      onClick: () => setActiveSettingsTab(`data`),
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `data` ? `wanjuan-settings-nav-item-active bg-[#252525] text-orange-400 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
-                      children: [jsx(`span`, {
-                        className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-data`,
-                        children: `🗄️`,
+                      children: [jsx(DatabaseBackup, {
+                        className: `wanjuan-settings-nav-icon`,
+                        size: 16,
+                        strokeWidth: 1.8,
+                        "aria-hidden": `true`,
 	                      }), settingsT(`项目与备份`)],
                     }),
                     jsx(`div`, {
@@ -416,9 +443,11 @@ export function WanJuanSettingsSectionB(props: any) {
                     jsxs(`button`, {
                       onClick: () => setActiveSettingsTab(`basic`),
                       className: `text-left px-3 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2 wanjuan-settings-nav-item ${activeSettingsTab === `basic` ? `wanjuan-settings-nav-item-active bg-[#252525] text-blue-400 font-bold border border-[#333] shadow-sm` : `text-gray-300 hover:bg-[#222] hover:text-gray-100 border border-transparent`}`,
-                      children: [jsx(`span`, {
-                        className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-basic`,
-                        children: `🪄`,
+                      children: [jsx(Palette, {
+                        className: `wanjuan-settings-nav-icon`,
+                        size: 16,
+                        strokeWidth: 1.8,
+                        "aria-hidden": `true`,
 	                      }), settingsT(`外观与通用`)],
                     }),
                   ],

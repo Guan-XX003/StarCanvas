@@ -1,0 +1,857 @@
+/*
+ * StarCanvas "Stellar Editor" visual pass.
+ *
+ * This file intentionally sits last in the renderer stylesheet order. It only
+ * refines the graphite theme and shared interaction states; product behaviour,
+ * layout data and the other user-selectable themes remain untouched.
+ */
+
+html.theme-graphite,
+html.theme-dark {
+  --wj-bg: #17191c;
+  --wj-surface: #1d2024;
+  --wj-surface-2: #24282d;
+  --wj-surface-3: #2c3137;
+  --wj-border: #353a40;
+  --wj-border-strong: #4b5159;
+  --wj-text: #eeeae3;
+  --wj-muted: #9b9a95;
+  --wj-accent: #e36b3f;
+  --wj-accent-2: #f0a24b;
+  --wj-accent-strong: #f07848;
+  --wj-action-bg: #d95f34;
+  --wj-action-hover-bg: #eb7147;
+  --wj-action-border: #d95f34;
+  --wj-action-text: #fffaf5;
+  --wj-action-shadow: none;
+  --wj-control-bg: #24282d;
+  --wj-control-border: #3b4148;
+  --wj-control-text: #e5e1da;
+  --wj-control-muted-text: #a7a59f;
+  --wj-control-hover-bg: #30353b;
+  --wj-control-hover-border: #59616a;
+  --wj-control-hover-text: #fffaf5;
+  --wj-control-selected-bg: #e36b3f;
+  --wj-control-selected-hover-bg: #ee774c;
+  --wj-control-selected-border: #e36b3f;
+  --wj-control-selected-text: #181513;
+  --wj-control-selected-shadow: none;
+  --wj-control-primary-bg: #d95f34;
+  --wj-control-primary-hover-bg: #eb7147;
+  --wj-control-primary-border: #d95f34;
+  --wj-control-primary-text: #fffaf5;
+  --wj-control-primary-shadow: none;
+  --wj-chrome-bg: #1b1e22;
+  --wj-chrome-border: #30353a;
+  --wj-chrome-shadow: none;
+  --wj-nav-text: #a8a7a2;
+  --wj-nav-text-active: #f4efe8;
+  --wj-nav-hover-bg: #24282d;
+  --wj-nav-active-line: #e36b3f;
+  --wj-nav-active-shadow: transparent;
+  --wj-panel-bg: #1d2024;
+  --wj-panel-bg-raised: #24282d;
+  --wj-panel-bg-subtle: #191b1f;
+  --wj-panel-border: #363c43;
+  --wj-panel-border-soft: #30353b;
+  --wj-panel-divider: #30353a;
+  --wj-panel-section-bg: #202328;
+  --wj-panel-section-header-bg: #24282d;
+  --wj-panel-row-bg: #202328;
+  --wj-panel-row-hover-bg: #292e34;
+  --wj-panel-shadow: none;
+  --wj-field-bg: #181b1f;
+  --wj-field-border: #3a4047;
+  --wj-field-text: #eeeae3;
+  --wj-field-placeholder: #777a7d;
+  --wj-field-focus-border: #e36b3f;
+  --wj-field-focus-shadow: 0 0 0 2px rgba(227, 107, 63, 0.2);
+  --wj-field-shadow: none;
+  --wj-disclosure-bg: #24282d;
+  --wj-disclosure-border: #3b4148;
+  --wj-disclosure-text: #ddd9d2;
+  --wj-disclosure-hover-bg: #30353b;
+  --wj-disclosure-hover-border: #59616a;
+  --wj-disclosure-hover-text: #fffaf5;
+  --wj-disclosure-shadow: none;
+  --wj-disclosure-hover-shadow: none;
+  --wj-menu-bg: #23272c;
+  --wj-menu-border: #41474f;
+  --wj-menu-hover-bg: #31363c;
+  --wj-menu-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+  --wj-card-bg: #202328;
+  --wj-card-hover-bg: #272c31;
+  --wj-card-selected-bg: #24282d;
+  --wj-card-selected-border: #e36b3f;
+  --wj-card-selected-rail: #e36b3f;
+  --wj-card-shadow: none;
+  --wj-card-selected-shadow: inset 3px 0 0 #e36b3f;
+  --wj-node-surface: #202328;
+  --wj-node-surface-raised: #272b30;
+  --wj-node-surface-subtle: #191c20;
+  --wj-node-border: #3b4148;
+  --wj-node-border-hover: #68717a;
+  --wj-node-text: #eeeae3;
+  --wj-node-muted: #a5a39e;
+  --wj-node-hover-bg: #2c3137;
+  --wj-node-soft-action-bg: #272c31;
+  --wj-node-soft-action-hover-bg: #32383f;
+  --wj-node-soft-action-border: #454c54;
+  --wj-node-soft-action-text: #e8e4dd;
+  --wj-node-upload-bg: #191c20;
+  --wj-node-upload-border: #41474f;
+  --wj-node-upload-text: #aaa8a2;
+  --wj-node-upload-hover-bg: #292e34;
+  --wj-node-upload-hover-border: #68717a;
+  --wj-node-upload-hover-text: #fffaf5;
+  --wj-canvas-control-bg: #202328;
+  --wj-canvas-control-border: #3b4148;
+  --wj-canvas-control-text: #c9c6bf;
+  --wj-canvas-control-hover-bg: #30353b;
+  --wj-canvas-control-hover-border: #59616a;
+  --wj-canvas-control-hover-text: #fffaf5;
+  --wj-canvas-control-shadow: none;
+  --wj-canvas-control-hover-shadow: none;
+  --wj-edge-glow: transparent;
+  --wj-edge-main: #656b71;
+  --wj-edge-selected: #e36b3f;
+  --wj-edge-active-glow: transparent;
+  --wj-edge-active: #e36b3f;
+  --wj-edge-energy: #f0a24b;
+  --wj-edge-spark: #f4c07a;
+  --wj-loading-node-border: #e36b3f;
+  --wj-loading-node-shadow: 0 0 0 1px #e36b3f;
+  --wj-radius-control: 4px;
+  --wj-radius-panel: 6px;
+  --wj-motion-fast: 120ms;
+  --wj-motion-panel: 180ms;
+}
+
+html.theme-graphite body,
+html.theme-graphite button,
+html.theme-graphite input,
+html.theme-graphite textarea,
+html.theme-graphite select {
+  font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html.theme-graphite .wanjuan-app-top-nav {
+  min-height: 58px !important;
+  background: #1b1e22 !important;
+  background-image: none !important;
+  border-bottom: 1px solid #30353a !important;
+  box-shadow: none !important;
+}
+
+html.theme-graphite .wanjuan-app-nav-tab {
+  border-radius: 0 !important;
+  letter-spacing: 0.01em;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite .wanjuan-app-nav-tab:hover:not(.wanjuan-app-nav-tab-active) {
+  background: #22262a !important;
+  color: #d5d1ca !important;
+}
+
+html.theme-graphite .wanjuan-app-nav-tab-active {
+  position: relative;
+  color: #f4efe8 !important;
+}
+
+html.theme-graphite .wanjuan-app-nav-tab-active::after {
+  content: "";
+  position: absolute;
+  right: 24%;
+  bottom: 5px;
+  left: 24%;
+  height: 2px;
+  background: #e36b3f;
+  border-radius: 1px;
+}
+
+html.theme-graphite :is(
+  .wanjuan-resource-toolbar,
+  .wanjuan-settings-sidebar,
+  .wanjuan-settings-card,
+  .wanjuan-settings-subcard,
+  .wanjuan-settings-list-card,
+  .wanjuan-storage-optimization-card
+) {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html.theme-graphite :is(
+  .wanjuan-settings-nav-item,
+  .wanjuan-settings-button,
+  .wanjuan-settings-chip-button,
+  .wanjuan-settings-advanced-toggle,
+  .wanj-seedance-portrait-library-toggle,
+  .wanjuan-resource-filter-button,
+  .wanjuan-resource-filter-tab,
+  .wanjuan-node-picker-trigger,
+  .wanjuan-node-model-option,
+  .wanjuan-node-popover-option,
+  .wanjuan-tts-node-mode-button,
+  .wj-mode-tab
+) {
+  border-radius: var(--wj-radius-control) !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    border-color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite .wanjuan-settings-nav-item-active {
+  background: #2a2e33 !important;
+  border-color: #444a51 !important;
+  color: #f4efe8 !important;
+  box-shadow: inset 3px 0 0 #e36b3f !important;
+}
+
+html.theme-graphite .wanjuan-settings-nav-item-active :is(span, svg, .wanjuan-skeuo-icon) {
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+}
+
+html.theme-graphite :is(input, textarea, select, .wanjuan-settings-control) {
+  border-radius: var(--wj-radius-control) !important;
+  box-shadow: none !important;
+  transition: border-color var(--wj-motion-fast) ease-out,
+    box-shadow var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid rgba(227, 107, 63, 0.78) !important;
+  outline-offset: 2px !important;
+}
+
+html.theme-graphite :is(
+  [data-wanjuan-context-menu="true"],
+  .wanjuan-canvas-dock-popover,
+  .wanjuan-mention-picker,
+  .wanjuan-membership-dialog,
+  .wanjuan-enterprise-create-dialog,
+  .wanjuan-project-group-panel,
+  .wanjuan-global-tasks-panel
+) {
+  border: 1px solid var(--wj-menu-border) !important;
+  border-radius: var(--wj-radius-panel) !important;
+  background: var(--wj-menu-bg) !important;
+  background-image: none !important;
+  box-shadow: var(--wj-menu-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.theme-graphite [data-wanjuan-context-menu="true"] :is(
+  .wanjuan-context-menu-item,
+  .wanjuan-context-menu-row,
+  .wanjuan-context-menu-item-plain
+) {
+  border-radius: 3px !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite [data-wanjuan-context-menu="true"] :is(
+  .wanjuan-context-menu-item,
+  .wanjuan-context-menu-row,
+  .wanjuan-context-menu-item-plain
+):hover {
+  background: #34393f !important;
+  color: #fffaf5 !important;
+}
+
+html.theme-graphite .wanjuan-canvas-bottom-dock {
+  padding: 3px;
+  border-color: #3b4148;
+  border-radius: 6px;
+  background: #202328;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.theme-graphite .wanjuan-canvas-dock-button {
+  height: 38px;
+  border-radius: 4px;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class] {
+  background: #34393f !important;
+  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  color: #fffaf5 !important;
+}
+
+html.theme-graphite .react-flow__controls {
+  gap: 1px !important;
+  padding: 3px !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.theme-graphite .react-flow__controls-button {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 3px !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite .react-flow__controls-button:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+html.theme-graphite .wanjuan-flow-edge-glow,
+html.theme-graphite .wanjuan-flow-edge-glow-active {
+  opacity: 0 !important;
+  filter: none !important;
+}
+
+html.theme-graphite :is(
+  .wanjuan-flow-edge-main,
+  .wanjuan-flow-edge-selected,
+  .wanjuan-flow-edge-energy-base,
+  .wanjuan-flow-edge-energy-flow,
+  .wanjuan-flow-edge-energy-spark
+) {
+  filter: none !important;
+}
+
+html.theme-graphite .wanjuan-flow-edge-main {
+  stroke-width: 1.5;
+}
+
+html.theme-graphite .wanjuan-flow-edge-selected,
+html.theme-graphite .wanjuan-flow-edge-energy-base {
+  stroke-width: 2;
+}
+
+html.theme-graphite .react-flow__node.selected > :first-child,
+html.theme-graphite .react-flow__node:focus-visible > :first-child {
+  border-color: #e36b3f !important;
+  box-shadow: 0 0 0 1px #e36b3f !important;
+}
+
+html.theme-graphite .wanjuan-loading-node-frame {
+  border-color: #e36b3f !important;
+  box-shadow: 0 0 0 1px #e36b3f !important;
+}
+
+html.theme-graphite .react-flow__handle {
+  border: 1px solid #17191c !important;
+  box-shadow: none !important;
+  transition: transform var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-graphite .react-flow__handle:hover {
+  transform: scale(1.18);
+  background: #e36b3f !important;
+}
+
+html.theme-graphite :is(.animate-pulse, .animate-spin) {
+  animation-duration: 1.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-graphite *,
+  html.theme-graphite *::before,
+  html.theme-graphite *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* The shipped default is "Obsidian" (theme-dark); keep it visually aligned
+ * with Graphite without changing the user's stored theme choice. */
+html.theme-dark .wanjuan-app-top-nav {
+  min-height: 58px !important;
+  background: #1b1e22 !important;
+  background-image: none !important;
+  border-bottom: 1px solid #30353a !important;
+  box-shadow: none !important;
+}
+
+html.theme-dark .wanjuan-app-nav-tab {
+  border-radius: 0 !important;
+  letter-spacing: 0.01em;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-dark .wanjuan-app-nav-tab:hover:not(.wanjuan-app-nav-tab-active) {
+  background: #22262a !important;
+  color: #d5d1ca !important;
+}
+
+html.theme-dark .wanjuan-app-nav-tab-active {
+  position: relative;
+  color: #f4efe8 !important;
+}
+
+html.theme-dark .wanjuan-app-nav-tab-active::after {
+  content: "";
+  position: absolute;
+  right: 24%;
+  bottom: 5px;
+  left: 24%;
+  height: 2px;
+  background: #e36b3f;
+  border-radius: 1px;
+}
+
+html.theme-dark :is(
+  .wanjuan-resource-toolbar,
+  .wanjuan-settings-sidebar,
+  .wanjuan-settings-card,
+  .wanjuan-settings-subcard,
+  .wanjuan-settings-list-card,
+  .wanjuan-storage-optimization-card
+) {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html.theme-dark :is(
+  .wanjuan-settings-nav-item,
+  .wanjuan-settings-button,
+  .wanjuan-settings-chip-button,
+  .wanjuan-settings-advanced-toggle,
+  .wanj-seedance-portrait-library-toggle,
+  .wanjuan-resource-filter-button,
+  .wanjuan-resource-filter-tab,
+  .wanjuan-node-picker-trigger,
+  .wanjuan-node-model-option,
+  .wanjuan-node-popover-option,
+  .wanjuan-tts-node-mode-button,
+  .wj-mode-tab,
+  input,
+  textarea,
+  select,
+  .wanjuan-settings-control
+) {
+  border-radius: var(--wj-radius-control) !important;
+  box-shadow: none !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    border-color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-dark .wanjuan-settings-nav-item-active {
+  background: #2a2e33 !important;
+  border-color: #444a51 !important;
+  color: #f4efe8 !important;
+  box-shadow: inset 3px 0 0 #e36b3f !important;
+}
+
+html.theme-dark .wanjuan-settings-nav-item-active :is(span, svg, .wanjuan-skeuo-icon) {
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+}
+
+html.theme-dark :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid rgba(227, 107, 63, 0.78) !important;
+  outline-offset: 2px !important;
+}
+
+html.theme-dark :is(
+  [data-wanjuan-context-menu="true"],
+  .wanjuan-canvas-dock-popover,
+  .wanjuan-mention-picker,
+  .wanjuan-membership-dialog,
+  .wanjuan-enterprise-create-dialog,
+  .wanjuan-project-group-panel,
+  .wanjuan-global-tasks-panel
+) {
+  border: 1px solid var(--wj-menu-border) !important;
+  border-radius: var(--wj-radius-panel) !important;
+  background: var(--wj-menu-bg) !important;
+  background-image: none !important;
+  box-shadow: var(--wj-menu-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.theme-dark [data-wanjuan-context-menu="true"] :is(
+  .wanjuan-context-menu-item,
+  .wanjuan-context-menu-row,
+  .wanjuan-context-menu-item-plain
+) {
+  border-radius: 3px !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-dark [data-wanjuan-context-menu="true"] :is(
+  .wanjuan-context-menu-item,
+  .wanjuan-context-menu-row,
+  .wanjuan-context-menu-item-plain
+):hover {
+  background: #34393f !important;
+  color: #fffaf5 !important;
+}
+
+html.theme-dark .wanjuan-canvas-bottom-dock {
+  padding: 3px;
+  border-color: #3b4148;
+  border-radius: 6px;
+  background: #202328;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.theme-dark .wanjuan-canvas-dock-button {
+  height: 38px;
+  border-radius: 4px;
+}
+
+html.theme-dark .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class] {
+  background: #34393f !important;
+  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  color: #fffaf5 !important;
+}
+
+html.theme-dark .react-flow__controls {
+  gap: 1px !important;
+  padding: 3px !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.theme-dark .react-flow__controls-button {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 3px !important;
+}
+
+html.theme-dark .react-flow__controls-button:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+html.theme-dark :is(.wanjuan-flow-edge-glow, .wanjuan-flow-edge-glow-active) {
+  opacity: 0 !important;
+  filter: none !important;
+}
+
+html.theme-dark :is(
+  .wanjuan-flow-edge-main,
+  .wanjuan-flow-edge-selected,
+  .wanjuan-flow-edge-energy-base,
+  .wanjuan-flow-edge-energy-flow,
+  .wanjuan-flow-edge-energy-spark
+) {
+  filter: none !important;
+}
+
+html.theme-dark .react-flow__node.selected > :first-child,
+html.theme-dark .react-flow__node:focus-visible > :first-child,
+html.theme-dark .wanjuan-loading-node-frame {
+  border-color: #e36b3f !important;
+  box-shadow: 0 0 0 1px #e36b3f !important;
+}
+
+html.theme-dark .react-flow__handle {
+  border: 1px solid #17191c !important;
+  box-shadow: none !important;
+  transition: transform var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html.theme-dark .react-flow__handle:hover {
+  transform: scale(1.18);
+  background: #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-nav-icon {
+  flex: 0 0 auto;
+  color: currentColor;
+  filter: none !important;
+  transform: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-top-nav .wanjuan-app-nav-tab,
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-top-nav .wanjuan-app-nav-tab:hover,
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-top-nav .wanjuan-app-nav-tab:focus-visible,
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-top-nav .wanjuan-app-nav-tab:active {
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-nav-icon {
+  flex: 0 0 auto;
+  color: currentColor !important;
+  filter: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:hover[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:focus-visible[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:active[class][class] {
+  background: #2a2e33 !important;
+  background-color: #2a2e33 !important;
+  background-image: none !important;
+  border-color: #444a51 !important;
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+  box-shadow: inset 3px 0 0 #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active::before {
+  display: none !important;
+  content: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-title {
+  border-radius: 6px !important;
+  background: #202328 !important;
+  border-color: #3b4148 !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-action {
+  min-width: 116px !important;
+  border-radius: 4px !important;
+  background: #1d2024 !important;
+  border-color: #3b4148 !important;
+  color: #aaa8a2 !important;
+  box-shadow: none !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    border-color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-action:hover {
+  background: #292e34 !important;
+  border-color: #68717a !important;
+  color: #fffaf5 !important;
+  transform: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #3b4148 !important;
+  border-radius: 4px !important;
+  background: #202328 !important;
+  color: #aaa8a2 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transition: color var(--wj-motion-fast) ease-out,
+    border-color var(--wj-motion-fast) ease-out,
+    background-color var(--wj-motion-fast) ease-out !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button:hover {
+  background: #30353b !important;
+  border-color: #59616a !important;
+  color: #fffaf5 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-button.is-unseen {
+  border-color: #8e513c !important;
+  background: #27292c !important;
+  color: #e78a67 !important;
+  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-button.is-unseen::before,
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-button.is-unseen::after {
+  content: none !important;
+  display: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-anchor {
+  filter: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-coachmark {
+  border: 1px solid #76503f !important;
+  border-radius: 4px !important;
+  background: #23272c !important;
+  color: #eeeae3 !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32) !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-coachmark::before {
+  background: #23272c !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-dot,
+html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-dot {
+  background: #e36b3f !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > .wanjuan-canvas-dock-button:not(.is-active) svg,
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-dock-tool-items .wanjuan-canvas-dock-button:not(.is-active) svg {
+  color: #92938f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > .wanjuan-canvas-dock-button:not(.is-active):hover svg,
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-dock-tool-items .wanjuan-canvas-dock-button:not(.is-active):hover svg {
+  color: #f4efe8 !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar {
+  min-height: 56px !important;
+  background: #1b1e22 !important;
+  border-bottom-color: #30353a !important;
+}
+
+html:is(.theme-dark, .theme-graphite) :is(
+  .wanjuan-resource-toolbar,
+  .wanjuan-resource-source-filter,
+  .wanjuan-mention-picker,
+  .wanjuan-material-picker
+) .wanjuan-resource-filter-group {
+  min-height: 34px !important;
+  padding: 3px !important;
+  border: 1px solid #3b4148 !important;
+  border-radius: 5px !important;
+  background: #202328 !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button[class][class] {
+  border-radius: 3px !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active:hover[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active:focus-visible[class][class] {
+  background: #30353b !important;
+  background-color: #30353b !important;
+  background-image: none !important;
+  border-color: #4b5159 !important;
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+  box-shadow: inset 0 -2px 0 #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty,
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty-filter {
+  color: #888b8d !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty > svg,
+html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty-filter > svg {
+  color: #e0784f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-workspace {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card[class][class] {
+  border-radius: 5px !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active:hover[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active:focus-visible[class][class] {
+  background: #292e34 !important;
+  background-image: none !important;
+  border-color: #604638 !important;
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+  box-shadow: inset 3px 0 0 #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:first-child {
+  display: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2),
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2) :is(div, span, svg) {
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page button:not(.wanjuan-agent-role-card) {
+  border-radius: 4px !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer {
+  border-radius: 6px !important;
+  border-color: #4b5159 !important;
+  background: #202328 !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer:focus-within {
+  border-color: #e36b3f !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38), inset 0 -2px 0 #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer textarea {
+  border-radius: 5px 5px 0 0 !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer > div:last-child {
+  border-radius: 0 0 5px 5px !important;
+}
+
+html:is(.theme-dark, .theme-graphite) :is(
+  .wanjuan-workspace-tabs button.is-active,
+  .wanjuan-workspace-sections button.is-active,
+  .wanjuan-workspace-segment button.is-active
+)[class][class],
+html:is(.theme-dark, .theme-graphite) :is(
+  .wanjuan-workspace-tabs button.is-active,
+  .wanjuan-workspace-sections button.is-active,
+  .wanjuan-workspace-segment button.is-active
+):hover[class][class] {
+  background: #30353b !important;
+  background-color: #30353b !important;
+  background-image: none !important;
+  border-color: #4b5159 !important;
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+  box-shadow: inset 0 -2px 0 #e36b3f !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-workspace-group.is-active[class][class],
+html:is(.theme-dark, .theme-graphite) .wanjuan-workspace-group.is-active:hover[class][class] {
+  background: #292e34 !important;
+  background-color: #292e34 !important;
+  background-image: none !important;
+  border-color: #604638 !important;
+  color: #f4efe8 !important;
+  -webkit-text-fill-color: #f4efe8 !important;
+  box-shadow: inset 3px 0 0 #e36b3f !important;
+}

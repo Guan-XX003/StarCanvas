@@ -11,5 +11,6 @@ import "./styles/canvas-bottom-dock.css";
 import "./styles/theme-controls-final.css";
 import "./styles/tianji-settings-native.css";
 import "./styles/account.css";
+import "./styles/stellar-editor.css";
 import "./lib/i18n-runtime.js";
 import "./bundle/index.js";

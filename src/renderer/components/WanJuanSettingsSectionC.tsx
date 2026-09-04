@@ -1,5 +1,6 @@
 /** WanJuanSettingsSectionC：自 WanJuanAppRoot render 抽出的 JSX 段，props 传入，行为不变。 */
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
+import { PackageOpen, SearchX } from "lucide-react";
 
 export function WanJuanSettingsSectionC(props: any) {
   const {
@@ -180,9 +181,11 @@ export function WanJuanSettingsSectionC(props: any) {
                     jsxs(`div`, {
                       className: `wanjuan-resource-empty text-center text-gray-500 py-20 text-sm flex flex-col items-center`,
                       children: [
-                        jsx(`div`, {
-                          className: `text-4xl mb-3 opacity-50`,
-                          children: `📦`,
+                        jsx(PackageOpen, {
+                          className: `mb-3 opacity-55`,
+                          size: 34,
+                          strokeWidth: 1.5,
+                          "aria-hidden": `true`,
                         }),
                         jsx(`p`, {
                           children: wanjuanT(`暂无资源`)
@@ -202,9 +205,11 @@ export function WanJuanSettingsSectionC(props: any) {
                     jsxs(`div`, {
                       className: `wanjuan-resource-empty-filter text-center text-gray-500 py-20 text-sm flex flex-col items-center`,
                       children: [
-                        jsx(`div`, {
-                          className: `text-3xl mb-3 opacity-40`,
-                          children: `⌕`,
+                        jsx(SearchX, {
+                          className: `mb-3 opacity-45`,
+                          size: 32,
+                          strokeWidth: 1.5,
+                          "aria-hidden": `true`,
                         }),
                         jsx(`p`, {
                           children: wanjuanT(`当前筛选没有资源`)

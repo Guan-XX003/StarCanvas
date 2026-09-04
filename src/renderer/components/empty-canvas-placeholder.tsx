@@ -1,5 +1,6 @@
 /** 空画布占位提示（无节点时显示）。自 WanJuanAppCanvas 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
+import { Image, Music2, Type, Video, Workflow } from "lucide-react";
 declare const chrome: any;
 
 export function WanJuanEmptyCanvasPlaceholder({
@@ -16,7 +17,7 @@ export function WanJuanEmptyCanvasPlaceholder({
                 },
                 children: [
                   jsxs(`div`, {
-                    className: `bg-[#1c1c1c] rounded-full px-5 py-2.5 flex items-center gap-3 mb-10 border border-[#333] shadow-lg`,
+                    className: `wanjuan-empty-canvas-title bg-[#1c1c1c] px-5 py-2.5 flex items-center gap-3 mb-10 border border-[#333]`,
                     style: {
                       display: `flex`,
                       alignItems: `center`,
@@ -24,32 +25,18 @@ export function WanJuanEmptyCanvasPlaceholder({
                       minHeight: 44,
                       marginBottom: 34,
                       padding: `10px 22px`,
-                      borderRadius: 9999,
+                      borderRadius: 6,
                     },
                     children: [
-                      jsxs(`svg`, {
-                        xmlns: `http://www.w3.org/2000/svg`,
-                        width: `18`,
-                        height: `18`,
-                        viewBox: `0 0 24 24`,
-                        fill: `none`,
-                        stroke: `currentColor`,
-                        strokeWidth: `2`,
-                        strokeLinecap: `round`,
-                        strokeLinejoin: `round`,
+                      jsx(Workflow, {
+                        size: 18,
+                        strokeWidth: 1.8,
+                        "aria-hidden": `true`,
                         className: `text-gray-300`,
                         style: {
                           display: `block`,
                           flex: `0 0 18px`
                         },
-                        children: [
-                          jsx(`path`, {
-                            d: `M3 3v18h18`
-                          }),
-                          jsx(`path`, {
-                            d: `m19 9-5 5-4-4-3 3`
-                          }),
-                        ],
                       }),
                       jsx(`span`, {
                         className: `text-base font-medium text-gray-200 tracking-wide`,
@@ -84,7 +71,7 @@ export function WanJuanEmptyCanvasPlaceholder({
                             },
                           );
                         },
-                        className: `flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 rounded-2xl transition-all text-gray-400 hover:text-gray-200`,
+                        className: `wanjuan-empty-canvas-action flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 transition-all text-gray-400 hover:text-gray-200`,
                         style: {
                           display: `inline-flex`,
                           alignItems: `center`,
@@ -93,24 +80,20 @@ export function WanJuanEmptyCanvasPlaceholder({
                           height: 36,
                           minWidth: 124,
                           padding: `0 18px`,
-                          borderRadius: 18,
+                          borderRadius: 4,
                           lineHeight: 1,
                           overflow: `hidden`,
                         },
                         children: [
-                          jsx(`span`, {
-                            className: `text-gray-500 text-lg leading-none`,
+                          jsx(Type, {
+                            className: `text-gray-500`,
+                            size: 16,
+                            strokeWidth: 1.8,
+                            "aria-hidden": `true`,
                             style: {
                               display: `inline-flex`,
-                              alignItems: `center`,
-                              justifyContent: `center`,
-                              width: 16,
-                              height: 16,
                               flex: `0 0 16px`,
-                              fontSize: 15,
-                              lineHeight: `16px`,
                             },
-                            children: `T`,
                           }),
                           jsx(`span`, {
                             className: `text-sm font-medium`,
@@ -137,7 +120,7 @@ export function WanJuanEmptyCanvasPlaceholder({
                             },
                           );
                         },
-                        className: `flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 rounded-2xl transition-all text-gray-400 hover:text-gray-200`,
+                        className: `wanjuan-empty-canvas-action flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 transition-all text-gray-400 hover:text-gray-200`,
                         style: {
                           display: `inline-flex`,
                           alignItems: `center`,
@@ -146,43 +129,20 @@ export function WanJuanEmptyCanvasPlaceholder({
                           height: 36,
                           minWidth: 124,
                           padding: `0 18px`,
-                          borderRadius: 18,
+                          borderRadius: 4,
                           lineHeight: 1,
                           overflow: `hidden`,
                         },
                         children: [
-                          jsxs(`svg`, {
-                            xmlns: `http://www.w3.org/2000/svg`,
-                            width: `16`,
-                            height: `16`,
-                            viewBox: `0 0 24 24`,
-                            fill: `none`,
-                            stroke: `currentColor`,
-                            strokeWidth: `2`,
-                            strokeLinecap: `round`,
-                            strokeLinejoin: `round`,
+                          jsx(Image, {
+                            size: 16,
+                            strokeWidth: 1.8,
+                            "aria-hidden": `true`,
                             className: `text-gray-500`,
                             style: {
                               display: `block`,
                               flex: `0 0 16px`
                             },
-                            children: [
-                              jsx(`rect`, {
-                                x: `4`,
-                                y: `4`,
-                                width: `16`,
-                                height: `16`,
-                                rx: `2`,
-                              }),
-                              jsx(`circle`, {
-                                cx: `9`,
-                                cy: `9`,
-                                r: `1.5`,
-                              }),
-                              jsx(`path`, {
-                                d: `m20 15-4-4L5 20`,
-                              }),
-                            ],
                           }),
                           jsx(`span`, {
                             className: `text-sm font-medium`,
@@ -209,7 +169,7 @@ export function WanJuanEmptyCanvasPlaceholder({
                             },
                           );
                         },
-                        className: `flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 rounded-2xl transition-all text-gray-400 hover:text-gray-200`,
+                        className: `wanjuan-empty-canvas-action flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 transition-all text-gray-400 hover:text-gray-200`,
                         style: {
                           display: `inline-flex`,
                           alignItems: `center`,
@@ -218,38 +178,20 @@ export function WanJuanEmptyCanvasPlaceholder({
                           height: 36,
                           minWidth: 124,
                           padding: `0 18px`,
-                          borderRadius: 18,
+                          borderRadius: 4,
                           lineHeight: 1,
                           overflow: `hidden`,
                         },
                         children: [
-                          jsxs(`svg`, {
-                            xmlns: `http://www.w3.org/2000/svg`,
-                            width: `16`,
-                            height: `16`,
-                            viewBox: `0 0 24 24`,
-                            fill: `none`,
-                            stroke: `currentColor`,
-                            strokeWidth: `2`,
-                            strokeLinecap: `round`,
-                            strokeLinejoin: `round`,
+                          jsx(Video, {
+                            size: 16,
+                            strokeWidth: 1.8,
+                            "aria-hidden": `true`,
                             className: `text-gray-500`,
                             style: {
                               display: `block`,
                               flex: `0 0 16px`
                             },
-                            children: [
-                              jsx(`rect`, {
-                                x: `3`,
-                                y: `5`,
-                                width: `18`,
-                                height: `14`,
-                                rx: `2`,
-                              }),
-                              jsx(`path`, {
-                                d: `m10 9 5 3-5 3V9z`,
-                              }),
-                            ],
                           }),
                           jsx(`span`, {
                             className: `text-sm font-medium`,
@@ -278,7 +220,7 @@ export function WanJuanEmptyCanvasPlaceholder({
                             },
                           );
                         },
-                        className: `flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 rounded-2xl transition-all text-gray-400 hover:text-gray-200`,
+                        className: `wanjuan-empty-canvas-action flex items-center gap-2 px-6 py-3.5 bg-transparent hover:bg-[#222] border border-[#333] hover:border-gray-500 transition-all text-gray-400 hover:text-gray-200`,
                         style: {
                           display: `inline-flex`,
                           alignItems: `center`,
@@ -287,24 +229,20 @@ export function WanJuanEmptyCanvasPlaceholder({
                           height: 36,
                           minWidth: 124,
                           padding: `0 18px`,
-                          borderRadius: 18,
+                          borderRadius: 4,
                           lineHeight: 1,
                           overflow: `hidden`,
                         },
                         children: [
-                          jsx(`span`, {
-                            className: `text-gray-500 text-lg leading-none`,
+                          jsx(Music2, {
+                            className: `text-gray-500`,
+                            size: 16,
+                            strokeWidth: 1.8,
+                            "aria-hidden": `true`,
                             style: {
                               display: `inline-flex`,
-                              alignItems: `center`,
-                              justifyContent: `center`,
-                              width: 16,
-                              height: 16,
                               flex: `0 0 16px`,
-                              fontSize: 16,
-                              lineHeight: `16px`,
                             },
-                            children: `♫`,
                           }),
                           jsx(`span`, {
                             className: `text-sm font-medium`,

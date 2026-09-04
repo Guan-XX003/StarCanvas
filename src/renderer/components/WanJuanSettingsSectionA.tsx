@@ -335,7 +335,7 @@ export function WanJuanSettingsSectionA(props: any) {
                   ],
                 }),
                 jsxs(`div`, {
-                  className: `flex-1 min-w-0 flex flex-col overflow-hidden`,
+                  className: `wanjuan-agent-workspace flex-1 min-w-0 flex flex-col overflow-hidden`,
                   style: {
                     background: agentTheme.mainBg,
                     position: `relative`,
@@ -840,7 +840,7 @@ export function WanJuanSettingsSectionA(props: any) {
 	                              children: agentAttachments.map(renderAgentAttachmentPill),
 	                            }),
 	                            jsxs(`div`, {
-			                              className: `flex flex-col transition-all backdrop-blur-2xl overflow-hidden`,
+		                              className: `wanjuan-agent-composer flex flex-col transition-all backdrop-blur-2xl overflow-hidden`,
 			                              style: {
 			                                position: `relative`,
 			                                overflow: `hidden`,

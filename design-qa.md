@@ -157,3 +157,50 @@ No actionable P0, P1, or P2 visual or interaction issue remains for the requeste
 - Post-fix Electron evidence confirms the title is absent and the toolbar remains in its original position.
 
 final result: passed
+
+---
+
+# StarCanvas Stellar Editor — Design QA
+
+- Source visual truth: `docs/screenshots/01-canvas.png`
+- Rendered implementation: `docs/design-qa/stellar-editor-canvas-fullscreen.png`
+- Full comparison: `docs/design-qa/stellar-editor-full-comparison.png`
+- Focused comparison: `docs/design-qa/stellar-editor-focused-comparison.png`
+- Reference pixels: 1484 × 768
+- Implementation capture: 3840 × 2160 pixels, approximately 1920 × 1080 CSS pixels at 2× display density
+- Normalization: implementation scaled to 1484 px wide and reference vertically padded for the full comparison; stable top chrome and bottom dock were separately cropped and normalized for focused inspection
+- State: reference is a populated canvas; implementation is the isolated development profile's empty canvas. Persistent chrome, navigation, controls, canvas framing and dock are the comparable surfaces.
+
+## Findings
+
+No actionable P0, P1 or P2 visual defects remain in the reviewed dark/graphite experience.
+
+- Fonts and typography: Inter / SF Pro Text / PingFang SC fallbacks render consistently; navigation, controls and empty-state hierarchy are legible with no clipping or unexpected wrapping.
+- Spacing and layout rhythm: top chrome, project toolbar, canvas controls and bottom dock preserve the existing information architecture while using a tighter 4–6 px radius system and consistent compact spacing.
+- Colors and visual tokens: neutral graphite surfaces and the restrained vermilion accent consistently mark selection, focus and primary actions. Legacy glow, blur and rainbow dock emphasis were removed from the reviewed surfaces.
+- Image quality and assets: no raster product assets were replaced or degraded. Navigation, settings and empty-state glyphs use the project's vector icon library instead of emoji or text-symbol substitutes.
+- Copy and content: product copy and user data are unchanged. The pass only changes presentation and iconography.
+
+## Comparison History
+
+1. Initial implementation review found P2 visual inconsistency: the unseen beginner guide retained an animated halo; settings used emoji icons and a full orange selected block; resource filters, workspace groups and the selected agent card used unrelated bright fills; the agent composer retained a large blue glow and oversized rounding.
+2. Fixes applied: removed the halo animation and generated ring; replaced visible navigation/empty-state emoji with vector icons; standardized selected states to a graphite surface with a vermilion edge or underline; flattened resource groups; added the agent selection rail; reduced workspace/composer radii and removed glass/gradient treatment.
+3. Post-fix evidence: the full and focused comparison captures show a consistent dark editorial shell, restrained accent use, compact controls and preserved layout. Canvas, resources, agents, workspace and settings were opened in the running development app; the API settings tab was also switched successfully.
+
+## Open Questions
+
+- The reference contains populated nodes while the isolated development profile is intentionally empty, so node-card content was not judged for exact composition in this pass. Existing node layout and behavior were not changed.
+
+## Follow-up Polish
+
+- P3: a few dense secondary controls inside deep settings panels retain their original pill-shaped treatment. They remain usable and do not conflict with the primary navigation hierarchy, but could be normalized in a later deep-panel pass.
+
+## Implementation Checklist
+
+- [x] Preserve application behavior, data flow and theme choices.
+- [x] Verify canvas, resources, agents, workspace and settings navigation.
+- [x] Verify a nested settings-tab transition.
+- [x] Run type checking, library tests and production web build.
+- [x] Keep the isolated source build open for inspection.
+
+final result: passed
