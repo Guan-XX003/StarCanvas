@@ -61,10 +61,10 @@ export function useSafeEffect18(deps: UseSafeEffect18Deps) {
             return;
 	          let shortcutKey = String(event.key || ``).toLowerCase(),
 	            isPlainCommand = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
-	          if ((event.ctrlKey || event.metaKey) && event.key === `z`) {
+	          if ((event.ctrlKey || event.metaKey) && shortcutKey === `z`) {
 	            if (guard(event)) return;
 	            (event.preventDefault(), event.shiftKey ? redo() : $e());
-	          } else if ((event.ctrlKey || event.metaKey) && event.key === `y`) {
+	          } else if ((event.ctrlKey || event.metaKey) && shortcutKey === `y`) {
 	            if (guard(event)) return;
 	            (event.preventDefault(), redo());
 	          }
@@ -91,13 +91,13 @@ export function useSafeEffect18(deps: UseSafeEffect18Deps) {
 		                prompt: ``
 		              });
 	          }
-	          else if ((event.ctrlKey || event.metaKey) && event.key === `c`) {
+	          else if ((event.ctrlKey || event.metaKey) && shortcutKey === `c`) {
 	            if (guard(event)) return;
 	            copySelectedNodes();
-          } else if ((event.ctrlKey || event.metaKey) && event.key === `g`) {
+          } else if ((event.ctrlKey || event.metaKey) && shortcutKey === `g`) {
             if (guard(event)) return;
             (event.preventDefault(), groupSelectedNodes());
-          } else if ((event.ctrlKey || event.metaKey) && event.key === `l`) {
+          } else if ((event.ctrlKey || event.metaKey) && shortcutKey === `l`) {
             if (guard(event)) return;
             (event.preventDefault(), autoLayout());
           } else if (event.key === `Backspace` || event.key === `Delete`) {

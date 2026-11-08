@@ -1,5 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { assertMacDefaceRuntime } = require("./portable-python-runtime.cjs");
+const resourceRoot = require("./packaged-resource-root.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
 const defaultSourceRoot = path.join(repoRoot, "tool-runtime");
@@ -15,17 +17,12 @@ function archName(arch) {
   return names[arch] || String(arch || "");
 }
 
-function resourceRoot(context) {
-  if (context.electronPlatformName === "darwin") {
-    return path.join(context.appOutDir, "StarCanvas.app", "Contents", "Resources");
-  }
-  return path.join(context.appOutDir, "resources");
-}
-
 function copyRuntimeDir(from, to) {
   if (!fs.existsSync(from)) return false;
   fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.cpSync(from, to, { recursive: true, force: true });
+  // CPython includes relative python/python3 aliases. Converting them into
+  // absolute links silently reconnects the package to the build machine.
+  fs.cpSync(from, to, { recursive: true, force: true, verbatimSymlinks: true });
   return true;
 }
 
@@ -56,6 +53,12 @@ async function copyPlatformToolRuntime(context, options = {}) {
   const requiresWindowsDeface = platformKey === "win32" && architecture === "x64";
   const platformSource = path.join(sourceRoot, `${platformKey}-${architecture}`);
   if (requiresWindowsDeface) assertWindowsDefaceRuntime(platformSource);
+  if (platformKey === "darwin") {
+    for (const name of [`${platformKey}-${architecture}`, platformKey]) {
+      const root = path.join(sourceRoot, name);
+      if (fs.existsSync(path.join(root, "deface"))) assertMacDefaceRuntime(root);
+    }
+  }
   fs.rmSync(targetRoot, { recursive: true, force: true });
 
   const runtimeNames = [`${platformKey}-${architecture}`, platformKey];
@@ -69,6 +72,12 @@ async function copyPlatformToolRuntime(context, options = {}) {
     console.log(`No bundled tool runtime found for ${platformKey}-${architecture}; package will use managed/user tools.`);
   }
   if (requiresWindowsDeface) assertWindowsDefaceRuntime(path.join(targetRoot, `${platformKey}-${architecture}`));
+  if (platformKey === "darwin") {
+    for (const name of copied) {
+      const root = path.join(targetRoot, name);
+      if (fs.existsSync(path.join(root, "deface"))) assertMacDefaceRuntime(root);
+    }
+  }
 }
 
 module.exports = copyPlatformToolRuntime;

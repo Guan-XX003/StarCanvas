@@ -6,11 +6,14 @@ import { useCallback } from "react";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, SetAny, SetState, Toast, WjEdge, WjNode } from "../lib/app-types";
 import { buildProjectMediaFileUrl, wanjuanResourceKind, wanjuanResourceMediaUrl } from "../lib/resource";
 import { mediaUrlToDataUrl, wanjuanCollectNodeReferenceMedia, wanjuanNodeTextValue, wanjuanNormalizeReferenceMediaUrl } from "../lib/reference-media";
-import { parseSeedanceList, resolveModelApiBindingIdHelper, resolveModelProtocolBindingHelper } from "../lib/model-binding";
+import { parseSeedanceList } from "../lib/model-binding";
+import { resolveMediaModelContract } from "../lib/media-model-contract";
 import { safeStringifyRequestForLog, serializeErrorPreview, WanJuanIsTransientNetworkError } from "../lib/log-utils";
 import { WanJuanGetPreferredModel } from "../lib/model-favorites";
 import { WanJuanParseModelList } from "../lib/model-id";
 import { wanjuanResetTianjiPortraitBindingForImage } from "../lib/tianji-portrait";
+import { wanjuanAppendImageReferenceFiles, wanjuanBuildOpenAiImageReferencePlan } from "../lib/generation-reference";
+import { wanjuanBuildGeminiImageTransport } from "../lib/gemini-image";
 
 interface UseImageGenerationDeps {
   propImageApiKey: any;
@@ -81,16 +84,13 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
             imageModelName =
             WanJuanGetPreferredModel(imageModels, modelName || ``),
             imageSourceNode = getNodes().find((node) => node.id === nodeId),
-            selectedImageApiConfigId =
-            apiBindingId ||
-            resolveModelApiBindingIdHelper(
-              imageModelApiBindings,
-              imageModelName,
-              undefined,
-            ) ||
-            imageSourceNode?.data?.selectedApiConfigId ||
-            imageSourceNode?.data?.apiConfigId,
-            imageConfig = apiConfigs.find((config) => config.id === selectedImageApiConfigId),
+            imageModelContract = resolveMediaModelContract({
+              category: `image`, model: imageModelName, apiConfigs,
+              apiBindings: imageModelApiBindings, protocolBindings: imageModelProtocolBindings,
+              registry: modelProtocolRegistry, apiBindingId,
+              selectedApiConfigId: imageSourceNode?.data?.selectedApiConfigId || imageSourceNode?.data?.apiConfigId,
+            }),
+            imageConfig = imageModelContract.apiConfig,
             imageApiUrl = imageConfig?.url || propImageApiUrl,
             imageApiKey = imageConfig?.key || propImageApiKey,
             normalizeImageApiBase = (value) =>
@@ -125,9 +125,9 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
             `vectorengine-image-generation` :
             `gemini-generate-content`,
 	            selectedImageProtocolName =
-	            resolveModelProtocolBindingHelper(imageModelProtocolBindings, imageModelName),
+	            imageModelContract.protocolName,
 	            selectedImageProtocolDefinition =
-	            modelProtocolRegistry?.[selectedImageProtocolName],
+	            imageModelContract.protocol,
 	            isLconaiImageApi =
 	            /(^|\.)lconai\.com$/i.test(imageApiHost) ||
 	            /\/\/[nv]\.lconai\.com/i.test(imageApiBaseUrl),
@@ -171,6 +171,12 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
           }
           if (!imageApiKey) {
             showToast(`请先在设置中配置图像大模型 API Key`);
+            return;
+          }
+          if (imageModelContract.protocolConfigMissing || imageModelContract.protocolCategoryMismatch) {
+            showToast(imageModelContract.protocolCategoryMismatch ?
+              `当前 API 渠道绑定的图片协议类别不匹配，请在模型设置中检查` :
+              `当前 API 渠道绑定的图片协议不存在，请在模型设置中重新选择`);
             return;
           }
           let imageTaskId = `image-${nodeId}-${Date.now()}`;
@@ -719,16 +725,31 @@ ${combinedPrompt}`,
                   let normalizedReference = await normalizeImageReferenceForProvider(imageReference);
                   normalizedReference && seedreamReferenceImages.push(normalizedReference);
                 } catch (error) {
-                  console.warn(`Failed to normalize image reference for image generation`, imageReference, error);
+                  console.warn(`Failed to normalize a connected image reference for image generation`);
+                  throw Error(`参考图读取失败，请重新连接图片后再试`);
                 }
-              abortControllersRef.current.set(nodeId, seedreamController);
-              let seedreamRequestInit;
-		              if (
-		                imageRequestProtocol === `openai-images` &&
-		                seedreamReferenceImages.length > 0 &&
-		                (/^gpt-image/i.test(imageModelName) || isLconaiDoubaoImage) &&
-		                !vectorengineOpenAiCompatRequest
-		              ) {
+	              abortControllersRef.current.set(nodeId, seedreamController);
+	              let seedreamRequestInit,
+	                openAiImageReferencePlan = wanjuanBuildOpenAiImageReferencePlan({
+	                  requestProtocol: imageRequestProtocol,
+	                  referenceCount: seedreamReferenceImages.length,
+	                  modelName: imageModelName,
+	                  isLconaiDoubaoImage,
+	                  vectorengineOpenAiCompatRequest,
+	                  editPath: imageProtocolProfile.editPath,
+	                  editSubmitPath: imageProtocolProfile.editSubmitPath,
+	                  referenceImageField: imageProtocolFieldMapping.referenceImage,
+	                });
+	              if (
+	                imageRequestProtocol === `openai-images` &&
+	                seedreamReferenceImages.length > 0 &&
+	                !openAiImageReferencePlan.useEdit &&
+	                !vectorengineOpenAiCompatRequest &&
+	                !/(^|\.)lconai\.com$/i.test(imageApiHost) &&
+	                !String(imageProtocolProfile.fieldMapping?.referenceImage || ``).trim()
+	              )
+	                throw Error(`当前图片模型协议未配置参考图字段或编辑接口，已停止生成以避免忽略参考图`);
+	              if (openAiImageReferencePlan.useEdit) {
 		                let formData = new FormData();
 		                if (imageProtocolHasDynamicMapping) {
 		                  let appendField = (key, value) => {
@@ -767,55 +788,18 @@ ${combinedPrompt}`,
 		                    vectorengineOpenAiCompatAspectRatio &&
 		                    formData.append(`aspect_ratio`, vectorengineOpenAiCompatAspectRatio));
                 let appendedCount = 0;
-                for (let index = 0; index < seedreamReferenceImages.length; index++) {
-                  let referenceImage = seedreamReferenceImages[index];
-                  try {
-                    let blob = null,
-                      extension = `png`,
-                      mimeType = `image/png`,
-                      dataUrlMatch = referenceImage.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
-                    if (dataUrlMatch) {
-                      ((mimeType = dataUrlMatch[1]),
-                        (extension = mimeType === `image/jpeg` ? `jpg` : mimeType === `image/webp` ? `webp` : `png`));
-                      let binaryString = atob(dataUrlMatch[2]),
-                        bytes = new Uint8Array(binaryString.length);
-                      for (let index2 = 0; index2 < binaryString.length; index2++) bytes[index2] = binaryString.charCodeAt(index2);
-                      blob = new Blob([bytes], {
-                        type: mimeType
-                      });
-                    } else if (/^https?:\/\//i.test(referenceImage)) {
-                      let response = await fetch(referenceImage, {
-                        signal: seedreamController.signal
-                      });
-                      if (response.ok) {
-                        let blob2 = await response.blob();
-                        blob2.size > 0 &&
-                          ((blob = blob2),
-                            (mimeType = blob2.type || mimeType),
-                            (extension =
-                              mimeType === `image/jpeg` ?
-                              `jpg` :
-                              mimeType === `image/webp` ?
-                              `webp` :
-                              `png`));
-                      }
-                    }
-			                    blob &&
-			                      (formData.append(
-			                        imageProtocolHasDynamicMapping ?
-			                        String(imageProtocolFieldMapping.referenceImage || `image`).replace(
-			                          /\{index\}/g,
-			                          String(index),
-			                        ) :
-			                        /(^|\.)lconai\.com$/i.test(imageApiHost) && !isLconaiDoubaoImage ?
-			                        `image[${index}]` :
-			                        `image`,
-		                        blob,
-	                        `reference_${index + 1}.${extension}`,
-	                      ), appendedCount++);
-                  } catch (error) {
-                    console.warn(`Failed to append image reference for edits request`, referenceImage, error);
-                  }
+                try {
+                  appendedCount = await wanjuanAppendImageReferenceFiles(formData, seedreamReferenceImages, {
+                    fieldTemplate: imageProtocolHasDynamicMapping ?
+                      String(imageProtocolFieldMapping.referenceImage || `image`) :
+                      /(^|\.)lconai\.com$/i.test(imageApiHost) && !isLconaiDoubaoImage ?
+                      `image[{index}]` :
+                      `image`,
+                    signal: seedreamController.signal,
+                  });
+                } catch (error) {
+                  console.warn(`Failed to append image references for edits request`);
+                  throw Error(error?.message || `参考图读取失败，请重新连接图片后再试`);
                 }
                 appendedCount > 0 ?
 	                  ((seedreamRequestInit = {
@@ -826,10 +810,10 @@ ${combinedPrompt}`,
 	                      body: formData,
 	                      signal: seedreamController.signal,
 	                    }),
-	                    (seedreamEndpoint = buildImageProtocolUrl(
-	                      imageProtocolProfile.editPath || imageProtocolProfile.editSubmitPath,
-	                      `${seedreamBaseUrl}/v1/images/edits`,
-	                    ))) :
+		                    (seedreamEndpoint = buildImageProtocolUrl(
+		                      openAiImageReferencePlan.editPath,
+		                      `${seedreamBaseUrl}/v1/images/edits`,
+		                    ))) :
                   (seedreamRequestInit = undefined);
 	              } else {
 		                let requestBody =
@@ -903,8 +887,8 @@ ${combinedPrompt}`,
                   };
 	                seedreamReferenceImages.length > 0 &&
 	                  (imageProtocolHasDynamicMapping ?
-	                    String(imageProtocolFieldMapping.referenceImage || ``).trim() &&
-	                    (requestBody[String(imageProtocolFieldMapping.referenceImage || `image`).trim()] =
+	                    String(imageProtocolProfile.fieldMapping?.referenceImage || ``).trim() &&
+	                    (requestBody[String(imageProtocolProfile.fieldMapping.referenceImage).trim()] =
 	                      seedreamReferenceImages.length === 1 ?
 	                      seedreamReferenceImages[0] :
 	                      seedreamReferenceImages) :
@@ -1684,6 +1668,13 @@ ${combinedPrompt}`,
               }
               return;
             }
+            const geminiImageTransport = wanjuanBuildGeminiImageTransport({
+              apiBaseUrl: imageApiUrl,
+              apiKey: imageApiKey,
+              model: imageModelName,
+              protocol: selectedImageProtocolDefinition,
+            });
+            if (geminiImageTransport.fixedImageSize) requestParams.imageSize = geminiImageTransport.fixedImageSize;
             let requestBody = {
               contents: [{
                 role: `user`,
@@ -1696,30 +1687,11 @@ ${combinedPrompt}`,
             (Object.keys(requestParams).length > 0 &&
               ((requestParams.aspectRatio ||= `1:1`), (requestBody.generationConfig.imageConfig = requestParams)),
               console.log(`Sending request:`, safeStringifyRequestForLog(requestBody)));
-            let baseUrl = imageApiUrl.replace(/\/$/, ``),
-              apiHost = (() => {
-                try {
-                  return new URL(baseUrl).host;
-                } catch {
-                  return baseUrl;
-                }
-              })(),
-              isVectorEngine = /(?:^|\.)api\.vectorengine\.ai$/i.test(String(apiHost || ``)),
-              requestUrl = isVectorEngine ?
-              `${baseUrl}/v1beta/models/${imageModelName}:generateContent` :
-              `${baseUrl}/v1beta/models/${imageModelName}:generateContent?key=${imageApiKey}`,
-              abortController = new AbortController();
+            let abortController = new AbortController();
             abortControllersRef.current.set(nodeId, abortController);
-            let response = await fetch(requestUrl, {
+            let response = await fetch(geminiImageTransport.requestUrl, {
               method: `POST`,
-              headers: isVectorEngine ?
-                {
-                  Authorization: `Bearer ${imageApiKey}`,
-                  "Content-Type": `application/json`,
-                } :
-                {
-                  "Content-Type": `application/json`
-                },
+              headers: geminiImageTransport.headers,
               body: JSON.stringify(requestBody),
               signal: abortController.signal,
             });

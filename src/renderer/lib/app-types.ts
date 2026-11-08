@@ -168,6 +168,9 @@ export interface ApiConfig {
   url?: string;
   key?: string;
   protocolFormat?: "auto" | string;
+  /** Per-channel media contracts; legacy model-level bindings remain the fallback. */
+  imageProtocolBindings?: ProtocolBindings;
+  videoProtocolBindings?: ProtocolBindings;
   models?: any[];
   /** 历史兼容字段（部分旧代码用这些名字，实际应读 url/key）。 */
   apiUrl?: string;

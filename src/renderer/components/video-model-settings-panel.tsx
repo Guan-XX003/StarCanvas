@@ -1,5 +1,7 @@
 /** 视频模型设置面板。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
+import { MediaChannelProtocolSelect } from "./media-channel-protocol-select";
+import { resolveModelApiBindingIdHelper, updateModelBindingHelper } from "../lib/model-binding";
 declare const chrome: any;
 
 export function WanJuanVideoModelSettingsPanel({
@@ -14,6 +16,8 @@ export function WanJuanVideoModelSettingsPanel({
   videoModelApiBindings,
   videoModels,
   videoResolutions,
+  modelProtocolRegistry,
+  setApiConfigs,
 }: any) {
   return jsxs(`div`, {
                                 className: `px-4 pt-4 space-y-4 wanjuan-settings-card-body`,
@@ -60,17 +64,9 @@ export function WanJuanVideoModelSettingsPanel({
                                                   }),
                                                   jsxs(`select`, {
                                                     className: `w-52 bg-[#1a1a1a] border border-[#333] text-gray-300 text-xs px-2 py-1.5 rounded-lg outline-none focus:border-blue-500 hover:bg-[#222] transition-colors wanjuan-settings-control wanjuan-settings-select`,
-                                                    value: videoModelApiBindings[
-                                                      model
-                                                    ] || ``,
+                                                    value: resolveModelApiBindingIdHelper(videoModelApiBindings, model, ``),
                                                     onChange: (event) => {
-                                                      let next = {
-                                                        ...videoModelApiBindings,
-                                                      };
-                                                      event.target.value ?
-                                                        (next[model] =
-                                                          event.target.value) :
-                                                        delete next[model];
+                                                      let next = updateModelBindingHelper(videoModelApiBindings, model, event.target.value);
                                                       setVideoModelApiBindings(
                                                         next,
                                                       );
@@ -94,6 +90,11 @@ export function WanJuanVideoModelSettingsPanel({
                                                         ),
                                                       ),
                                                     ],
+                                                  }),
+                                                  jsx(MediaChannelProtocolSelect, {
+                                                    category: `video`, model, apiConfigs,
+                                                    apiBindings: videoModelApiBindings,
+                                                    registry: modelProtocolRegistry, setApiConfigs,
                                                   }),
                                                 ],
                                               },

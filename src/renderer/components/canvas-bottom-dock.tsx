@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 import {
   FileUp,
@@ -86,6 +86,11 @@ export function WanJuanCanvasBottomDock({
   const [openPanel, setOpenPanel] = useState<"tools" | "resources" | null>(null);
   const [activeToolGroup, setActiveToolGroup] = useState("format");
   const dockRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const toolsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const resourcesButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusPanelOnOpen = useRef(false);
+  const panelId = useId();
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -94,6 +99,28 @@ export function WanJuanCanvasBottomDock({
     document.addEventListener("mousedown", close, true);
     return () => document.removeEventListener("mousedown", close, true);
   }, []);
+
+  useEffect(() => {
+    if (!openPanel) return;
+    if (focusPanelOnOpen.current) {
+      panelRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+      focusPanelOnOpen.current = false;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing || event.defaultPrevented || !dockRef.current?.contains(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpenPanel(null);
+      (openPanel === "tools" ? toolsButtonRef : resourcesButtonRef).current?.focus();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [openPanel]);
+
+  const togglePanel = (panel: "tools" | "resources", event: React.MouseEvent<HTMLButtonElement>) => {
+    focusPanelOnOpen.current = event.detail === 0 && openPanel !== panel;
+    setOpenPanel(openPanel === panel ? null : panel);
+  };
 
   const centerPosition = () => {
     const rect = wrapperRef.current?.getBoundingClientRect();
@@ -129,6 +156,9 @@ export function WanJuanCanvasBottomDock({
       draggable: options.draggable !== false,
       onDragStart: options.draggable === false ? undefined : (event: any) => beginDrag(event, item),
       onClick: options.onClick || (() => create(item.type, item.data)),
+      ref: options.ref,
+      "aria-expanded": options.expanded,
+      "aria-controls": options.expanded ? panelId : undefined,
       className: `wanjuan-canvas-dock-button ${options.active ? "is-active" : ""}`,
       title: options.title ? t(options.title) : tf("{label}（点击创建，拖动可指定位置）", { label: t(item.label) }),
       children: [jsx(Icon, { size: 19, className: item.color || "text-gray-300" }), jsx("span", { children: t(item.label) })],
@@ -141,6 +171,8 @@ export function WanJuanCanvasBottomDock({
     onClick: (event: any) => event.stopPropagation(),
     children: [
       openPanel === "tools" && jsxs("div", {
+        id: panelId,
+        ref: panelRef,
         className: "wanjuan-canvas-dock-popover wanjuan-canvas-dock-tools",
         children: [
           jsx("div", {
@@ -151,6 +183,7 @@ export function WanJuanCanvasBottomDock({
                 type: "button",
                 onClick: () => setActiveToolGroup(group.id),
                 className: `wanjuan-canvas-dock-tool-tab ${activeToolGroup === group.id ? "is-active" : ""}`,
+                "aria-pressed": activeToolGroup === group.id,
                 children: [jsx(Icon, { size: 15, className: group.color }), jsx("span", { children: t(group.label) })],
               }, group.id);
             }),
@@ -162,17 +195,26 @@ export function WanJuanCanvasBottomDock({
         ],
       }),
       openPanel === "resources" && jsx("div", {
+        id: panelId,
+        ref: panelRef,
         className: "wanjuan-canvas-dock-popover wanjuan-canvas-dock-resources",
-        children: jsx(WanJuanResourcePicker, { resources: resources || [], onSelect: selectResource, onClose: () => setOpenPanel(null) }),
+        children: jsx(WanJuanResourcePicker, {
+          resources: resources || [],
+          onSelect: selectResource,
+          onClose: () => {
+            setOpenPanel(null);
+            resourcesButtonRef.current?.focus();
+          },
+        }),
       }),
       jsxs("div", {
         className: "wanjuan-canvas-bottom-dock",
         children: [
           ...PRIMARY_ITEMS.map((item) => dockButton(item)),
           jsx("span", { className: "wanjuan-canvas-dock-divider", "aria-hidden": true }),
-          dockButton({ label: "工具", icon: Wrench, color: "text-cyan-400" }, { draggable: false, active: openPanel === "tools", onClick: () => setOpenPanel(openPanel === "tools" ? null : "tools"), title: "打开工具" }),
+          dockButton({ label: "工具", icon: Wrench, color: "text-cyan-400" }, { draggable: false, active: openPanel === "tools", expanded: openPanel === "tools", ref: toolsButtonRef, onClick: (event: React.MouseEvent<HTMLButtonElement>) => togglePanel("tools", event), title: "打开工具" }),
           dockButton({ label: "上传", icon: Upload, color: "text-green-400" }, { draggable: false, onClick: () => fileInputRef.current?.click(), title: "上传文件" }),
-          dockButton({ label: "素材", icon: ImageIcon, color: "text-blue-400" }, { draggable: false, active: openPanel === "resources", onClick: () => setOpenPanel(openPanel === "resources" ? null : "resources"), title: "选择素材" }),
+          dockButton({ label: "素材", icon: ImageIcon, color: "text-blue-400" }, { draggable: false, active: openPanel === "resources", expanded: openPanel === "resources", ref: resourcesButtonRef, onClick: (event: React.MouseEvent<HTMLButtonElement>) => togglePanel("resources", event), title: "选择素材" }),
         ],
       }),
     ],

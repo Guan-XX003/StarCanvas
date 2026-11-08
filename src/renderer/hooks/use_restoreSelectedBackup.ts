@@ -1,14 +1,23 @@
 // @ts-nocheck
-/**
- * restoreSelectedBackup。自 bundle 抽出，逐字搬运、行为不变。
- */
-import { useCallback, useMemo } from "react";
+/** Restore selected backup modules with a journaled cross-storage transaction. */
 import type { TransitResource } from "../lib/app-types";
-import { buildBackupRestoreReport, cloneBackupValue, extractProjectPortableDataRefs, normalizeBackupSettingsSections, normalizeProjectLocalforagePayload } from "../lib/backup";
+import {
+  buildBackupRestoreReport,
+  cloneBackupValue,
+  extractProjectPortableDataRefs,
+  normalizeBackupSettingsSections,
+  normalizeProjectLocalforagePayload,
+} from "../lib/backup";
 import { buildProjectMediaFileUrl } from "../lib/resource";
 import { mergeTransitResourceEntries } from "../lib/app-root-helpers";
 import { normalizeAgentIdSelection } from "../lib/agent";
-import { normalizeModuleSelection, normalizeProjectIdSelection, normalizeProjectResourceMap } from "../lib/project-normalize";
+import {
+  assertSafeBackupProjects,
+  normalizeModuleSelection,
+  normalizeProjectIdSelection,
+  normalizeProjectResourceMap,
+} from "../lib/project-normalize";
+import { runBackupRestoreTransaction } from "../lib/backup-restore-transaction";
 declare const chrome: any;
 
 interface UseRestoreSelectedBackupDeps {
@@ -29,6 +38,13 @@ interface UseRestoreSelectedBackupDeps {
   transitResources: TransitResource[];
 }
 
+const readChromeStorage = (storage: any) => new Promise<any>((resolve, reject) => {
+  storage.get(null, (value: any) => {
+    if (chrome.runtime?.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else resolve(value || {});
+  });
+});
+
 export function use_restoreSelectedBackup(deps: UseRestoreSelectedBackupDeps) {
   const {
     localforageModule,
@@ -41,283 +57,129 @@ export function use_restoreSelectedBackup(deps: UseRestoreSelectedBackupDeps) {
     getProjectCanvasStorageKey,
     normalizeBackupModules,
     normalizeResourceLocalforagePayload,
-    agentConversations,
-    projectGroups,
-    projects,
-    selectedAgentId,
-    transitResources,
   } = deps;
+
   const restoreSelectedBackup = async (backup, moduleSelection, options = {}) => {
-                              let modules = normalizeBackupModules(backup),
-                                availableModules = getAvailableBackupModules(backup),
-                                selectedModules = normalizeModuleSelection(moduleSelection, availableModules),
-                                restoreSettings = selectedModules.includes(`settings`),
-                                restoreProjects = selectedModules.includes(`projects`),
-                                restoreResources = selectedModules.includes(`resources`),
-                                shouldRestoreAgents = selectedModules.includes(`agents`),
-                                settingsStorage =
-                                modules.settings?.chromeStorage && typeof modules.settings.chromeStorage == `object` ?
-                                modules.settings.chromeStorage :
-                                {},
-                                projectsStorage =
-                                modules.projects?.chromeStorage && typeof modules.projects.chromeStorage == `object` ?
-                                modules.projects.chromeStorage :
-                                {},
-                                projectPayload = normalizeProjectLocalforagePayload(modules.projects?.localforage),
-                                resourcePayload = Object.keys(normalizeResourceLocalforagePayload(modules.resources?.localforage)).length ?
-                                normalizeResourceLocalforagePayload(modules.resources?.localforage) :
-                                normalizeResourceLocalforagePayload(modules.projects?.bundledResources),
-                                settingsSectionMap = getBackupSettingsSectionMap(settingsStorage),
-                                selectedSections = normalizeBackupSettingsSections(
-                                  options.settingsSections,
-                                  settingsSectionMap.availableSections,
-                                ),
-                                mergedSections = selectedSections.reduce((acc, sectionKey) => ({
-                                  ...acc,
-                                  ...(settingsSectionMap.sections[sectionKey] || {})
-                                }), {}),
-                                projects2 = Array.isArray(projectsStorage.projects) ? cloneBackupValue(projectsStorage.projects) : [],
-                                selectedProjectIds = normalizeProjectIdSelection(
-                                  options.projectIds,
-                                  projects2.map((project) => project.id).filter(Boolean),
-                                ),
-                                selectedProjects = projects2.filter((project) => selectedProjectIds.includes(project.id)),
-                                importedProjectGroups = Array.isArray(projectsStorage.projectGroups) ?
-                                cloneBackupValue(projectsStorage.projectGroups) :
-                                [],
-                                selectedImportGroupIds = new Set(selectedProjects.map((project) => project.groupId).filter(Boolean)),
-                                restoredProjectGroups = selectedProjectIds.length === projects2.length ?
-                                importedProjectGroups :
-                                importedProjectGroups.filter((projectGroup) => selectedImportGroupIds.has(projectGroup.id)),
-                                agentChromeStorage =
-                                modules.agents?.chromeStorage && typeof modules.agents.chromeStorage == `object` ?
-                                modules.agents.chromeStorage :
-                                {},
-                                importedAgents = Array.isArray(agentChromeStorage.agents) ?
-                                cloneBackupValue(agentChromeStorage.agents) :
-                                [],
-                                importedAgentIds = normalizeAgentIdSelection(
-                                  options.agentIds,
-                                  importedAgents.map((agent) => agent.id).filter(Boolean),
-                                ),
-                                selectedImportedAgents = importedAgents.filter((agent) =>
-                                  importedAgentIds.includes(agent.id),
-                                ),
-                                selectedImportedAgentIdSet = new Set(
-                                  selectedImportedAgents.map((agent) => agent.id),
-                                ),
-                                importedAgentConversations =
-                                agentChromeStorage.agentConversations &&
-                                typeof agentChromeStorage.agentConversations == `object` ?
-                                cloneBackupValue(agentChromeStorage.agentConversations) :
-                                {},
-                                projectResourceMap = normalizeProjectResourceMap(modules.projects?.projectResources),
-                                selectedCanvasStates = Object.fromEntries(
-                                  selectedProjectIds.filter((projectId) => Object.prototype.hasOwnProperty.call(projectPayload.canvasStates, projectId)).map(
-                                    (projectId) => [projectId, cloneBackupValue(projectPayload.canvasStates[projectId])],
-                                  ),
-                                ),
-                                assets = Object.entries(projectPayload.assets || {}).reduce(
-                                  (acc, [assetId, asset]) => ({
-                                    ...acc,
-                                    [assetId]: cloneBackupValue(asset)
-                                  }), {},
-                                ),
-                                transitResources2 = Object.prototype.hasOwnProperty.call(
-                                  resourcePayload,
-                                  TRANSIT_RESOURCES_STORAGE_KEY,
-                                ) ?
-                                cloneBackupValue(resourcePayload[TRANSIT_RESOURCES_STORAGE_KEY]) :
-                                undefined,
-                                mergedTransitResources = undefined,
-                                pendingWrites = [];
-                              if (restoreSettings || restoreProjects || restoreResources || shouldRestoreAgents)
-                                await new Promise((resolvePromise, reject) => {
-                                  if (!(typeof chrome < `u` && chrome.storage && chrome.storage.local)) {
-                                    reject(Error(`Chrome Storage API 不可用`));
-                                    return;
-                                  }
-                                  chrome.storage.local.get(null, (currentStorage) => {
-                                    if (chrome.runtime?.lastError) {
-                                      reject(Error(chrome.runtime.lastError.message));
-                                      return;
-                                    }
-                                    let storage = {
-                                        ...(currentStorage || {})
-                                      },
-                                      removedKeys = [];
-                                    if (restoreSettings)
-                                      for (let [key, value] of Object.entries(mergedSections)) storage[key] = cloneBackupValue(value);
-                                    if (restoreProjects) {
-                                      let existingProjects = Array.isArray(storage.projects) ? cloneBackupValue(storage.projects) : [],
-                                        selectedProjectIdSet = new Set(selectedProjects.map((project) => project.id)),
-                                        mergedProjects = [...existingProjects.filter((project) => !selectedProjectIdSet.has(project.id)), ...selectedProjects],
-                                        projectGroupsExisting = Array.isArray(storage.projectGroups) ?
-                                        cloneBackupValue(storage.projectGroups) :
-                                        [],
-                                        projectGroupIdSet = new Set(restoredProjectGroups.map((projectGroup) => projectGroup.id)),
-                                        projectGroupsMerged = [
-                                          ...projectGroupsExisting.filter((projectGroup) => !projectGroupIdSet.has(projectGroup.id)),
-                                          ...restoredProjectGroups,
-                                        ],
-                                        lastOpenedProjectId =
-                                        selectedProjectIds.includes(projectsStorage.lastOpenedProjectId) && selectedProjectIdSet.has(projectsStorage.lastOpenedProjectId) ?
-                                        projectsStorage.lastOpenedProjectId :
-                                        selectedProjects[0]?.id || selectedProjectIds[0] || ``;
-                                      ((storage.projects = mergedProjects),
-                                        projectGroupsMerged.length > 0 && (storage.projectGroups = projectGroupsMerged),
-                                        lastOpenedProjectId ?
-                                        (storage.lastOpenedProjectId = lastOpenedProjectId) :
-                                        (delete storage.lastOpenedProjectId, removedKeys.push(`lastOpenedProjectId`)),
-                                        selectedProjectIds.forEach((projectId) => {
-                                          let mirrorStorageKey = getDesktopProjectMirrorStorageKey(projectId);
-                                          delete storage[mirrorStorageKey], removedKeys.push(mirrorStorageKey);
-                                        }),
-                                        Object.entries(selectedCanvasStates).forEach(([projectId, mirrorValue]) => {
-                                          storage[getDesktopProjectMirrorStorageKey(projectId)] = cloneBackupValue(mirrorValue);
-                                        }));
-                                    }
-                                    if (restoreResources)
-                                      transitResources2 !== undefined ?
-                                      ((mergedTransitResources = cloneBackupValue(transitResources2)),
-                                        (storage[TRANSIT_RESOURCES_STORAGE_KEY] = cloneBackupValue(mergedTransitResources))) :
-                                      (delete storage[TRANSIT_RESOURCES_STORAGE_KEY],
-                                        removedKeys.push(TRANSIT_RESOURCES_STORAGE_KEY),
-                                        (mergedTransitResources = undefined));
-                                    else if (restoreProjects && transitResources2 !== undefined) {
-                                      let transitResourceEntries = Array.isArray(storage[TRANSIT_RESOURCES_STORAGE_KEY]) ?
-                                        storage[TRANSIT_RESOURCES_STORAGE_KEY] :
-                                        [];
-                                      ((mergedTransitResources = mergeTransitResourceEntries(transitResources2, transitResourceEntries)),
-                                        (storage[TRANSIT_RESOURCES_STORAGE_KEY] = cloneBackupValue(mergedTransitResources)));
-                                    } else if (restoreProjects) {
-                                      let mergedTransitResources2 = mergeTransitResourceEntries(
-                                        selectedProjectIds.flatMap((projectId) => projectResourceMap[projectId] || []),
-                                        Array.isArray(storage[TRANSIT_RESOURCES_STORAGE_KEY]) ?
-                                        storage[TRANSIT_RESOURCES_STORAGE_KEY] :
-                                        [],
-                                      );
-                                      mergedTransitResources2.length > 0 &&
-                                        ((mergedTransitResources = mergedTransitResources2),
-                                          (storage[TRANSIT_RESOURCES_STORAGE_KEY] = cloneBackupValue(mergedTransitResources)));
-                                    }
-                                    if (shouldRestoreAgents) {
-                                      let existingAgents = Array.isArray(storage.agents) ? cloneBackupValue(storage.agents) : [],
-                                        mergedAgents = [
-                                          ...existingAgents.filter((agent) => !selectedImportedAgentIdSet.has(agent.id)),
-                                          ...selectedImportedAgents,
-                                        ],
-                                        existingAgentConversations = storage.agentConversations && typeof storage.agentConversations == `object` ?
-                                        cloneBackupValue(storage.agentConversations) :
-                                        {};
-                                      ((storage.agents = mergedAgents),
-                                        (storage.agentConversations = {
-                                          ...existingAgentConversations,
-                                          ...Object.fromEntries(
-                                            importedAgentIds
-                                            .filter((agentId) => Object.prototype.hasOwnProperty.call(importedAgentConversations, agentId))
-                                            .map((agentId) => [agentId, cloneBackupValue(importedAgentConversations[agentId])]),
-                                          ),
-                                        }));
-                                      let selectedAgentId2 =
-                                        typeof agentChromeStorage.selectedAgentId == `string` &&
-                                        selectedImportedAgentIdSet.has(agentChromeStorage.selectedAgentId) ?
-                                        agentChromeStorage.selectedAgentId :
-                                        selectedImportedAgents[0]?.id ||
-                                        storage.selectedAgentId ||
-                                        mergedAgents[0]?.id ||
-                                        ``;
-                                      selectedAgentId2 && (storage.selectedAgentId = selectedAgentId2);
-                                    }
-                                    let persistStorage = () => {
-                                      chrome.storage.local.set(storage, () => {
-                                        if (chrome.runtime?.lastError) {
-                                          reject(Error(chrome.runtime.lastError.message));
-                                          return;
-                                        }
-                                        restoreProjects &&
-                                          (storage.lastOpenedProjectId ?
-                                            localStorage.setItem(`lastOpenedProjectId`, storage.lastOpenedProjectId) :
-                                            localStorage.removeItem(`lastOpenedProjectId`)),
-                                          (pendingWrites = removedKeys),
-                                          resolvePromise();
-                                      });
-                                    };
-                                    removedKeys.length ?
-                                      chrome.storage.local.remove(removedKeys, () => {
-                                        if (chrome.runtime?.lastError) {
-                                          reject(Error(chrome.runtime.lastError.message));
-                                          return;
-                                        }
-                                        persistStorage();
-                                      }) :
-                                      persistStorage();
-                                  });
-                                });
-                              if (restoreProjects && localforageModule.default) {
-                                let referencedAssetKeys = new Set(),
-                                  referencedPortableDataKeys = new Set();
-                                for (let projectId of selectedProjectIds) {
-                                  let canvasStorageKey = getProjectCanvasStorageKey(projectId);
-                                  try {
-                                    let projectState = await localforageModule.default.getItem(canvasStorageKey);
-                                    (extractProjectAssetRefs(projectState).forEach((assetRef) => referencedAssetKeys.add(assetRef)),
-                                      extractProjectPortableDataRefs(projectState).forEach((portableDataRef) => referencedPortableDataKeys.add(portableDataRef)));
-                                  } catch (error) {
-                                    console.warn(`Failed to inspect existing project state`, error);
-                                  }
-                                  try {
-                                    await localforageModule.default.removeItem(canvasStorageKey);
-                                  } catch (error) {
-                                    console.warn(`Failed to clear existing project state`, error);
-                                  }
-                                }
-                                for (let storageKey of referencedAssetKeys)
-                                  try {
-                                    await localforageModule.default.removeItem(storageKey);
-                                  } catch (error) {
-                                    console.warn(`Failed to clear project asset ref`, storageKey, error);
-                                  }
-                                for (let assetKey of referencedPortableDataKeys)
-                                  try {
-                                    referencedAssetKeys.has(assetKey) || (await localforageModule.default.removeItem(assetKey));
-                                  } catch (error) {
-                                    console.warn(`Failed to clear portable project asset`, assetKey, error);
-                                  }
-                                for (let [projectId, canvasState] of Object.entries(selectedCanvasStates))
-                                  await localforageModule.default.setItem(getProjectCanvasStorageKey(projectId), canvasState);
-                                for (let [storageKey, assetEntry] of Object.entries(assets)) {
-                                  if (assetEntry && typeof assetEntry == `object` && assetEntry.__wanjuanExternalAssetFile && assetEntry.filePath) {
-                                    await localforageModule.default.setItem(storageKey, buildProjectMediaFileUrl(assetEntry.filePath) || assetEntry.filePath);
-                                    continue;
-                                  }
-                                  if (typeof assetEntry == `string` && assetEntry.startsWith(PROJECT_ASSET_MANIFEST_STORAGE_PREFIX)) continue;
-                                  await localforageModule.default.setItem(storageKey, assetEntry);
-                                }
-                              }
-                              (restoreResources || (restoreProjects && transitResources2 !== undefined)) &&
-                              localforageModule.default &&
-                                (mergedTransitResources !== undefined ?
-                                  await localforageModule.default.setItem(TRANSIT_RESOURCES_STORAGE_KEY, mergedTransitResources) :
-                                  restoreResources && (await localforageModule.default.removeItem(TRANSIT_RESOURCES_STORAGE_KEY)));
-                              let restoreReport = buildBackupRestoreReport({
-                                modules: selectedModules,
-                                settingsSections: selectedSections,
-                                projectIds: selectedProjectIds,
-                                agentIds: importedAgentIds,
-                                canvasStates: selectedCanvasStates,
-                                assets: assets,
-                                transitResources: mergedTransitResources,
-                                projectResources: projectResourceMap,
-                              });
-                              return {
-                                modules: selectedModules,
-                                settingsSections: selectedSections,
-                                projectIds: selectedProjectIds,
-                                agentIds: importedAgentIds,
-                                clearedChromeKeys: pendingWrites,
-                                report: restoreReport,
-                              };
-                            };
+    const modules = normalizeBackupModules(backup);
+    const availableModules = getAvailableBackupModules(backup);
+    const selectedModules = normalizeModuleSelection(moduleSelection, availableModules);
+    const restoreSettings = selectedModules.includes(`settings`);
+    const restoreProjects = selectedModules.includes(`projects`);
+    const restoreResources = selectedModules.includes(`resources`);
+    const shouldRestoreAgents = selectedModules.includes(`agents`);
+    const settingsStorage = modules.settings?.chromeStorage && typeof modules.settings.chromeStorage === `object` ? modules.settings.chromeStorage : {};
+    const projectsStorage = modules.projects?.chromeStorage && typeof modules.projects.chromeStorage === `object` ? modules.projects.chromeStorage : {};
+    const projects2 = Array.isArray(projectsStorage.projects) ? cloneBackupValue(projectsStorage.projects) : [];
+    if (restoreProjects) assertSafeBackupProjects(projects2);
+    if (!(typeof chrome !== `undefined` && chrome.storage?.local)) throw new Error(`Chrome Storage API 不可用`);
+    const localforage = localforageModule.default;
+    if ((restoreProjects || restoreResources) && !localforage) throw new Error(`LocalForage API 不可用`);
+
+    const projectPayload = normalizeProjectLocalforagePayload(modules.projects?.localforage);
+    const resourcePayload = Object.keys(normalizeResourceLocalforagePayload(modules.resources?.localforage)).length
+      ? normalizeResourceLocalforagePayload(modules.resources?.localforage)
+      : normalizeResourceLocalforagePayload(modules.projects?.bundledResources);
+    const settingsSectionMap = getBackupSettingsSectionMap(settingsStorage);
+    const selectedSections = normalizeBackupSettingsSections(options.settingsSections, settingsSectionMap.availableSections);
+    const mergedSections = selectedSections.reduce((acc, sectionKey) => ({ ...acc, ...(settingsSectionMap.sections[sectionKey] || {}) }), {});
+    const selectedProjectIds = normalizeProjectIdSelection(options.projectIds, projects2.map((project) => project.id).filter(Boolean));
+    const selectedProjects = projects2.filter((project) => selectedProjectIds.includes(project.id));
+    const importedProjectGroups = Array.isArray(projectsStorage.projectGroups) ? cloneBackupValue(projectsStorage.projectGroups) : [];
+    const selectedImportGroupIds = new Set(selectedProjects.map((project) => project.groupId).filter(Boolean));
+    const restoredProjectGroups = selectedProjectIds.length === projects2.length ? importedProjectGroups : importedProjectGroups.filter((group) => selectedImportGroupIds.has(group.id));
+    const agentChromeStorage = modules.agents?.chromeStorage && typeof modules.agents.chromeStorage === `object` ? modules.agents.chromeStorage : {};
+    const importedAgents = Array.isArray(agentChromeStorage.agents) ? cloneBackupValue(agentChromeStorage.agents) : [];
+    const importedAgentIds = normalizeAgentIdSelection(options.agentIds, importedAgents.map((agent) => agent.id).filter(Boolean));
+    const selectedImportedAgents = importedAgents.filter((agent) => importedAgentIds.includes(agent.id));
+    const selectedImportedAgentIdSet = new Set(selectedImportedAgents.map((agent) => agent.id));
+    const importedAgentConversations = agentChromeStorage.agentConversations && typeof agentChromeStorage.agentConversations === `object` ? cloneBackupValue(agentChromeStorage.agentConversations) : {};
+    const projectResourceMap = normalizeProjectResourceMap(modules.projects?.projectResources);
+    const selectedCanvasStates = Object.fromEntries(selectedProjectIds.filter((id) => Object.prototype.hasOwnProperty.call(projectPayload.canvasStates, id)).map((id) => [id, cloneBackupValue(projectPayload.canvasStates[id])]));
+    const allowedImportedAssetKeys = new Set([
+      ...Object.values(selectedCanvasStates).flatMap((state) => extractProjectAssetRefs(state)),
+      ...Object.values(selectedCanvasStates).flatMap((state) => extractProjectPortableDataRefs(state)),
+    ]);
+    const assets = Object.fromEntries(Object.entries(projectPayload.assets || {}).filter(([key]) => allowedImportedAssetKeys.has(key)).map(([key, value]) => [key, cloneBackupValue(value)]));
+    const transitResources2 = Object.prototype.hasOwnProperty.call(resourcePayload, TRANSIT_RESOURCES_STORAGE_KEY) ? cloneBackupValue(resourcePayload[TRANSIT_RESOURCES_STORAGE_KEY]) : undefined;
+    const currentStorage = await readChromeStorage(chrome.storage.local);
+    const chromeSet: any = {};
+    const chromeRemove = new Set<string>();
+    const setChromeValue = (key: string, value: any) => { chromeSet[key] = cloneBackupValue(value); chromeRemove.delete(key); };
+    const removeChromeValue = (key: string) => { delete chromeSet[key]; chromeRemove.add(key); };
+
+    if (restoreSettings) for (const [key, value] of Object.entries(mergedSections)) setChromeValue(key, value);
+    let restoredLastOpenedProjectId = ``;
+    if (restoreProjects) {
+      const existingProjects = Array.isArray(currentStorage.projects) ? cloneBackupValue(currentStorage.projects) : [];
+      const selectedProjectIdSet = new Set(selectedProjects.map((project) => project.id));
+      setChromeValue(`projects`, [...existingProjects.filter((project) => !selectedProjectIdSet.has(project.id)), ...selectedProjects]);
+      const existingGroups = Array.isArray(currentStorage.projectGroups) ? cloneBackupValue(currentStorage.projectGroups) : [];
+      const restoredGroupIds = new Set(restoredProjectGroups.map((group) => group.id));
+      const mergedGroups = [...existingGroups.filter((group) => !restoredGroupIds.has(group.id)), ...restoredProjectGroups];
+      if (mergedGroups.length > 0) setChromeValue(`projectGroups`, mergedGroups);
+      restoredLastOpenedProjectId = selectedProjectIds.includes(projectsStorage.lastOpenedProjectId) && selectedProjectIdSet.has(projectsStorage.lastOpenedProjectId) ? projectsStorage.lastOpenedProjectId : selectedProjects[0]?.id || selectedProjectIds[0] || ``;
+      if (restoredLastOpenedProjectId) setChromeValue(`lastOpenedProjectId`, restoredLastOpenedProjectId); else removeChromeValue(`lastOpenedProjectId`);
+      for (const projectId of selectedProjectIds) removeChromeValue(getDesktopProjectMirrorStorageKey(projectId));
+      for (const [projectId, value] of Object.entries(selectedCanvasStates)) setChromeValue(getDesktopProjectMirrorStorageKey(projectId), value);
+    }
+
+    let mergedTransitResources: any = undefined;
+    if (restoreResources) {
+      if (transitResources2 !== undefined) { mergedTransitResources = cloneBackupValue(transitResources2); setChromeValue(TRANSIT_RESOURCES_STORAGE_KEY, mergedTransitResources); }
+      else removeChromeValue(TRANSIT_RESOURCES_STORAGE_KEY);
+    } else if (restoreProjects && transitResources2 !== undefined) {
+      mergedTransitResources = mergeTransitResourceEntries(transitResources2, Array.isArray(currentStorage[TRANSIT_RESOURCES_STORAGE_KEY]) ? currentStorage[TRANSIT_RESOURCES_STORAGE_KEY] : []);
+      setChromeValue(TRANSIT_RESOURCES_STORAGE_KEY, mergedTransitResources);
+    } else if (restoreProjects) {
+      const merged = mergeTransitResourceEntries(selectedProjectIds.flatMap((projectId) => projectResourceMap[projectId] || []), Array.isArray(currentStorage[TRANSIT_RESOURCES_STORAGE_KEY]) ? currentStorage[TRANSIT_RESOURCES_STORAGE_KEY] : []);
+      if (merged.length > 0) { mergedTransitResources = merged; setChromeValue(TRANSIT_RESOURCES_STORAGE_KEY, merged); }
+    }
+    if (shouldRestoreAgents) {
+      const existingAgents = Array.isArray(currentStorage.agents) ? cloneBackupValue(currentStorage.agents) : [];
+      const mergedAgents = [...existingAgents.filter((agent) => !selectedImportedAgentIdSet.has(agent.id)), ...selectedImportedAgents];
+      const existingConversations = currentStorage.agentConversations && typeof currentStorage.agentConversations === `object` ? cloneBackupValue(currentStorage.agentConversations) : {};
+      setChromeValue(`agents`, mergedAgents);
+      setChromeValue(`agentConversations`, { ...existingConversations, ...Object.fromEntries(importedAgentIds.filter((id) => Object.prototype.hasOwnProperty.call(importedAgentConversations, id)).map((id) => [id, cloneBackupValue(importedAgentConversations[id])])) });
+      const nextSelectedAgentId = typeof agentChromeStorage.selectedAgentId === `string` && selectedImportedAgentIdSet.has(agentChromeStorage.selectedAgentId) ? agentChromeStorage.selectedAgentId : selectedImportedAgents[0]?.id || currentStorage.selectedAgentId || mergedAgents[0]?.id || ``;
+      if (nextSelectedAgentId) setChromeValue(`selectedAgentId`, nextSelectedAgentId);
+    }
+
+    const localforageSet = new Map<string, any>();
+    const localforageRemove = new Set<string>();
+    if (restoreProjects) {
+      const oldAssetKeys = new Set<string>();
+      const oldPortableKeys = new Set<string>();
+      for (const projectId of selectedProjectIds) {
+        const canvasKey = getProjectCanvasStorageKey(projectId);
+        const existingState = await localforage.getItem(canvasKey);
+        extractProjectAssetRefs(existingState).forEach((key) => oldAssetKeys.add(key));
+        extractProjectPortableDataRefs(existingState).forEach((key) => oldPortableKeys.add(key));
+        localforageRemove.add(canvasKey);
+      }
+      oldAssetKeys.forEach((key) => localforageRemove.add(key));
+      oldPortableKeys.forEach((key) => localforageRemove.add(key));
+      for (const [projectId, value] of Object.entries(selectedCanvasStates)) localforageSet.set(getProjectCanvasStorageKey(projectId), value);
+      for (const [key, assetEntry] of Object.entries(assets)) {
+        if (assetEntry && typeof assetEntry === `object` && assetEntry.__wanjuanExternalAssetFile && assetEntry.filePath) localforageSet.set(key, buildProjectMediaFileUrl(assetEntry.filePath) || assetEntry.filePath);
+        else if (!(typeof assetEntry === `string` && assetEntry.startsWith(PROJECT_ASSET_MANIFEST_STORAGE_PREFIX))) localforageSet.set(key, assetEntry);
+      }
+    }
+    if (restoreResources || (restoreProjects && transitResources2 !== undefined)) {
+      if (mergedTransitResources !== undefined) localforageSet.set(TRANSIT_RESOURCES_STORAGE_KEY, mergedTransitResources);
+      else if (restoreResources) localforageRemove.add(TRANSIT_RESOURCES_STORAGE_KEY);
+    }
+
+    const transaction = await runBackupRestoreTransaction({ localforage, chromeStorage: chrome.storage.local, chromeSet, chromeRemove: [...chromeRemove], localforageSet, localforageRemove: [...localforageRemove] });
+    if (restoreProjects) restoredLastOpenedProjectId ? localStorage.setItem(`lastOpenedProjectId`, restoredLastOpenedProjectId) : localStorage.removeItem(`lastOpenedProjectId`);
+    return {
+      modules: selectedModules,
+      settingsSections: selectedSections,
+      projectIds: selectedProjectIds,
+      agentIds: importedAgentIds,
+      clearedChromeKeys: [...chromeRemove],
+      report: buildBackupRestoreReport({ modules: selectedModules, settingsSections: selectedSections, projectIds: selectedProjectIds, agentIds: importedAgentIds, canvasStates: selectedCanvasStates, assets, transitResources: mergedTransitResources, projectResources: projectResourceMap }),
+      transaction,
+    };
+  };
   return { restoreSelectedBackup };
 }

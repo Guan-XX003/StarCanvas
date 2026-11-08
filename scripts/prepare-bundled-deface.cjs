@@ -1,11 +1,14 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { assertMacDefaceRuntime, assembleStandalonePython, basePythonInfo } = require("./portable-python-runtime.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
 const platformKey = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : process.platform;
 const archKey = process.arch === "x64" ? "x64" : process.arch === "ia32" ? "ia32" : process.arch === "arm64" ? "arm64" : process.arch;
 const isWindows = process.platform === "win32";
+const isMac = process.platform === "darwin";
+let standalonePythonVersion = "";
 const targetRoot = path.join(repoRoot, "tool-runtime", `${platformKey}-${archKey}`, "deface");
 const platformRoot = path.dirname(targetRoot);
 const binRoot = path.join(platformRoot, "bin");
@@ -110,8 +113,9 @@ function writeManifest() {
       arch: archKey,
       preparedAt: new Date().toISOString(),
       command: path.relative(platformRoot, bundledDefaceCommandPath()),
-      runtime: isWindows ? "pyinstaller-onefile" : "venv",
+      runtime: isWindows ? "pyinstaller-onefile" : isMac ? "cpython-standalone" : "venv",
       requiresSystemPython: false,
+      ...(isMac ? { pythonVersion: standalonePythonVersion } : {}),
       ...(isWindows ? { backend: "opencv-cpu", pyInstallerVersion } : {})
     }, null, 2),
     "utf8"
@@ -134,11 +138,28 @@ function writeNonWindowsWrapper() {
       "#!/bin/sh",
       "set -eu",
       "ROOT=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\"",
-      "exec \"$ROOT/deface/venv/bin/python\" \"$ROOT/deface/venv/bin/deface\" \"$@\""
+      isMac
+        ? `exec "$ROOT/deface/python/bin/python${standalonePythonVersion}" -I -B "$ROOT/deface/run.py" "$@"`
+        : "exec \"$ROOT/deface/venv/bin/python\" \"$ROOT/deface/venv/bin/deface\" \"$@\""
     ].join("\n"),
     "utf8"
   );
   fs.chmodSync(wrapperPath, 0o755);
+}
+
+function prepareMacStandalone() {
+  const { baseRoot, version } = basePythonInfo(venvPython);
+  standalonePythonVersion = version;
+  assembleStandalonePython({ baseRoot, version,
+    siteRoot: path.join(venvRoot, "lib", `python${version}`, "site-packages"),
+    targetRoot: path.join(targetRoot, "python") });
+  fs.writeFileSync(path.join(targetRoot, "run.py"),
+    "from deface.deface import main\n\nif __name__ == '__main__':\n    main()\n", "utf8");
+  // Preserve the old generated venv outside shipped resources, for rollback.
+  const preserved = path.join(repoRoot, ".wanjuan-build-tools", `${platformKey}-${archKey}`,
+    `legacy-deface-venv-${Date.now()}`);
+  fs.mkdirSync(path.dirname(preserved), { recursive: true });
+  fs.renameSync(venvRoot, preserved);
 }
 
 function ensureVirtualenv(python) {
@@ -220,8 +241,16 @@ function assertNoAbsolutePythonLink() {
   }
 }
 
-if (commandWorks(bundledDefaceCommandPath(), ["--version"]) || commandWorks(bundledDefaceCommandPath(), ["--help"])) {
-  assertNoAbsolutePythonLink();
+let existingPortable = !isMac;
+if (isMac) {
+  try {
+    const runtime = assertMacDefaceRuntime(platformRoot);
+    standalonePythonVersion = runtime.version;
+    existingPortable = true;
+  } catch { /* A locally runnable venv is not a portable release runtime. */ }
+}
+if (existingPortable && (commandWorks(bundledDefaceCommandPath(), ["--version"]) || commandWorks(bundledDefaceCommandPath(), ["--help"]))) {
+  if (!isMac) assertNoAbsolutePythonLink();
   writeLicenseNote();
   writeManifest();
   console.log(`Bundled Deface already prepared: ${bundledDefaceCommandPath()}`);
@@ -244,10 +273,18 @@ if (!fs.existsSync(venvPython)) {
   createPortableVenv(python);
 }
 
-run(venvPython, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
-run(venvPython, ["-m", "pip", "install", "--upgrade", `deface==${defaceVersion}`]);
+if (process.argv.includes("--from-existing-venv")) {
+  if (!isMac) throw new Error("Existing-venv relocation is only supported for macOS");
+  const installed = execFileSync(venvPython, ["-I", "-c",
+    "from importlib.metadata import version; print(version('deface'))"], { encoding: "utf8", timeout: 30000 }).trim();
+  if (installed !== defaceVersion) throw new Error("Existing Deface dependency version does not match the release input");
+} else {
+  run(venvPython, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
+  run(venvPython, ["-m", "pip", "install", "--upgrade", `deface==${defaceVersion}`]);
+}
+if (isMac) prepareMacStandalone();
 writeNonWindowsWrapper();
-assertNoAbsolutePythonLink();
+if (!isMac) assertNoAbsolutePythonLink();
 
 if (!commandWorks(bundledDefaceCommandPath(), ["--version"]) && !commandWorks(bundledDefaceCommandPath(), ["--help"])) {
   throw new Error(`Deface was installed but is not runnable: ${bundledDefaceCommandPath()}`);

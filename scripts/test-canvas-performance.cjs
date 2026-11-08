@@ -10,6 +10,24 @@ const projectRoot = path.resolve(__dirname, "..");
 const electronPath = require("electron");
 const port = Number(process.env.WANJUAN_PERF_DEBUG_PORT || 9455);
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), "wanjuan-canvas-perf-"));
+const readPositiveLimit = (name, fallback) => {
+  const value = Number(process.env[name] || fallback);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
+  return value;
+};
+const performanceLimits = Object.freeze({
+  interactionMs: readPositiveLimit("WANJUAN_PERF_MAX_INTERACTION_MS", 1200),
+  frameGapMs: readPositiveLimit("WANJUAN_PERF_MAX_FRAME_GAP_MS", 1000),
+  longTaskMs: readPositiveLimit("WANJUAN_PERF_MAX_LONG_TASK_MS", 1000),
+});
+const limitsForNodeCount = (count) => {
+  const scale = count <= 100 ? 0.35 : count <= 300 ? 0.7 : 1;
+  return {
+    interactionMs: Math.round(performanceLimits.interactionMs * scale),
+    frameGapMs: Math.round(performanceLimits.frameGapMs * scale),
+    longTaskMs: Math.round(performanceLimits.longTaskMs * scale),
+  };
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const getJson = (url) => new Promise((resolve, reject) => {
@@ -124,6 +142,53 @@ async function run() {
         worst: measurements.sort((left, right) => right.distance - left.distance)[0] || null,
       };
     })()`);
+    const measureCanvasInteraction = (viewport) => evaluate(`new Promise((resolve) => {
+      const longTasks = [];
+      const observer = typeof PerformanceObserver === 'function'
+        ? new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) longTasks.push(entry.duration);
+          })
+        : null;
+      try { observer?.observe({ type: 'longtask', buffered: false }); } catch {}
+      const startedAt = performance.now();
+      globalThis.__wanjuanCanvasDebug.setViewport(${JSON.stringify(viewport)});
+      requestAnimationFrame((firstFrameAt) => {
+        requestAnimationFrame((secondFrameAt) => {
+          setTimeout(() => {
+            try { longTasks.push(...(observer?.takeRecords?.() || []).map((entry) => entry.duration)); } catch {}
+            observer?.disconnect?.();
+            resolve({
+              interactionMs: secondFrameAt - startedAt,
+              firstFrameDelayMs: firstFrameAt - startedAt,
+              frameGapMs: secondFrameAt - firstFrameAt,
+              maxLongTaskMs: longTasks.length ? Math.max(...longTasks) : 0,
+              longTaskCount: longTasks.length,
+            });
+          }, 0);
+        });
+      });
+    })`, true);
+    const readCanvasViewport = () => evaluate(`(() => {
+      const element = document.querySelector('.react-flow__viewport');
+      const matrix = new DOMMatrix(getComputedStyle(element).transform);
+      return { x: matrix.m41, y: matrix.m42, zoom: matrix.m11 };
+    })()`);
+    const assertInteractionBudget = (count, measurement) => {
+      const limits = limitsForNodeCount(count);
+      if (measurement.interactionMs > limits.interactionMs) {
+        throw new Error(`${count}-node viewport interaction exceeded ${limits.interactionMs}ms: ${JSON.stringify(measurement)}`);
+      }
+      if (measurement.firstFrameDelayMs > limits.interactionMs) {
+        throw new Error(`${count}-node first frame exceeded ${limits.interactionMs}ms: ${JSON.stringify(measurement)}`);
+      }
+      if (measurement.frameGapMs > limits.frameGapMs) {
+        throw new Error(`${count}-node animation frame gap exceeded ${limits.frameGapMs}ms: ${JSON.stringify(measurement)}`);
+      }
+      if (measurement.maxLongTaskMs > limits.longTaskMs) {
+        throw new Error(`${count}-node long task exceeded ${limits.longTaskMs}ms: ${JSON.stringify(measurement)}`);
+      }
+      measurement.limits = limits;
+    };
     await send("Performance.enable");
     const waitForDebugApi = async () => {
       const deadline = Date.now() + 30000;
@@ -134,6 +199,7 @@ async function run() {
       throw new Error("Canvas debug API was not installed");
     };
     await waitForDebugApi();
+    await send("Page.bringToFront");
     const inactivePageRendering = await evaluate(`(() => {
       const contentRoot = document.querySelector('#root > div > .flex-1.relative.overflow-hidden');
       return [...(contentRoot?.children || [])]
@@ -267,7 +333,14 @@ async function run() {
         snapshot.fixtureData = fixtureDataAfter;
       }
       if (resultViewport) snapshot.resultViewport = resultViewport;
-      results.push({ requested: count, ...snapshot });
+      const currentViewport = await readCanvasViewport();
+      const interaction = await measureCanvasInteraction({
+        x: currentViewport.x + 32,
+        y: currentViewport.y + 24,
+        zoom: currentViewport.zoom,
+      });
+      assertInteractionBudget(count, interaction);
+      results.push({ requested: count, interaction, ...snapshot });
     }
     await evaluate(`globalThis.__wanjuanCanvasDebug.loadFixture(20, { withResults: true, videoThumbnails: false, extractedFrameCount: 24 })`);
     await sleep(700);
@@ -291,7 +364,7 @@ async function run() {
     }
     const largeImageSummary = largeImageResult ? { ...largeImageResult } : null;
     if (largeImageSummary?.value) largeImageSummary.value = `[${largeImageSummary.valueFormat || `asset`} omitted]`;
-    console.log(JSON.stringify({ ok: true, largeImageResult: largeImageSummary, inactivePageRendering, idleMutations, idleTaskUtilization, idleSnapshot, results, renderModeTransitions: { compactModeSnapshot, expandedModeSnapshot } }, null, 2));
+    console.log(JSON.stringify({ ok: true, performanceLimits, largeImageResult: largeImageSummary, inactivePageRendering, idleMutations, idleTaskUtilization, idleSnapshot, results, renderModeTransitions: { compactModeSnapshot, expandedModeSnapshot } }, null, 2));
   } finally {
     try { ws?.close(); } catch {}
     child.kill("SIGTERM");

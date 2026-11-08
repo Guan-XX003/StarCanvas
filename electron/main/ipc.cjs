@@ -33,6 +33,7 @@ const {
   walkAssetFolder,
   loadProjectAssetManifests,
   validateExternalProjectAssetFiles,
+  resolveExternalAssetManifestFile,
   copyExternalProjectAssetFiles,
   injectExternalAssetBundleSummary,
 } = require("./assets/project-assets.cjs");
@@ -93,8 +94,11 @@ const {
   fetchWorkspaceTeamMember,
 } = require("./workspace-team.cjs");
 const { defaultCloudPromptService } = require("./cloud-prompt-service.cjs");
+const { createCloudProjectBridge } = require("./cloud-project-bridge.cjs");
 const {
   bootstrapAccount,
+  resetAccountPassword,
+  confirmRelayLink,
   connectEnterpriseWorkspace,
   continueWithLocalMode,
   createEnterpriseGateway,
@@ -102,6 +106,11 @@ const {
   getCurrentAccount,
   getEnterpriseManagement,
   getEnterpriseStorageOverlay,
+  getRechargeStore,
+  getRelayAccount,
+  getRelayUsageRecords,
+  getWallet,
+  getWalletTransactions,
   invokeEnterpriseTeamTemplates,
   loginAccount,
   logoutAccount,
@@ -111,15 +120,23 @@ const {
   releaseCreatedEnterpriseGateway,
   refreshEnterpriseWorkspaceConfig,
   refreshAccountSession,
+  requestWithManagedRelayRetry,
+  redeemWalletCode,
+  regenerateRelayKey,
+  revealRelayKey,
   resetAccountOnboarding,
   removeEnterpriseMember,
   sendAccountCode,
+  sendRelayKeyCode,
+  sendRelayLinkCode,
   startCreatedEnterpriseGateway,
   stopCreatedEnterpriseGateway,
   takeOverEnterpriseGateway,
   updateEnterpriseMember,
   updateEnterpriseMemberQuota,
   updateEnterpriseQuotaDefault,
+  verifyLegacyRelayAccount,
+  verifyLegacyRelayMfa,
 } = require("./account-service.cjs");
 const {
   LOCAL_DATA_REMOVAL_CONFIRMATION,
@@ -156,6 +173,10 @@ function accountErrorResult(error) {
 
 function registerDesktopIpc() {
   if (!ipcMain || !dialog) return;
+  // The server remains authoritative: the bridge probes the authenticated
+  // endpoint before advertising cloud projects. An explicit local kill switch
+  // is retained for recovery and isolated tests.
+  const cloudProjects = createCloudProjectBridge({ enabled: process.env.WANJUAN_EXPERIMENTAL_CLOUD_PROJECTS !== "0" });
 
   ipcMain.handle("wanjuan:check-for-updates", async (event) => {
     const blocked = rejectUntrustedIpc(event, "wanjuan:check-for-updates");
@@ -235,6 +256,16 @@ function registerDesktopIpc() {
     return defaultCloudPromptService.invoke(payload || {});
   });
 
+  ipcMain.handle("wanjuan:cloud-projects", async (event, payload = {}) => {
+    const blocked = rejectUntrustedIpc(event, "wanjuan:cloud-projects");
+    if (blocked) return blocked;
+    try { return { ok: true, ...(await cloudProjects.invoke(payload)) }; }
+    catch (error) {
+      const code = /^[A-Z0-9_]{1,80}$/.test(String(error?.code || "")) ? error.code : "CLOUD_PROJECT_FAILED";
+      return { ok: false, code, status: Number(error?.status || 0), error: "云项目操作未完成，请检查状态后重试" };
+    }
+  });
+
   ipcMain.handle("wanjuan:account-bootstrap", async (event) => {
     const blocked = rejectUntrustedIpc(event, "wanjuan:account-bootstrap");
     if (blocked) return blocked;
@@ -286,6 +317,32 @@ function registerDesktopIpc() {
       return accountErrorResult(error);
     }
   });
+
+  const registerAccountCommerceHandler = (channel, operation) => {
+    ipcMain.handle(channel, async (event, payload = {}) => {
+      const blocked = rejectUntrustedIpc(event, channel);
+      if (blocked) return blocked;
+      try {
+        return await operation(payload || {});
+      } catch (error) {
+        return accountErrorResult(error);
+      }
+    });
+  };
+  registerAccountCommerceHandler("wanjuan:account-relay", () => getRelayAccount());
+  registerAccountCommerceHandler("wanjuan:account-password-reset", resetAccountPassword);
+  registerAccountCommerceHandler("wanjuan:account-wallet", () => getWallet());
+  registerAccountCommerceHandler("wanjuan:account-wallet-transactions", getWalletTransactions);
+  registerAccountCommerceHandler("wanjuan:account-relay-usage", getRelayUsageRecords);
+  registerAccountCommerceHandler("wanjuan:account-recharge-store", () => getRechargeStore());
+  registerAccountCommerceHandler("wanjuan:account-wallet-redeem", redeemWalletCode);
+  registerAccountCommerceHandler("wanjuan:account-relay-key-send-code", sendRelayKeyCode);
+  registerAccountCommerceHandler("wanjuan:account-relay-key-reveal", revealRelayKey);
+  registerAccountCommerceHandler("wanjuan:account-relay-key-regenerate", regenerateRelayKey);
+  registerAccountCommerceHandler("wanjuan:account-relay-link-send-code", sendRelayLinkCode);
+  registerAccountCommerceHandler("wanjuan:account-relay-link-verify-legacy", verifyLegacyRelayAccount);
+  registerAccountCommerceHandler("wanjuan:account-relay-link-verify-mfa", verifyLegacyRelayMfa);
+  registerAccountCommerceHandler("wanjuan:account-relay-link-confirm", confirmRelayLink);
 
   ipcMain.handle("wanjuan:account-local-mode", async (event) => {
     const blocked = rejectUntrustedIpc(event, "wanjuan:account-local-mode");
@@ -538,7 +595,7 @@ function registerDesktopIpc() {
             folderPath,
             folderName: path.basename(folderPath),
             files: manifest.files.map((entry) => {
-              const filePath = entry?.filename ? path.join(folderPath, entry.filename) : "";
+              const filePath = resolveExternalAssetManifestFile(folderPath, entry);
               return {
                 ...entry,
                 filePath: filePath && fs.existsSync(filePath) ? filePath : ""
@@ -680,9 +737,6 @@ function registerDesktopIpc() {
         payload?.externalAssetFolderName
       );
       if (assetBundle?.failed) {
-        try {
-          assetBundle.folderPath && fs.rmSync(assetBundle.folderPath, { recursive: true, force: true });
-        } catch {}
         return {
           ok: false,
           error: `导出已中止：${assetBundle.failed} 个素材未能打包`,
@@ -691,7 +745,16 @@ function registerDesktopIpc() {
         };
       }
       const finalText = injectExternalAssetBundleSummary(payload?.text, assetBundle);
-      fs.writeFileSync(target, finalText !== null ? Buffer.from(finalText, "utf8") : buffer);
+      try {
+        fs.writeFileSync(target, finalText !== null ? Buffer.from(finalText, "utf8") : buffer);
+      } catch (error) {
+        if (assetBundle?.createdByOperation && assetBundle.folderPath) {
+          try {
+            fs.rmSync(assetBundle.folderPath, { recursive: true, force: true });
+          } catch {}
+        }
+        throw error;
+      }
       return { ok: true, path: target, externalAssetBundle: assetBundle };
     } catch (error) {
       console.error("save-download failed", error);
@@ -1078,14 +1141,15 @@ function registerDesktopIpc() {
     desktopProxyFetchControllers.set(requestId, { controller, cancel: null });
     try {
       const method = String(payload?.method || "GET").toUpperCase();
-      const headers = sanitizeProxyFetchHeaders(payload?.headers);
+      const originalHeaders = sanitizeProxyFetchHeaders(payload?.headers);
+      let headers = originalHeaders;
       const body = payload?.bodyBase64 ? Buffer.from(String(payload.bodyBase64), "base64") : undefined;
       const tianjiGenerationProfile = inspectTianjiGenerationRequest(payload, body);
       if (tianjiGenerationProfile) appendDesktopLog("tianji-generation-request-profile", tianjiGenerationProfile);
       validateTianjiGenerationRequest(tianjiGenerationProfile);
       const preflight = captureTianjiGenerationPreflight(tianjiGenerationProfile);
       if (preflight) return preflight;
-      const runProxyRequest = async () => {
+      const performProxyRequest = async () => {
         const enterpriseResult = await proxyEnterpriseRequest({
           ...payload,
           url,
@@ -1100,6 +1164,12 @@ function registerDesktopIpc() {
           body,
           signal: controller.signal,
           requestTimeout: Number(payload?.requestTimeout || 180000)
+        });
+      };
+      const runProxyRequest = async () => {
+        return requestWithManagedRelayRetry(url, originalHeaders, async (nextHeaders) => {
+          headers = nextHeaders;
+          return performProxyRequest();
         });
       };
       const rule = classifyDesktopProxyFetch(payload);
@@ -1121,7 +1191,7 @@ function registerDesktopIpc() {
         requestId,
         url,
         method: payload?.method,
-        error: formatErrorMessage(error)
+        error
       });
       return { ok: false, error: formatErrorMessage(error) };
     } finally {

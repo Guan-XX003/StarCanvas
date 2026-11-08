@@ -147,7 +147,7 @@ export const WanJuanImageNode = reactMemo(({
       className: `relative group/node w-full h-full min-w-[120px] min-h-[80px]`,
       children: [
         jsx(NodeResizer, {
-          color: `#3b82f6`,
+          color: `var(--wj-accent)`,
           isVisible: selected,
           minWidth: 120,
           minHeight: 80,

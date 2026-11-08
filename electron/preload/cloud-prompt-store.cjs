@@ -107,6 +107,14 @@ function createCloudPromptStore(options = {}) {
     adapter.delete(CLOUD_PROMPT_TEMPLATE_STORE, namespace(accountId, workspaceId, templateId));
   const applyRemoteChanges = async (accountId, workspaceId, items = [], tombstones = [], options2 = {}) => {
     const existing = await listTemplates(accountId, workspaceId, { includeArchived: true });
+    const isCurrent = typeof options2.isCurrent === "function" ? options2.isCurrent : () => true;
+    const rollback = async () => {
+      const current = await listTemplates(accountId, workspaceId, { includeArchived: true });
+      await Promise.all(current.map((item) => removeTemplate(accountId, workspaceId, item.id)));
+      for (const item of existing) await putTemplate(accountId, workspaceId, item, item.syncStatus || "synced");
+      return { stale: true };
+    };
+    if (!isCurrent()) return { stale: true };
     const existingMap = new Map(existing.map((item) => [String(item.id), item]));
     const remoteIds = new Set();
     for (const template of items) {
@@ -116,6 +124,7 @@ function createCloudPromptStore(options = {}) {
       const local = existingMap.get(id);
       if (local && ["pending-create", "pending-update", "pending-delete", "conflict"].includes(local.syncStatus)) continue;
       await putTemplate(accountId, workspaceId, template, "synced");
+      if (!isCurrent()) return rollback();
     }
     for (const tombstone of tombstones) {
       const id = String(tombstone?.id || tombstone?.templateId || "");
@@ -129,15 +138,18 @@ function createCloudPromptStore(options = {}) {
       } else {
         await removeTemplate(accountId, workspaceId, id);
       }
+      if (!isCurrent()) return rollback();
     }
     if (options2.replace === true) {
       for (const local of existing) {
         if (!remoteIds.has(String(local.id)) && local.syncStatus === "synced") {
           await removeTemplate(accountId, workspaceId, local.id);
+          if (!isCurrent()) return rollback();
         }
       }
     }
-    return listTemplates(accountId, workspaceId, { includeArchived: true });
+    const result = await listTemplates(accountId, workspaceId, { includeArchived: true });
+    return isCurrent() ? result : rollback();
   };
   const listQueue = async (accountId, workspaceId = "") => {
     const values = await adapter.values(CLOUD_PROMPT_QUEUE_STORE);

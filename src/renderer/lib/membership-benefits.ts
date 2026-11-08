@@ -9,10 +9,6 @@ export const WANJUAN_MEMBERSHIP_BENEFITS = [
     title: "云端提示词库",
     description: "不受局域网限制，保存、管理和分享提示词资产。",
   },
-  {
-    title: "极鑫模型 85 折",
-    description: "会员调用极鑫中转站模型享受 85 折。",
-  },
 ] as const;
 
 export async function copyMembershipContactQQ({

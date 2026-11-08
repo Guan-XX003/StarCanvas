@@ -23,6 +23,7 @@ import {
   wanjuanMergeModelText,
 } from "./jixin-catalog";
 import { WanJuanSameModelId } from "./model-id";
+import { wanjuanManagedRelayPlaceholderFor } from "./managed-relay";
 import { WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE } from "./upload-defaults";
 import { wanjuanClearProjectAssetBindingsFromData } from "./resource";
 
@@ -349,7 +350,7 @@ export const wanjuanNormalizeTianjiSeedanceConfig = (config: any = {}): TianjiSe
   ...wanjuanTianjiSeedanceDefaults,
   ...(config && typeof config == `object` ? config : {}),
   baseUrl,
-  token: String(config?.token || ``).trim(),
+  token: String(config?.token || ``).trim() || wanjuanManagedRelayPlaceholderFor({ url: baseUrl }),
   syncSource:
     config?.syncSource === WANJUAN_TIANJI_SYNC_SOURCE_MANUAL
       ? WANJUAN_TIANJI_SYNC_SOURCE_MANUAL

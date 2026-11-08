@@ -14,6 +14,7 @@
   --wj-muted: var(--wanjuan-theme-muted, #94a3b8);
   --wj-accent: var(--wanjuan-theme-accent, #38bdf8);
   --wj-accent-2: var(--wanjuan-theme-accent-2, var(--wj-accent));
+  --wj-accent-contrast: var(--wanjuan-theme-accent-contrast, #ffffff);
   --wj-danger: #dc2626;
   --wj-danger-bg: #dc2626;
   --wj-danger-border: #f87171;
@@ -43,7 +44,7 @@
   --wj-action-bg: var(--wj-accent);
   --wj-action-hover-bg: color-mix(in srgb, var(--wj-action-bg) 86%, #000000 14%);
   --wj-action-border: color-mix(in srgb, var(--wj-action-bg) 72%, #ffffff 28%);
-  --wj-action-text: #ffffff;
+  --wj-action-text: var(--wanjuan-theme-action-contrast, #ffffff);
   --wj-action-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20), 0 3px 0 rgba(0, 0, 0, 0.22);
   --wj-control-selected-bg: var(--wj-action-bg);
   --wj-control-selected-hover-bg: var(--wj-control-selected-bg);
@@ -257,9 +258,9 @@ html.theme-sage-green {
 }
 
 html.theme-dark {
-  --wj-action-bg: #4f46e5;
-  --wj-action-hover-bg: #4338ca;
-  --wj-action-border: #a5b4fc;
+  --wj-action-bg: #d95f34;
+  --wj-action-hover-bg: #eb7147;
+  --wj-action-border: #e36b3f;
 }
 
 html.theme-warm-light,
@@ -470,10 +471,10 @@ html .wanjuan-agent-page .wanjuan-agent-role-card-active[class][class],
 html .wanjuan-agent-page .wanjuan-agent-role-card-active:hover[class][class],
 html .wanjuan-agent-page .wanjuan-agent-role-card-active:focus-visible[class][class],
 html .wanjuan-agent-page .wanjuan-agent-role-card-active:active[class][class] {
-  background: color-mix(in srgb, #f3f4f6 82%, var(--wj-accent) 18%) !important;
+  background: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: color-mix(in srgb, #111827 24%, transparent) !important;
-  color: #111827 !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
   -webkit-text-fill-color: currentColor !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 8px 20px color-mix(in srgb, var(--wanjuan-theme-shadow, rgba(0, 0, 0, 0.28)) 24%, transparent) !important;
   filter: none !important;
@@ -488,7 +489,7 @@ html .wanjuan-agent-page .wanjuan-agent-role-card-active:hover > div:first-child
 
 html .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2),
 html .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2) :is(div, span, svg) {
-  color: #111827 !important;
+  color: var(--wj-control-selected-text) !important;
   -webkit-text-fill-color: currentColor !important;
 }
 
@@ -1063,20 +1064,20 @@ html :is(
 }
 
 .wanjuan-resource-favorite-filter {
-  background: var(--wj-favorite-bg) !important;
-  background-color: var(--wj-favorite-bg) !important;
+  background: transparent !important;
+  background-color: transparent !important;
   background-image: none !important;
-  border-color: var(--wj-favorite-border) !important;
+  border: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
-  box-shadow: var(--wj-filter-button-shadow) !important;
+  box-shadow: none !important;
   font-weight: 700 !important;
 }
 
 .wanjuan-resource-favorite-filter:not(.wanjuan-resource-favorite-filter-active):not([aria-pressed="true"]):hover {
-  background: var(--wj-favorite-hover-bg) !important;
-  background-color: var(--wj-favorite-hover-bg) !important;
-  border-color: var(--wj-favorite-hover-border) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
 }
@@ -1084,26 +1085,26 @@ html :is(
 .wanjuan-resource-favorite-filter-active,
 .wanjuan-resource-favorite-filter[aria-pressed="true"],
 .wanjuan-resource-favorite-filter[data-active="true"] {
-  background: var(--wj-favorite-active-bg) !important;
-  background-color: var(--wj-favorite-active-bg) !important;
+  background: transparent !important;
+  background-color: transparent !important;
   background-image: none !important;
-  border-color: var(--wj-favorite-active-border) !important;
-  color: var(--wj-favorite-active-text) !important;
-  -webkit-text-fill-color: var(--wj-favorite-active-text) !important;
-  box-shadow: var(--wj-favorite-shadow) !important;
+  border: 0 !important;
+  color: var(--wj-favorite-active-bg) !important;
+  -webkit-text-fill-color: var(--wj-favorite-active-bg) !important;
+  box-shadow: none !important;
   filter: none !important;
 }
 
 .wanjuan-resource-favorite-filter-active:is(:hover, :focus-visible, :active),
 .wanjuan-resource-favorite-filter[aria-pressed="true"]:is(:hover, :focus-visible, :active),
 .wanjuan-resource-favorite-filter[data-active="true"]:is(:hover, :focus-visible, :active) {
-  background: var(--wj-favorite-active-bg) !important;
-  background-color: var(--wj-favorite-active-bg) !important;
+  background: transparent !important;
+  background-color: transparent !important;
   background-image: none !important;
-  border-color: var(--wj-favorite-active-border) !important;
-  color: var(--wj-favorite-active-text) !important;
-  -webkit-text-fill-color: var(--wj-favorite-active-text) !important;
-  box-shadow: var(--wj-favorite-shadow) !important;
+  border: 0 !important;
+  color: var(--wj-favorite-active-bg) !important;
+  -webkit-text-fill-color: var(--wj-favorite-active-bg) !important;
+  box-shadow: none !important;
   filter: none !important;
   transform: none !important;
 }
@@ -1941,15 +1942,15 @@ html.theme-graphite :is(
 }
 
 html.theme-graphite .wanjuan-resource-favorite-filter {
-  background: var(--wj-favorite-bg) !important;
-  border: 1px solid var(--wj-favorite-border) !important;
+  background: transparent !important;
+  border: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
 }
 
 html.theme-graphite .wanjuan-resource-favorite-filter:not(.wanjuan-resource-favorite-filter-active):not([aria-pressed="true"]):hover {
-  background: var(--wj-favorite-hover-bg) !important;
-  border-color: var(--wj-favorite-hover-border) !important;
+  background: transparent !important;
+  border: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
 }
@@ -1959,11 +1960,11 @@ html.theme-graphite :is(
   .wanjuan-resource-favorite-filter[aria-pressed="true"],
   .wanjuan-resource-favorite-filter[data-active="true"]
 ) {
-  background: var(--wj-favorite-active-bg) !important;
-  border-color: var(--wj-favorite-active-border) !important;
-  color: var(--wj-favorite-active-text) !important;
-  -webkit-text-fill-color: var(--wj-favorite-active-text) !important;
-  box-shadow: var(--wj-favorite-shadow) !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--wj-favorite-active-bg) !important;
+  -webkit-text-fill-color: var(--wj-favorite-active-bg) !important;
+  box-shadow: none !important;
 }
 
 html.theme-graphite :is(input, textarea, select, .wanjuan-settings-control) {

@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
+require("./verify-electron-runtime.cjs").verifyElectronRuntime(projectRoot);
 const userDataPath = path.join(projectRoot, ".wanjuan-dev-user-data");
 
 fs.mkdirSync(userDataPath, { recursive: true });

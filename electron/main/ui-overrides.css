@@ -16,6 +16,7 @@
   --wj-muted: var(--wanjuan-theme-muted, var(--wanjuan-muted));
   --wj-accent: var(--wanjuan-theme-accent, var(--wanjuan-accent));
   --wj-accent-2: var(--wanjuan-theme-accent-2, var(--wanjuan-accent-2));
+  --wj-accent-contrast: var(--wanjuan-theme-accent-contrast, #ffffff);
   --wj-danger: #dc2626;
   --wj-success: #22c55e;
   --wj-warning: #f59e0b;
@@ -46,7 +47,7 @@
   --wj-action-bg: var(--wj-accent);
   --wj-action-hover-bg: color-mix(in srgb, var(--wj-action-bg) 86%, #000000 14%);
   --wj-action-border: color-mix(in srgb, var(--wj-action-bg) 72%, #ffffff 28%);
-  --wj-action-text: #ffffff;
+  --wj-action-text: var(--wanjuan-theme-action-contrast, #ffffff);
   --wj-action-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.20),
     0 3px 0 rgba(0, 0, 0, 0.22);
@@ -255,6 +256,7 @@ html.theme-graphite {
   --wj-muted: var(--wanjuan-theme-muted);
   --wj-accent: var(--wanjuan-theme-accent);
   --wj-accent-2: var(--wanjuan-theme-accent-2, var(--wanjuan-theme-accent));
+  --wj-accent-contrast: var(--wanjuan-theme-accent-contrast, #ffffff);
 }
 
 html.theme-light,
@@ -749,8 +751,10 @@ html.theme-light {
   --wanjuan-theme-surface-3: #dde6ff;
   --wanjuan-theme-border: #cad6fb;
   --wanjuan-theme-text: #18213f;
-  --wanjuan-theme-muted: #67759d;
-  --wanjuan-theme-accent: #4f6dff;
+  --wanjuan-theme-muted: #596587;
+  --wanjuan-theme-accent: #465fe5;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #ff8a5b;
   --wj-action-bg: #3657e5;
   --wj-action-hover-bg: #2f49c8;
@@ -764,8 +768,10 @@ html.theme-warm-light {
   --wanjuan-theme-surface-3: #f1e6d6;
   --wanjuan-theme-border: #dfd2bf;
   --wanjuan-theme-text: #2b2720;
-  --wanjuan-theme-muted: #74695b;
+  --wanjuan-theme-muted: #6f6557;
   --wanjuan-theme-accent: #c46a2b;
+  --wanjuan-theme-accent-contrast: #111111;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wj-action-bg: #9a4f16;
   --wj-action-hover-bg: #7f3f10;
   --wj-action-border: #d18a42;
@@ -778,8 +784,10 @@ html.theme-mist-blue {
   --wanjuan-theme-surface-3: #d9e6ff;
   --wanjuan-theme-border: #c5d5f4;
   --wanjuan-theme-text: #1a2742;
-  --wanjuan-theme-muted: #62789b;
-  --wanjuan-theme-accent: #4b73ff;
+  --wanjuan-theme-muted: #536684;
+  --wanjuan-theme-accent: #4264e8;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #ff8d62;
   --wj-action-bg: #365fdb;
   --wj-action-hover-bg: #2f52c0;
@@ -793,8 +801,10 @@ html.theme-chrome-blue {
   --wanjuan-theme-surface-3: #d9e4ff;
   --wanjuan-theme-border: #c9d6fb;
   --wanjuan-theme-text: #162241;
-  --wanjuan-theme-muted: #617097;
-  --wanjuan-theme-accent: #4d68ff;
+  --wanjuan-theme-muted: #566486;
+  --wanjuan-theme-accent: #435fe8;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #ff8759;
   --wj-action-bg: #3559d4;
   --wj-action-hover-bg: #2f4db8;
@@ -808,8 +818,10 @@ html.theme-chrome-rose {
   --wanjuan-theme-surface-3: #ffd3dd;
   --wanjuan-theme-border: #efc1cd;
   --wanjuan-theme-text: #3c1f29;
-  --wanjuan-theme-muted: #8b6070;
-  --wanjuan-theme-accent: #d6476f;
+  --wanjuan-theme-muted: #7d5665;
+  --wanjuan-theme-accent: #c93c64;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #ff9f6e;
   --wj-action-bg: #b4235a;
   --wj-action-hover-bg: #991f4f;
@@ -823,8 +835,10 @@ html.theme-chrome-sand {
   --wanjuan-theme-surface-3: #e8dbc2;
   --wanjuan-theme-border: #d6c5a6;
   --wanjuan-theme-text: #33281b;
-  --wanjuan-theme-muted: #7d6a55;
+  --wanjuan-theme-muted: #6e5d4b;
   --wanjuan-theme-accent: #b7791f;
+  --wanjuan-theme-accent-contrast: #111111;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #e75a3c;
   --wj-action-bg: #8a580f;
   --wj-action-hover-bg: #70470c;
@@ -838,8 +852,10 @@ html.theme-chrome-teal {
   --wanjuan-theme-surface-3: #c8e2dd;
   --wanjuan-theme-border: #aaccc5;
   --wanjuan-theme-text: #102f2e;
-  --wanjuan-theme-muted: #486b68;
+  --wanjuan-theme-muted: #446663;
   --wanjuan-theme-accent: #008577;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #2563eb;
   --wanjuan-theme-shadow: rgba(20, 80, 72, 0.18);
   --wj-action-bg: #006f63;
@@ -854,8 +870,10 @@ html.theme-sage-green {
   --wanjuan-theme-surface-3: #c9dfc0;
   --wanjuan-theme-border: #abc59d;
   --wanjuan-theme-text: #172716;
-  --wanjuan-theme-muted: #52684b;
+  --wanjuan-theme-muted: #4e6347;
   --wanjuan-theme-accent: #0f7a35;
+  --wanjuan-theme-accent-contrast: #ffffff;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #2f6fda;
   --wanjuan-theme-shadow: rgba(35, 80, 34, 0.18);
   --wj-action-bg: #08702f;
@@ -864,20 +882,23 @@ html.theme-sage-green {
 }
 
 html.theme-dark {
-  --wanjuan-theme-bg: #0c1021;
-  --wanjuan-theme-surface: #121935;
-  --wanjuan-theme-surface-2: #192347;
-  --wanjuan-theme-surface-3: #273162;
-  --wanjuan-theme-border: #2d3a70;
-  --wanjuan-theme-text: #f5f7ff;
-  --wanjuan-theme-muted: #aab5db;
-  --wanjuan-theme-accent: #7c8cff;
-  --wanjuan-theme-accent-2: #ff8a5b;
-  --wanjuan-theme-glow: rgba(124, 140, 255, 0.24);
-  --wanjuan-theme-shadow: rgba(4, 8, 24, 0.54);
-  --wj-action-bg: #4f46e5;
-  --wj-action-hover-bg: #4338ca;
-  --wj-action-border: #a5b4fc;
+  --wanjuan-theme-bg: #111111;
+  --wanjuan-theme-surface: #191919;
+  --wanjuan-theme-surface-2: #222222;
+  --wanjuan-theme-surface-3: #2e2e2e;
+  --wanjuan-theme-border: #404040;
+  --wanjuan-theme-text: #eeeae3;
+  --wanjuan-theme-muted: #aaa7a1;
+  --wanjuan-theme-accent: #e36b3f;
+  --wanjuan-theme-accent-contrast: #111111;
+  --wanjuan-theme-action-contrast: #111111;
+  --wanjuan-theme-accent-2: #f0a24b;
+  --wanjuan-theme-glow: rgba(227, 107, 63, 0.10);
+  --wanjuan-theme-shadow: rgba(0, 0, 0, 0.42);
+  --wj-action-bg: #d95f34;
+  --wj-action-hover-bg: #eb7147;
+  --wj-action-border: #e36b3f;
+  --wj-action-text: #111111;
 }
 
 html.theme-graphite {
@@ -889,12 +910,15 @@ html.theme-graphite {
   --wanjuan-theme-text: #f8fafc;
   --wanjuan-theme-muted: #d0d0d0;
   --wanjuan-theme-accent: #d8dde3;
+  --wanjuan-theme-accent-contrast: #111111;
+  --wanjuan-theme-action-contrast: #ffffff;
   --wanjuan-theme-accent-2: #f2f4f6;
   --wanjuan-theme-glow: rgba(226, 232, 240, 0.1);
   --wanjuan-theme-shadow: rgba(9, 12, 16, 0.58);
   --wj-action-bg: #454545;
   --wj-action-hover-bg: #505050;
   --wj-action-border: #e4e7eb;
+  --wj-action-text: #ffffff;
   --wj-chrome-bg:
     linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0)),
     #222222;
@@ -2907,8 +2931,7 @@ html:is(.theme-light, .theme-warm-light, .theme-mist-blue, .theme-chrome-blue, .
   background: var(--wanjuan-theme-surface-3) !important;
 }
 
-/* Dark themes: modernize the default desktop look with richer ink surfaces and
-   a focused blue-coral accent instead of flat grayscale. */
+/* Obsidian uses neutral surfaces; emphasis comes from the shared accent. */
 html.theme-dark {
   --wanjuan-theme-text-strong: #ffffff;
   --wanjuan-theme-muted-soft: color-mix(in srgb, var(--wanjuan-theme-muted) 84%, var(--wanjuan-theme-text) 16%);
@@ -2922,10 +2945,7 @@ html.theme-dark {
 
 html.theme-dark,
 html.theme-dark body {
-  background:
-    radial-gradient(circle at 14% 0%, rgba(124, 140, 255, 0.18), transparent 30%),
-    radial-gradient(circle at 88% 4%, rgba(255, 138, 91, 0.17), transparent 24%),
-    linear-gradient(180deg, #0a0f20 0%, #111835 52%, #0b1021 100%) !important;
+  background: var(--wanjuan-theme-bg) !important;
   color: var(--wanjuan-theme-text) !important;
 }
 
@@ -6107,61 +6127,59 @@ html :is(.wanjuan-resource-toolbar, .wanjuan-resource-source-filter, .wanjuan-me
  * 按钮不协调。改成与筛选按钮一致的图标按钮: 去硬框,选中(黄)态清晰。
  * ============================================================ */
 html:is(.theme-light,.theme-warm-light,.theme-mist-blue,.theme-chrome-blue,.theme-chrome-rose,.theme-chrome-sand,.theme-chrome-teal,.theme-sage-green,.theme-graphite,.theme-dark) button[title="只看收藏"][class][class][class] {
-  border-width: 1px !important;
-  border-style: solid !important;
-  border-color: var(--wj-favorite-border) !important;
-  background: var(--wj-favorite-bg) !important;
-  background-color: var(--wj-favorite-bg) !important;
-  border-radius: var(--wj-radius-md, 10px) !important;
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
 }
 html:is(.theme-light,.theme-warm-light,.theme-mist-blue,.theme-chrome-blue,.theme-chrome-rose,.theme-chrome-sand,.theme-chrome-teal,.theme-sage-green,.theme-graphite,.theme-dark) button[title="只看收藏"][class][class][class]:hover {
-  background: var(--wj-favorite-hover-bg) !important;
-  background-color: var(--wj-favorite-hover-bg) !important;
-  border-color: var(--wj-favorite-hover-border) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
 }
 html .wanjuan-resource-favorite-filter {
-  border: 1px solid var(--wj-favorite-border) !important;
-  background: var(--wj-favorite-bg) !important;
-  background-color: var(--wj-favorite-bg) !important;
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
-  box-shadow: var(--wj-filter-button-shadow) !important;
+  box-shadow: none !important;
   outline: 0 !important;
 }
 html .wanjuan-resource-favorite-filter:not(.wanjuan-resource-favorite-filter-active):not([aria-pressed="true"]):hover {
   color: var(--wj-favorite-text) !important;
   -webkit-text-fill-color: var(--wj-favorite-text) !important;
-  background: var(--wj-favorite-hover-bg) !important;
-  background-color: var(--wj-favorite-hover-bg) !important;
-  border-color: var(--wj-favorite-hover-border) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
 }
 html :is(
   .wanjuan-resource-favorite-filter-active,
   .wanjuan-resource-favorite-filter[aria-pressed="true"],
   .wanjuan-resource-favorite-filter[data-active="true"]
 ) {
-  color: var(--wj-favorite-active-text) !important;
-  -webkit-text-fill-color: var(--wj-favorite-active-text) !important;
-  background: var(--wj-favorite-active-bg) !important;
-  background-color: var(--wj-favorite-active-bg) !important;
-  border-color: var(--wj-favorite-active-border) !important;
-  box-shadow: var(--wj-favorite-shadow) !important;
+  color: var(--wj-favorite-active-bg) !important;
+  -webkit-text-fill-color: var(--wj-favorite-active-bg) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 html :is(
   .wanjuan-resource-favorite-filter-active,
   .wanjuan-resource-favorite-filter[aria-pressed="true"],
   .wanjuan-resource-favorite-filter[data-active="true"]
 ):is(:hover, :focus-visible, :active) {
-  color: var(--wj-favorite-active-text) !important;
-  -webkit-text-fill-color: var(--wj-favorite-active-text) !important;
-  background: var(--wj-favorite-active-bg) !important;
-  background-color: var(--wj-favorite-active-bg) !important;
-  border-color: var(--wj-favorite-active-border) !important;
-  box-shadow: var(--wj-favorite-shadow) !important;
+  color: var(--wj-favorite-active-bg) !important;
+  -webkit-text-fill-color: var(--wj-favorite-active-bg) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
   filter: none !important;
   transform: none !important;
 }
@@ -7173,4 +7191,14 @@ html.theme-graphite .wanjuan-performance-dialog-actions button[data-action="down
   background-image: none !important;
   color: var(--wj-text, #fff) !important;
   -webkit-text-fill-color: var(--wj-text, #fff) !important;
+}
+
+/* The desktop theme bridge is injected after renderer styles. Preserve the
+   whole-button selection, including hover, for the canvas dock toggles. */
+html body .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[aria-expanded="true"][class][class][class][class],
+html body .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[aria-expanded="true"][class][class][class][class]:hover {
+  background: var(--wj-control-selected-bg, var(--wj-accent)) !important;
+  background-image: none !important;
+  color: var(--wj-control-selected-text, var(--wj-accent-contrast)) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text, var(--wj-accent-contrast)) !important;
 }

@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = mkdtempSync(join(tmpdir(), "wj-lib-"));
@@ -25,6 +26,8 @@ function compile() {
       "--outDir", outDir,
       join(root, "src/renderer/lib/resource.ts"),
       join(root, "src/renderer/lib/reference-media.ts"),
+      join(root, "src/renderer/lib/generation-reference.ts"),
+      join(root, "src/renderer/lib/gemini-image.ts"),
       join(root, "src/renderer/lib/project-asset-binding.ts"),
       join(root, "src/renderer/lib/node-runtime-contract.ts"),
       join(root, "src/renderer/lib/video-aspect-ratio.ts"),
@@ -33,7 +36,11 @@ function compile() {
       join(root, "src/renderer/lib/global-tasks.ts"),
       join(root, "src/renderer/lib/global-config.ts"),
       join(root, "src/renderer/lib/model-selection.ts"),
+      join(root, "src/renderer/lib/media-model-contract.ts"),
       join(root, "src/renderer/lib/membership-benefits.ts"),
+      join(root, "src/renderer/lib/managed-relay.ts"),
+      join(root, "src/renderer/lib/account-records.ts"),
+      join(root, "src/renderer/lib/app-notifications.ts"),
       join(root, "src/renderer/lib/config-butler.ts"),
       join(root, "src/renderer/lib/jixin-catalog.ts"),
       join(root, "src/renderer/lib/tianji-api.ts"),
@@ -69,16 +76,21 @@ async function run() {
 
   const { wanjuanApplyPersistedTransitResource, wanjuanBuildGeneratedVideoResourcesFromNodes, wanjuanResourceKind, wanjuanResourceSourceKind, wanjuanTransitResourceNeedsPersistence } = await import(pathToFileURL(join(outDir, "resource.js")).href);
   const { wanjuanCollectNodeReferenceMedia, wanjuanIsPublicHttpMediaUrl } = await import(pathToFileURL(join(outDir, "reference-media.js")).href);
+  const { wanjuanAppendConnectedImageReferences, wanjuanAppendImageReferenceFiles, wanjuanBuildOpenAiImageReferencePlan } = await import(pathToFileURL(join(outDir, "generation-reference.js")).href);
+  const { wanjuanBuildGeminiImageTransport } = await import(pathToFileURL(join(outDir, "gemini-image.js")).href);
   const { normalizeVideoAspectRatioValue, normalizeVideoSizeValue } = await import(pathToFileURL(join(outDir, "video-aspect-ratio.js")).href);
   const { applyRunScopedStateUpdate, compactGlobalTasks, failGlobalTaskRefresh, indexGlobalTasks, supersedeActiveNodeTasks, updateTaskRunningProgress } = await import(pathToFileURL(join(outDir, "global-tasks.js")).href);
   const { collectTaskCredentialConfigs, isCurrentSettingsSave, mergeGlobalConfigApiConfigs, replaceGlobalConfigApiConfigs, resolveTaskApiCredential, resolveTaskPollUrl } = await import(pathToFileURL(join(outDir, "global-config.js")).href);
   const { WanJuanShouldAutoPreferredModel } = await import(pathToFileURL(join(outDir, "model-selection.js")).href);
   const membershipBenefits = await import(pathToFileURL(join(outDir, "membership-benefits.js")).href);
+  const managedRelay = await import(pathToFileURL(join(outDir, "managed-relay.js")).href);
+  const accountRecords = await import(pathToFileURL(join(outDir, "account-records.js")).href);
+  const appNotifications = await import(pathToFileURL(join(outDir, "app-notifications.js")).href);
   const videoTask = await import(pathToFileURL(join(outDir, "video-task.js")).href);
   const videoParameterMode = await import(pathToFileURL(join(outDir, "video-parameter-mode.js")).href);
   const nodeRuntime = await import(pathToFileURL(join(outDir, "node-runtime-contract.js")).href);
   const configButler = await import(pathToFileURL(join(outDir, "config-butler.js")).href);
-  const { WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID, WANJUAN_JIXIN_BUILTIN_UNIFIED_VIDEO_MODELS, WANJUAN_JIXIN_BUILTIN_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS, WANJUAN_JIXIN_DEFAULT_API_CONFIG_ID, wanjuanMergeJixinVideoProtocolDefaults, wanjuanSyncJixinBuiltinStoredGlobalConfig } = await import(pathToFileURL(join(outDir, "jixin-catalog.js")).href);
+  const { WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID, WANJUAN_JIXIN_BUILTIN_IMAGE_MODELS, WANJUAN_JIXIN_BUILTIN_IMAGE_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_TEXT_MODELS, WANJUAN_JIXIN_BUILTIN_TEXT_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_UNIFIED_VIDEO_MODELS, WANJUAN_JIXIN_BUILTIN_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS, WANJUAN_JIXIN_DEFAULT_API_CONFIG_ID, wanjuanApplyJixinBuiltinProtocolPatch, wanjuanBuildJixinBuiltinBasePatch, wanjuanMergeJixinVideoProtocolDefaults, wanjuanMigrateJixinBuiltinCatalog, wanjuanSyncJixinBuiltinStoredGlobalConfig } = await import(pathToFileURL(join(outDir, "jixin-catalog.js")).href);
   const {
     WANJUAN_TIANJI_DEFAULT_BASE_URL,
     WANJUAN_TIANJI_SYNC_SOURCE_JIXIN,
@@ -132,35 +144,187 @@ async function run() {
   const arkTrustedAssets = await import(pathToFileURL(join(outDir, "ark-trusted-assets.js")).href);
   const imageEditor = await import(pathToFileURL(join(outDir, "image-editor.js")).href);
   const automationResult = await import(pathToFileURL(join(outDir, "automation-result.js")).href);
+  const { resolveMediaModelContract } = await import(pathToFileURL(join(outDir, "media-model-contract.js")).href);
+  const { getModelBindingCandidatesHelper, updateModelBindingHelper } = await import(pathToFileURL(join(outDir, "model-binding.js")).href);
 
   console.log("运行用例...");
+  const notificationFixtures = [
+    { id: "win", title: "fixture", platforms: ["windows"] },
+    { id: "mac", title: "fixture", platforms: ["macos"] },
+    { id: "linux", title: "fixture", platforms: ["linux"] },
+    { id: "desktop", title: "fixture", platforms: ["desktop"] },
+    { id: "electron", title: "fixture", platforms: ["electron"] },
+    { id: "all", title: "fixture", platforms: ["all"] },
+    { id: "web", title: "fixture", platforms: ["web"] },
+    { id: "mobile", title: "fixture", platforms: ["mobile"] },
+  ];
+  const notificationIds = platform => appNotifications.WanJuanFilterAppNotifications(notificationFixtures,
+    { platform, version: "1.4.8" }).map(item => item.id);
+  check("Windows notifications exclude Mac and Linux", notificationIds("windows"), ["win", "desktop", "electron", "all"]);
+  check("win32 platform alias resolves to Windows", notificationIds("win32"), notificationIds("windows"));
+  check("Mac notifications exclude Windows and Linux", notificationIds("darwin"), ["mac", "desktop", "electron", "all"]);
+  check("Linux notifications exclude Mac and Windows", notificationIds("linux"), ["linux", "desktop", "electron", "all"]);
+  check("web does not inherit desktop-only notifications", notificationIds("web"), ["all", "web"]);
+  check("mobile does not inherit desktop notifications", notificationIds("android"), ["all", "mobile"]);
+  check("unknown platform safely uses web", notificationIds("unknown"), ["all", "web"]);
+  for (const [label, browser, expected] of [
+    ["Windows UA", { userAgent: "Mozilla Windows NT 10.0; Win64; x64", platform: "Win32" }, "windows"],
+    ["Windows UA data", { userAgentData: { platform: "Windows" } }, "windows"],
+    ["Mac UA", { userAgent: "Mozilla Macintosh; Intel Mac OS X", platform: "MacIntel" }, "macos"],
+    ["Mac UA data", { userAgentData: { platform: "macOS" } }, "macos"],
+    ["Linux", { platform: "Linux x86_64" }, "linux"],
+    ["Android with Linux", { userAgent: "Mozilla Linux; Android 14", platform: "Linux arm64" }, "android"],
+    ["iPhone with Mac OS", { userAgent: "iPhone; CPU iPhone OS like Mac OS X" }, "ios"],
+    ["iPad desktop UA", { platform: "MacIntel", maxTouchPoints: 5 }, "ios"],
+    ["no navigator", null, "web"],
+    ["unknown browser", {}, "web"],
+  ]) check(`notification platform detects ${label}`, appNotifications.WanJuanGetNotificationPlatform(browser), expected);
+  check("Windows legacy channel aliases remain compatible",
+    appNotifications.WanJuanFilterAppNotifications(["win", "win32", "win64", "mac", "darwin"].map(id =>
+      ({ id, title: "fixture", platforms: [id] })), { platform: "windows", version: "1.4.8" }).map(item => item.id), ["win", "win32", "win64"]);
+  check("notification version/time boundaries still apply",
+    appNotifications.WanJuanFilterAppNotifications([
+      { id: "future-version", title: "fixture", platforms: ["windows"], min_version: "1.5.0" },
+      { id: "future-start", title: "fixture", platforms: ["windows"], start_at: "2030-01-01" },
+      { id: "expired", title: "fixture", platforms: ["windows"], end_at: "2020-01-01" },
+      { id: "valid", title: "fixture", platforms: ["windows"], min_version: "1.4.8" },
+    ], { platform: "windows", version: "1.4.8", now: Date.parse("2026-10-26T00:00:00Z") }).map(item => item.id), ["valid"]);
+  const windowsNotificationContext = {
+    exports: {}, navigator: { userAgent: "Windows NT 10.0", platform: "Win32" },
+    localStorage: { getItem: () => JSON.stringify({ items: notificationFixtures }) },
+  };
+  runInNewContext(readFileSync(join(outDir, "app-notifications.js"), "utf8"), windowsNotificationContext);
+  const windowsNotifications = windowsNotificationContext.exports;
+  check("Windows module default is detected rather than hardcoded macOS", windowsNotifications.WANJUAN_APP_NOTIFICATION_PLATFORM, "windows");
+  check("Windows default filter hides Mac-specific notifications",
+    windowsNotifications.WanJuanFilterAppNotifications(notificationFixtures).map(item => item.id), ["win", "desktop", "electron", "all"]);
+  check("cached notifications use the same Windows platform filter",
+    windowsNotifications.WanJuanLoadCachedAppNotifications().map(item => item.id), ["win", "desktop", "electron", "all"]);
+  const mediaProtocol = { category: "video", requestType: "json-video", parameterOptions: { durations: ["5", "10"] } };
+  const mediaImageProtocol = { category: "image", requestType: "gemini-generate-content", parameterAdapter: { fixedImageSize: "1K" } };
+  const mediaConfigs = [{ id: "relay", url: "https://relay.invalid", key: "relay-fixture" }, { id: "official", url: "https://official.invalid", key: "official-fixture" }];
+  const mediaOptions = {
+    category: "video", model: "fixture.video/v1", apiConfigs: mediaConfigs,
+    apiBindings: { "fixture-video-v1": "relay" }, protocolBindings: { "fixture-video-v1": "custom-video" },
+    registry: { "custom-video": mediaProtocol, "custom-image": mediaImageProtocol },
+  };
+  const resolvedMedia = resolveMediaModelContract(mediaOptions);
+  check("media controls resolve normalized model aliases to request protocol", resolvedMedia.protocol, mediaProtocol);
+  check("media model binding resolves normalized channel", resolvedMedia.apiConfig.id, "relay");
+  check("media explicit node channel takes priority over global model default", resolveMediaModelContract({ ...mediaOptions, selectedApiConfigId: "official" }).apiConfig.id, "official");
+  check("media generate callback channel takes priority over saved node channel", resolveMediaModelContract({ ...mediaOptions, selectedApiConfigId: "relay", apiBindingId: "official" }).apiConfig.id, "official");
+  check("media protocol resolver preserves exact custom contract identity", resolvedMedia.protocol === mediaProtocol, true);
+  check("media resolver does not overwrite manual configs", mediaConfigs[1].key, "official-fixture");
+  const channelSpecificVideo = { ...mediaConfigs[0], videoProtocolBindings: { "fixture-video-v1": "relay-video" } };
+  const officialSpecificVideo = { ...mediaConfigs[1], videoProtocolBindings: { "fixture-video-v1": "official-video" } };
+  const channelSpecificRegistry = {
+    "relay-video": mediaProtocol,
+    "official-video": { category: "video", requestType: "multipart-video", parameterOptions: { durations: ["4", "6"] } },
+    "global-video": { category: "video", requestType: "openai-video" },
+  };
+  const boundChannelOptions = { category: "video", model: "fixture.video/v1", apiConfigs: [channelSpecificVideo, officialSpecificVideo], apiBindings: { "fixture-video-v1": "relay" }, protocolBindings: { "fixture-video-v1": "global-video" }, registry: channelSpecificRegistry };
+  check("media selected relay uses its per-channel protocol", resolveMediaModelContract(boundChannelOptions).protocolName, "relay-video");
+  check("media selected official endpoint uses a distinct protocol for the same model", resolveMediaModelContract({ ...boundChannelOptions, selectedApiConfigId: "official" }).protocolName, "official-video");
+  check("media explicit request channel selects the matching channel protocol", resolveMediaModelContract({ ...boundChannelOptions, apiBindingId: "official" }).protocolName, "official-video");
+  check("media empty channel protocol falls back to the legacy global model profile", resolveMediaModelContract({ ...boundChannelOptions, apiConfigs: [{ ...channelSpecificVideo, videoProtocolBindings: {} }] }).protocolName, "global-video");
+  check("media image channel protocol does not leak into video contract", resolveMediaModelContract({ ...boundChannelOptions, apiConfigs: [{ ...channelSpecificVideo, videoProtocolBindings: {}, imageProtocolBindings: { "fixture-video-v1": "relay-video" } }] }).protocolName, "global-video");
+  check("media rejects a channel profile with the wrong category", resolveMediaModelContract({ ...boundChannelOptions, apiConfigs: [{ ...channelSpecificVideo, videoProtocolBindings: { "fixture-video-v1": "custom-image" } }], registry: { "custom-image": mediaImageProtocol } }).protocolCategoryMismatch, true);
+  check("media flags a deleted per-channel profile instead of silently inferring another route", resolveMediaModelContract({ ...boundChannelOptions, apiConfigs: [{ ...channelSpecificVideo, videoProtocolBindings: { "fixture-video-v1": "deleted-profile" } }] }).protocolConfigMissing, true);
+  check("media image UI and request share fixed size via alias", resolveMediaModelContract({ ...mediaOptions, category: "image", protocolBindings: { "fixture-video-v1": "custom-image" } }).protocol.parameterAdapter.fixedImageSize, "1K");
+  check("media video cannot consume image protocol", resolveMediaModelContract({ ...mediaOptions, protocolBindings: { "fixture-video-v1": "custom-image" } }).protocol, undefined);
+  check("media invalid category cannot leak protocol name to request inference", resolveMediaModelContract({ ...mediaOptions, protocolBindings: { "fixture-video-v1": "custom-image" } }).protocolName, "");
+  check("media legacy category-less custom profiles are preserved", resolveMediaModelContract({ ...mediaOptions, registry: { "custom-video": { requestType: "json-video" } } }).protocol.requestType, "json-video");
+  check("media empty node bindings fall back to live global bindings", resolveMediaModelContract({ ...mediaOptions, protocolBindings: {}, fallbackProtocolBindings: mediaOptions.protocolBindings }).protocol, mediaProtocol);
+  check("media node protocol binding wins over global fallback", resolveMediaModelContract({ ...mediaOptions, fallbackProtocolBindings: { "fixture-video-v1": "custom-image" } }).protocol, mediaProtocol);
+  check("media unknown selected channel does not resolve unrelated config", resolveMediaModelContract({ ...mediaOptions, selectedApiConfigId: "removed" }).apiConfig, undefined);
+  check("media legacy unbound models remain unbound", resolveMediaModelContract({ category: "video", model: "unknown" }).protocol, undefined);
+  check("media same exact custom model spelling wins over normalized candidate", resolveMediaModelContract({ ...mediaOptions, apiBindings: { "fixture.video/v1": "official", "fixture-video-v1": "relay" } }).apiConfig.id, "official");
+  check("media alias graph expands despite normalized seed already in candidates", getModelBindingCandidatesHelper("veo_3_1-fast").includes("veo3-1-fast-components"), true);
+  check("media alias graph cycles terminate without duplicates", new Set(getModelBindingCandidatesHelper("veo-3-1-fast")).size, getModelBindingCandidatesHelper("veo-3-1-fast").length);
+  const aliasBindingsToClear = { "veo3-1-fast-components": "old", "veo_3_1-fast": "stale", other: "preserved" };
+  check("media clearing a model binding removes imported aliases", updateModelBindingHelper(aliasBindingsToClear, "veo-3-1-fast", ""), { other: "preserved" });
+  check("media changing a model binding consolidates only its aliases", updateModelBindingHelper(aliasBindingsToClear, "veo-3-1-fast", "new"), { other: "preserved", "veo-3-1-fast": "new" });
+  check("media binding edits preserve input config", aliasBindingsToClear["veo_3_1-fast"], "stale");
+  check("media relay alias resolves parameter protocol without renaming wire model", resolveMediaModelContract({ ...mediaOptions, model: "veo_3_1-fast", protocolBindings: { "veo3-1-fast-components": "custom-video" } }).protocol, mediaProtocol);
+  managedRelay.setManagedRelayRuntimeState({ status: "pending", managed: true, keyVersion: "" });
+  check("pending relay does not inject a managed credential", managedRelay.wanjuanResolveManagedRelayConfig([], ""), undefined);
+  managedRelay.setManagedRelayRuntimeState({ status: "active", managed: true, keyVersion: "1" });
+  check(
+    "active relay injects an ephemeral managed configuration when no saved config exists",
+    managedRelay.wanjuanResolveManagedRelayConfig([], "missing"),
+    {
+      id: "jixin-default",
+      name: "极鑫托管配置",
+      url: "https://jixing.guancn.uk",
+      key: "__WANJUAN_MANAGED_RELAY__",
+      protocolFormat: "auto",
+      managed: true,
+    },
+  );
+  const manualRelayConfig = { id: "manual", name: "Manual", url: "https://jixing.guancn.uk", key: "manual-secret" };
+  check("saved manual configuration always wins over managed fallback", managedRelay.wanjuanResolveManagedRelayConfig([manualRelayConfig], "manual"), manualRelayConfig);
+  check("renderer managed relay accepts only the exact HTTPS origin", [
+    managedRelay.wanjuanIsManagedRelayUrl("https://jixing.guancn.uk/v1/models"),
+    managedRelay.wanjuanIsManagedRelayUrl("https://user:secret@jixing.guancn.uk/v1/models"),
+    managedRelay.wanjuanIsManagedRelayUrl("https://jixing.guancn.uk:8443/v1/models"),
+    managedRelay.wanjuanIsManagedRelayUrl("http://jixing.guancn.uk/v1/models"),
+  ], [true, false, false, false]);
+  managedRelay.setManagedRelayRuntimeState(null);
+  check("account record pagination normalizes nextCursor", accountRecords.wanjuanAccountRecordsPage({ records: [{ id: "r1" }], nextCursor: "page-2" }), { items: [{ id: "r1" }], nextCursor: "page-2", hasMore: true });
+  check("account record pagination deduplicates overlapping pages", accountRecords.wanjuanMergeAccountRecordPages([{ id: "r1" }], [{ id: "r1" }, { id: "r2" }]).map((item) => item.id), ["r1", "r2"]);
+  check("stale account record responses are rejected after account switch", accountRecords.wanjuanAccountRecordRequestIsCurrent({ cancelled: false, requestScope: "account-a", currentScope: "account-b", requestId: 3, currentRequestId: 3 }), false);
+  check("superseded account record responses are rejected within one account", accountRecords.wanjuanAccountRecordRequestIsCurrent({ cancelled: false, requestScope: "account-a", currentScope: "account-a", requestId: 2, currentRequestId: 3 }), false);
+  const recordTimeRange = accountRecords.wanjuanBuildAccountRecordTimeRange("2026-10-01", "2026-10-02");
+  check("account record dates become timezone-explicit RFC3339 instants", [recordTimeRange.from.endsWith("Z"), recordTimeRange.to.endsWith("Z"), Date.parse(recordTimeRange.to) - Date.parse(recordTimeRange.from)], [true, true, 2 * 24 * 60 * 60 * 1000]);
+  let invalidRecordRange = ``;
+  try { accountRecords.wanjuanBuildAccountRecordTimeRange("2026-10-03", "2026-10-01"); } catch (error) { invalidRecordRange = error.message; }
+  check("reversed account record date range fails closed", invalidRecordRange, "账单日期范围无效");
   const nativePanelSource = readFileSync(join(root, "src/renderer/components/tianji-settings-native.tsx"), "utf8");
   const preloadPanelSource = readFileSync(join(root, "electron/preload/desktop-patches.cjs"), "utf8");
   const cloudWorkspaceSource = readFileSync(join(root, "electron/preload/cloud-prompt-workspace.cjs"), "utf8");
   const accountGateSource = readFileSync(join(root, "src/renderer/components/account-gate.tsx"), "utf8");
+  const accountLibSource = readFileSync(join(root, "src/renderer/lib/account.ts"), "utf8");
   const bootThemeSource = readFileSync(join(root, "electron/preload/boot-theme.cjs"), "utf8");
   const desktopWindowSource = readFileSync(join(root, "electron/main/window.cjs"), "utf8");
   const startupReadiness = await import(pathToFileURL(join(root, "electron/shared/startup-readiness.cjs")).href);
   const appBundleSource = readFileSync(join(root, "src/renderer/bundle/index.js"), "utf8");
   const videoGenerationSource = readFileSync(join(root, "src/renderer/hooks/useVideoGeneration.ts"), "utf8");
+  const imageGenerationSource = readFileSync(join(root, "src/renderer/hooks/useImageGeneration.ts"), "utf8");
   const videoNodeSource = readFileSync(join(root, "src/renderer/components/video-node.tsx"), "utf8");
   const renderModeSource = readFileSync(join(root, "src/renderer/components/render-mode.tsx"), "utf8");
   const desktopIpcSource = readFileSync(join(root, "electron/main/ipc.cjs"), "utf8");
   const tianjiApiSource = readFileSync(join(root, "src/renderer/lib/tianji-api.ts"), "utf8");
   const accountSettingsSource = readFileSync(join(root, "src/renderer/components/settings-account-tab.tsx"), "utf8");
+  const accountRelayWalletSource = readFileSync(join(root, "src/renderer/components/account-relay-wallet.tsx"), "utf8");
+  const managedRelaySource = readFileSync(join(root, "src/renderer/lib/managed-relay.ts"), "utf8");
+  const safeApiEffectSource = readFileSync(join(root, "src/renderer/hooks/useSafeEffect19.ts"), "utf8");
   const membershipDialogSource = readFileSync(join(root, "src/renderer/components/membership-benefits-dialog.tsx"), "utf8");
   const imageEditorModalSource = readFileSync(join(root, "src/renderer/components/image-annotate-modal.tsx"), "utf8");
   const mediaEditorsSource = readFileSync(join(root, "src/renderer/hooks/useMediaEditors.ts"), "utf8");
   const membershipSnapshot = { plan: "free", status: "inactive" };
   const successNotifications = [];
   const copiedValues = [];
-  check("membership exposes exactly three benefits", membershipBenefits.WANJUAN_MEMBERSHIP_BENEFITS.length, 3);
+  check("membership exposes two non-pricing benefits", membershipBenefits.WANJUAN_MEMBERSHIP_BENEFITS.length, 2);
   check("membership price stays informational", membershipDialogSource.includes("¥</span>19.9") && !membershipDialogSource.includes("已开通"), true);
+  check("account registration is not described as invite-only", membershipDialogSource.includes("注册账号无需内测码；会员服务详情请联系 QQ：") && !membershipDialogSource.includes("开通会员需要内测码"), true);
   check("membership button opens an accessible dialog", accountSettingsSource.includes("会员权益") && membershipDialogSource.includes('role="dialog"') && membershipDialogSource.includes('aria-modal="true"'), true);
+  check("account center exposes relay wallet and billing surfaces", ["极鑫托管服务", "模型余额", "账单与使用记录"].every((label) => accountRelayWalletSource.includes(label)), true);
+  check("relay key is only held temporarily in renderer memory", accountRelayWalletSource.includes("setTimeout(() => setRevealedKey(``), 60_000)") && !accountRelayWalletSource.includes("localStorage"), true);
+  check("managed relay uses only an opaque renderer placeholder", managedRelaySource.includes("__WANJUAN_MANAGED_RELAY__") && !managedRelaySource.includes("sk-"), true);
+  check("managed relay never overrides a configured manual key", safeApiEffectSource.includes("String(config.key || ``).trim() || wanjuanManagedRelayPlaceholderFor(config)") && managedRelaySource.includes("if (selected) return selected"), true);
+  check("managed relay creates only an ephemeral fallback", managedRelaySource.includes("wanjuanResolveManagedRelayConfig") && managedRelaySource.includes("if (!wanjuanManagedRelayAvailable()) return undefined"), true);
+  check("account wallet obeys all four feature flags", ["relayAutoProvision", "relayManagedConfig", "relayWalletUi", "relayRedeem"].every((flag) => accountRelayWalletSource.includes(flag)), true);
+  check("production auth defaults to OTP unless public capabilities explicitly enable password flows", accountGateSource.includes('useState<"password" | "otp" | "reset">("otp")') && accountGateSource.includes("passwordAuthEnabled") && accountGateSource.includes("passwordRegistrationEnabled") && accountGateSource.includes("passwordResetEnabled"), true);
+  check("renderer account refreshes are scoped to the active identity epoch", accountLibSource.includes("accountStateEpoch") && accountLibSource.includes("requestScope === accountRequestScope()") && accountLibSource.includes("accountIdentityScopeKey"), true);
+  check("wallet UI clears sensitive and billing state on account scope changes", ["setRevealedKey(``)", "setRedeemCode(``)", "setUsageRecords([])", "setWalletRecords([])", "accountScopeRef.current !== requestScope"].every((entry) => accountRelayWalletSource.includes(entry)), true);
+  check("account wallet represents provisioning failure states", ["正在创建账号与 Key", "服务暂时不可用，后台重试中", "账号已暂停，模型调用已停用", "自动开通失败，请稍后刷新或联系客服"].every((label) => accountRelayWalletSource.includes(label)), true);
+  check("legacy account linking uses a stable renderer idempotency key", accountRelayWalletSource.includes("linkIdempotencyKey.current") && accountRelayWalletSource.includes("confirmRelayLink(verificationCode, legacyChallenge, linkIdempotencyKey.current)"), true);
+  check("legacy account linking clears ephemeral credentials and challenge together", accountRelayWalletSource.includes("const resetLinkFlow = () =>") && ["setLegacyPassword(``)", "setLegacyMfaCode(``)", "setLegacyChallenge(``)", "setVerificationCode(``)"].every((entry) => accountRelayWalletSource.includes(entry)), true);
+  check("password auth is capability-gated and keeps OTP compatibility", accountGateSource.includes('activeLoginMethod === "otp"') && accountGateSource.includes('loginMethod === "reset"') && accountGateSource.includes("passwordRegistrationEnabled") && accountGateSource.includes("resetAccountPassword") && !accountGateSource.includes("inviteCode"), true);
   check("membership dialog supports escape, backdrop and focus return", membershipDialogSource.includes('event.key === "Escape"') && membershipDialogSource.includes("event.target === event.currentTarget") && membershipDialogSource.includes("previousFocus?.focus()"), true);
   check("image editor catches canvas export and async save errors", imageEditorModalSource.includes("canvasRef.current.toDataURL") && imageEditorModalSource.includes("await onSave(result)") && imageEditorModalSource.includes("catch (error: any)"), true);
   check("image editor zooms with an ordinary mouse wheel", imageEditorModalSource.includes("event.preventDefault();") && imageEditorModalSource.includes("event.stopPropagation();") && !imageEditorModalSource.includes("if (!(event.ctrlKey || event.metaKey)) return;"), true);
-  check("image editor persists results before replacing canvas media", mediaEditorsSource.includes("persistProjectAsset") && mediaEditorsSource.includes("wanjuanApplyEditedImageToCanvasNodes") && mediaEditorsSource.includes("if (!persisted?.ok || !persisted.localPath)"), true);
+  check("image editor persists results before adding derived canvas media", mediaEditorsSource.includes("persistProjectAsset") && mediaEditorsSource.includes("wanjuanAppendEditedImageToCanvasNodes") && mediaEditorsSource.includes("if (!persisted?.ok || !persisted.localPath)"), true);
   check("membership state is not mutated by benefits dialog", membershipSnapshot, { plan: "free", status: "inactive" });
   check("membership copy succeeds", await membershipBenefits.copyMembershipContactQQ({ clipboard: { writeText: async (value) => copiedValues.push(value) }, notify: (message) => successNotifications.push(message) }), true);
   check("membership copy writes only contact QQ", copiedValues, [membershipBenefits.WANJUAN_MEMBERSHIP_CONTACT_QQ]);
@@ -181,6 +345,13 @@ async function run() {
   check("tianji manual collection keeps reviewed portraits out of image refs", videoGenerationSource.includes("wanjuanCollectTianjiManualPortraitInputs") && videoGenerationSource.includes("portraitAssetIds: seedanceConnectedPortraitAssetIds") && !videoGenerationSource.includes("addVideoReferenceImage(wanjuanTianjiPortraitReferenceFromNodeData(sourceNode.data))"), true);
   check("rendered node props are registered as the freshest runtime snapshot", renderModeSource.includes("renderedNodes?.set?.(props.id, { id: props.id, type: nodeType, data: props.data })") && renderModeSource.includes("renderedNodes.delete(props.id)"), true);
   check("manual video generation captures React Flow topology once and only supplements stale runtime snapshots", videoGenerationSource.includes("flowNodesSnapshot = [...(getNodes() || [])]") && videoGenerationSource.includes("flowEdgesSnapshot = [...(getEdges() || [])]") && videoGenerationSource.includes("wanjuanResolveTianjiGenerationCanvasSnapshot") && !videoGenerationSource.includes("wanjuanPreferCurrentCanvasNodes"), true);
+  check("video generation preserves opaque connected image URLs", videoGenerationSource.includes("wanjuanAppendConnectedImageReferences(sourceReferenceImages, addVideoReferenceImage") && !videoGenerationSource.includes("/\\.(jpg|jpeg|png|webp|gif)($|\\?)/i.test(imageUrl)"), true);
+  check("image generation selects edits from protocol capability", imageGenerationSource.includes("wanjuanBuildOpenAiImageReferencePlan") && imageGenerationSource.includes("openAiImageReferencePlan.useEdit"), true);
+  check("image generation blocks instead of silently dropping unreadable connected references", imageGenerationSource.includes("Failed to normalize a connected image reference for image generation") && imageGenerationSource.includes("参考图读取失败，请重新连接图片后再试"), true);
+  check("image generation blocks unsupported references instead of silently generating without them", imageGenerationSource.includes("当前图片模型协议未配置参考图字段或编辑接口，已停止生成以避免忽略参考图") && imageGenerationSource.includes("imageProtocolProfile.fieldMapping?.referenceImage"), true);
+  check("Gemini image generation sends native inline reference parts and IMAGE modality", imageGenerationSource.includes("contentParts.push({\n                inlineData:") && imageGenerationSource.includes("responseModalities: [`IMAGE`]") , true);
+  check("Gemini image generation applies the protocol fixed 1K limit before request serialization", /if \(geminiImageTransport\.fixedImageSize\) requestParams\.imageSize = geminiImageTransport\.fixedImageSize;[\s\S]{0,120}let requestBody = \{/.test(imageGenerationSource), true);
+  check("Gemini gateway transport is used by the real image-generation path", imageGenerationSource.includes("wanjuanBuildGeminiImageTransport") && imageGenerationSource.includes("fetch(geminiImageTransport.requestUrl") && imageGenerationSource.includes("headers: geminiImageTransport.headers"), true);
   check("packaged Tianji preflight validates and blocks upstream", desktopIpcSource.includes("inspectTianjiGenerationRequest") && desktopIpcSource.includes("validateTianjiGenerationRequest") && desktopIpcSource.includes("if (preflight) return preflight"), true);
   check("tianji badges require ready id and trusted source", [readFileSync(join(root, "src/renderer/components/image-node.tsx"), "utf8"), readFileSync(join(root, "src/renderer/components/prompt-node.tsx"), "utf8")].every((source) => source.includes("String(data.tianjiPortraitAssetId || ``).trim()") && source.includes("data.sourceOrigin === `tianji-portrait`")), true);
   check("tianji request diagnostics expose only scheme counts", tianjiApiSource.includes('imageSchemes: referenceSchemeCounts([') && !tianjiApiSource.includes('promptPreview:') && !tianjiApiSource.includes('imageRefs: imageUrls.map'), true);
@@ -393,6 +564,58 @@ async function run() {
     "reference grid merge image is not duplicated",
     wanjuanCollectNodeReferenceMedia({ type: "gridMergeNode", data: { imageUrl: "https://cdn/merged.png" } }),
     { images: ["https://cdn/merged.png"], videos: [] }
+  );
+  check(
+    "opaque generated image URL remains a connected image reference",
+    wanjuanCollectNodeReferenceMedia({ type: "imageNode", data: { imageUrl: "https://media.example.invalid/content?id=opaque", mediaKind: "image" } }),
+    { images: ["https://media.example.invalid/content?id=opaque"], videos: [] }
+  );
+  check(
+    "explicit compatible image edit protocol uses multipart edits",
+    wanjuanBuildOpenAiImageReferencePlan({ requestProtocol: "openai-images", referenceCount: 1, modelName: "Z-Image-Turbo", editPath: "/v1/images/edits", referenceImageField: "image[{index}]" }),
+    { useEdit: true, editPath: "/v1/images/edits", referenceImageField: "image[{index}]", hasExplicitEditCapability: true }
+  );
+  check(
+    "explicit edit endpoint uses the default image field when no custom field is needed",
+    wanjuanBuildOpenAiImageReferencePlan({ requestProtocol: "openai-images", referenceCount: 1, modelName: "Z-Image-Turbo", editPath: "/v1/images/edits", referenceImageField: "image" }),
+    { useEdit: true, editPath: "/v1/images/edits", referenceImageField: "image", hasExplicitEditCapability: true }
+  );
+  const capturedVideoReferences = [];
+  check(
+    "video request collection appends an opaque connected image",
+    wanjuanAppendConnectedImageReferences(["https://media.example.invalid/content?id=opaque"], (url, meta) => capturedVideoReferences.push({ url, sourceNodeId: meta.sourceNodeId }), { sourceNodeId: "source-image" }),
+    1
+  );
+  check(
+    "video request capture contains the connected opaque image",
+    capturedVideoReferences,
+    [{ url: "https://media.example.invalid/content?id=opaque", sourceNodeId: "source-image" }]
+  );
+  const imageEditForm = new FormData();
+  check(
+    "image edit request appends one reference file",
+    await wanjuanAppendImageReferenceFiles(imageEditForm, ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="], { fieldTemplate: "image[{index}]" }),
+    1
+  );
+  check("image edit request uses indexed multipart field", [...imageEditForm.keys()], ["image[0]"]);
+  let failedImageReferenceMessage = "";
+  try {
+    await wanjuanAppendImageReferenceFiles(new FormData(), ["https://media.example.invalid/missing"], {
+      fetchImpl: async () => ({ ok: false, status: 404 }),
+    });
+  } catch (error) {
+    failedImageReferenceMessage = String(error?.message || error);
+  }
+  check("failed image edit reference blocks unreferenced fallback", failedImageReferenceMessage, "参考图读取失败（HTTP 404）");
+  check(
+    "plain OpenAI generation protocol does not invent edit support",
+    wanjuanBuildOpenAiImageReferencePlan({ requestProtocol: "openai-images", referenceCount: 1, modelName: "dall-e-3" }),
+    { useEdit: false, editPath: "", referenceImageField: "", hasExplicitEditCapability: false }
+  );
+  check(
+    "vectorengine compatibility keeps its JSON reference path",
+    wanjuanBuildOpenAiImageReferencePlan({ requestProtocol: "openai-images", referenceCount: 1, modelName: "gpt-image-1", vectorengineOpenAiCompatRequest: true, editPath: "/v1/images/edits", referenceImageField: "image" }),
+    { useEdit: false, editPath: "/v1/images/edits", referenceImageField: "image", hasExplicitEditCapability: true }
   );
   check(
     "reference prefers matching local project binding over expiring public URL",
@@ -636,6 +859,78 @@ async function run() {
   check("size normalize", normalizeVideoSizeValue("1280 x 720"), "1280x720");
   check("size fallback", normalizeVideoSizeValue("nope"), "1280x720");
   check("jixin unified video contains wan t2v", WANJUAN_JIXIN_BUILTIN_UNIFIED_VIDEO_MODELS.includes("wan2.7-t2v-1080P"), true);
+  check("jixin text catalog contains Claude Opus 5", WANJUAN_JIXIN_BUILTIN_TEXT_MODELS.includes("claude-opus-5"), true);
+  check("jixin text catalog contains Gemini 3.8 Flash", WANJUAN_JIXIN_BUILTIN_TEXT_MODELS.includes("gemini-3.8-flash"), true);
+  check("Claude Opus 5 uses the production type1 OpenAI contract", WANJUAN_JIXIN_BUILTIN_TEXT_PROTOCOLS["claude-opus-5"], "极鑫文本兼容");
+  check("Gemini 3.8 Flash uses the production type1 OpenAI contract", WANJUAN_JIXIN_BUILTIN_TEXT_PROTOCOLS["gemini-3.8-flash"], "极鑫文本兼容");
+  check("jixin image catalog contains Gemini 3.1 Flash Lite Image", WANJUAN_JIXIN_BUILTIN_IMAGE_MODELS.includes("gemini-3.1-flash-lite-image"), true);
+  check("Gemini Flash Lite Image has an explicit native candidate binding", WANJUAN_JIXIN_BUILTIN_IMAGE_PROTOCOLS["gemini-3.1-flash-lite-image"], "极鑫 Gemini Lite 图片原生（实验）");
+  check(
+    "Gemini Flash Lite Image candidate stays native, experimental and fixed to 1K",
+    WANJUAN_JIXIN_BUILTIN_PROTOCOLS["极鑫 Gemini Lite 图片原生（实验）"],
+    {
+      category: "image",
+      requestType: "gemini-generate-content",
+      submitPath: "/v1beta/models/{model}:generateContent",
+      contentType: "application/json",
+      experimental: true,
+      parameterAdapter: { sizeValueMode: "preset", aspectRatioValueMode: "ratio", fixedImageSize: "1K" },
+      validationNotes: [
+        "Google 原生契约仅支持 1K；生产 type1 渠道尚无成功调用样本。",
+        "参考图仅按 Gemini inline_data/file part 发送，不假定 OpenAI Images 编辑协议可用。",
+      ],
+      responseMapping: { image: ["candidates.0.content.parts.0.inlineData.data", "candidates.0.content.parts.0.inline_data.data"] },
+    },
+  );
+  const nativeGeminiImageProtocol = WANJUAN_JIXIN_BUILTIN_PROTOCOLS["极鑫 Gemini Lite 图片原生（实验）"];
+  check(
+    "Jixin Gemini image transport uses bearer auth without leaking the key into the URL",
+    wanjuanBuildGeminiImageTransport({ apiBaseUrl: "https://jixing.example.test", apiKey: "test-secret", model: "gemini-3.1-flash-lite-image", protocol: nativeGeminiImageProtocol }),
+    {
+      requestUrl: "https://jixing.example.test/v1beta/models/gemini-3.1-flash-lite-image:generateContent",
+      headers: { Authorization: "Bearer test-secret", "Content-Type": "application/json" },
+      fixedImageSize: "1K",
+      directGoogleApi: false,
+    },
+  );
+  check(
+    "direct Google Gemini image transport keeps query-key auth",
+    wanjuanBuildGeminiImageTransport({ apiBaseUrl: "https://generativelanguage.googleapis.com", apiKey: "test-secret", model: "gemini-3.1-flash-lite-image", protocol: nativeGeminiImageProtocol }),
+    {
+      requestUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-image:generateContent?key=test-secret",
+      headers: { "Content-Type": "application/json" },
+      fixedImageSize: "1K",
+      directGoogleApi: true,
+    },
+  );
+  const manuallyBoundModels = wanjuanApplyJixinBuiltinProtocolPatch({
+    textModelProtocolBindings: { "claude-opus-5": "用户 Claude 协议" },
+    textModelApiBindings: { "claude-opus-5": "manual-api" },
+  });
+  check("catalog migration preserves a manual protocol binding", manuallyBoundModels.textModelProtocolBindings["claude-opus-5"], "用户 Claude 协议");
+  check("catalog migration preserves a manual API binding", manuallyBoundModels.textModelApiBindings["claude-opus-5"], "manual-api");
+  const seededNewModels = wanjuanBuildJixinBuiltinBasePatch({
+    textModel: "custom-text-model",
+    textModelApiBindings: { "custom-text-model": "manual-api" },
+    textModelProtocolBindings: { "custom-text-model": "用户文本协议" },
+  });
+  check("new built-in text models merge without deleting manual catalog entries", String(seededNewModels.textModel).split("\n").includes("custom-text-model"), true);
+  check("new built-in text models keep manual API bindings", seededNewModels.textModelApiBindings["custom-text-model"], "manual-api");
+  check("new built-in text models keep manual protocol bindings", seededNewModels.textModelProtocolBindings["custom-text-model"], "用户文本协议");
+  const manualCatalogMigration = wanjuanMigrateJixinBuiltinCatalog({
+    activeStoredGlobalConfigId: "manual-preset",
+    textModel: "custom-text-model",
+    drawingModel: "custom-image-model",
+    textModelApiBindings: { "custom-text-model": "manual-api" },
+    imageModelApiBindings: { "custom-image-model": "manual-api" },
+    textModelProtocolBindings: { "custom-text-model": "用户文本协议" },
+    imageModelProtocolBindings: { "custom-image-model": "用户图片协议" },
+    storedGlobalConfigs: [{ id: "manual-preset", config: { textModel: "custom-text-model" } }],
+  });
+  check("catalog migration does not mix built-in text models into an active manual preset", manualCatalogMigration.textModel, "custom-text-model");
+  check("catalog migration does not mix built-in image models into an active manual preset", manualCatalogMigration.drawingModel, "custom-image-model");
+  check("catalog migration preserves active manual protocol maps", manualCatalogMigration.textModelProtocolBindings, { "custom-text-model": "用户文本协议" });
+  check("catalog migration refreshes only the separate stored built-in preset", manualCatalogMigration.storedGlobalConfigs.some((config) => config.id === WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID && String(config.config.textModel).includes("claude-opus-5")), true);
   check("jixin unified video contains grok image video", WANJUAN_JIXIN_BUILTIN_UNIFIED_VIDEO_MODELS.includes("grok-image-video"), true);
   check("jixin grok image video protocol binding", WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS["grok-image-video"], "极鑫 Grok Image Video 兼容");
   check(

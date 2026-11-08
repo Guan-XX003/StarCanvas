@@ -640,13 +640,62 @@ function validateExternalProjectAssetFiles(assetFiles = []) {
   };
 }
 
+const RESERVED_PROJECT_ASSET_IDS = new Set(["_blobs", "_projects", "_trash", "_migrations"]);
+
+function assertSafeProjectAssetProjectId(value) {
+  const projectId = String(value || "").trim();
+  if (
+    !projectId ||
+    projectId.length > 128 ||
+    projectId.startsWith("_") ||
+    RESERVED_PROJECT_ASSET_IDS.has(projectId.toLowerCase()) ||
+    !(projectId === "default" || /^(?:proj|project|recovered)-[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(projectId))
+  ) {
+    throw new Error("PROJECT_ASSET_PROJECT_ID_INVALID");
+  }
+  return projectId;
+}
+
+function resolveExternalAssetManifestFile(folderPath, entry = {}) {
+  const filename = String(entry?.filename || "").trim();
+  if (!filename || path.basename(filename) !== filename) return "";
+  try {
+    const requestedRoot = path.resolve(folderPath);
+    if (fs.lstatSync(requestedRoot).isSymbolicLink()) return "";
+    const root = fs.realpathSync(requestedRoot);
+    if (!fs.statSync(root).isDirectory()) return "";
+    const candidate = path.resolve(root, filename);
+    if (path.dirname(candidate) !== root) return "";
+    const linkStat = fs.lstatSync(candidate);
+    if (linkStat.isSymbolicLink() || !linkStat.isFile()) return "";
+    const realCandidate = fs.realpathSync(candidate);
+    if (path.dirname(realCandidate) !== root) return "";
+    const stat = fs.statSync(realCandidate);
+    const expectedSize = Number(entry?.size || 0);
+    if (expectedSize > 0 && stat.size !== expectedSize) return "";
+    const expectedSha = String(entry?.sha256 || "").trim().toLowerCase();
+    if (expectedSha && sha256File(realCandidate).toLowerCase() !== expectedSha) return "";
+    return realCandidate;
+  } catch {
+    return "";
+  }
+}
+
 function copyExternalProjectAssetFiles(targetJsonPath, assetFiles = [], requestedFolderName = "") {
   const entries = Array.isArray(assetFiles) ? assetFiles.filter(Boolean) : [];
   if (!entries.length) return null;
   const parsed = path.parse(targetJsonPath);
-  const folderName = sanitizeFilename(requestedFolderName || `${parsed.name}-external-assets`);
-  const folderPath = path.join(parsed.dir, folderName);
-  fs.mkdirSync(folderPath, { recursive: true });
+  const requestedName = sanitizeFilename(requestedFolderName || `${parsed.name}-external-assets`);
+  let folderName = requestedName;
+  let folderPath = path.join(parsed.dir, folderName);
+  let suffix = 1;
+  while (fs.existsSync(folderPath)) {
+    folderName = `${requestedName}-${suffix}`;
+    folderPath = path.join(parsed.dir, folderName);
+    suffix += 1;
+  }
+  fs.mkdirSync(parsed.dir, { recursive: true });
+  const stagingPath = fs.mkdtempSync(path.join(parsed.dir, `.starcanvas-external-assets-${process.pid}-`));
   const manifest = {
     version: 2,
     exportedAt: new Date().toISOString(),
@@ -654,69 +703,87 @@ function copyExternalProjectAssetFiles(targetJsonPath, assetFiles = [], requeste
     physicalFileCount: 0,
     files: []
   };
-  const exportedByHash = new Map();
-  for (const entry of entries) {
-    const source = resolveAssetExportBuffer(entry);
-    const preferredName =
-      entry.exportName ||
-      entry.originalName ||
-      entry.filename ||
-      (entry.path ? path.basename(entry.path) : "");
-    const fallbackExt = extensionFromMime(source?.mime || entry.mime || "") || path.extname(preferredName) || ".bin";
-    try {
-      if (!source) throw new Error(entry?.path ? "源素材文件不存在，且没有可恢复的内嵌素材数据" : "没有可导出的素材数据");
-      const contentHash = sha256Buffer(source.buffer);
-      const existingTargetPath = exportedByHash.get(contentHash);
-      const targetPath = existingTargetPath ||
-        uniqueAssetExportPath(folderPath, preferredName, `asset-${manifest.files.length + 1}${fallbackExt}`);
-      if (!existingTargetPath) {
-        writeFileAtomicSync(targetPath, source.buffer);
-        exportedByHash.set(contentHash, targetPath);
-        manifest.physicalFileCount += 1;
+  try {
+    const exportedByHash = new Map();
+    for (const entry of entries) {
+      const source = resolveAssetExportBuffer(entry);
+      const preferredName =
+        entry.exportName ||
+        entry.originalName ||
+        entry.filename ||
+        (entry.path ? path.basename(entry.path) : "");
+      const fallbackExt = extensionFromMime(source?.mime || entry.mime || "") || path.extname(preferredName) || ".bin";
+      try {
+        if (!source) throw new Error(entry?.path ? "源素材文件不存在，且没有可恢复的内嵌素材数据" : "没有可导出的素材数据");
+        const contentHash = sha256Buffer(source.buffer);
+        const existingTargetPath = exportedByHash.get(contentHash);
+        const targetPath = existingTargetPath ||
+          uniqueAssetExportPath(stagingPath, preferredName, `asset-${manifest.files.length + 1}${fallbackExt}`);
+        if (!existingTargetPath) {
+          writeFileAtomicSync(targetPath, source.buffer);
+          exportedByHash.set(contentHash, targetPath);
+          manifest.physicalFileCount += 1;
+        }
+        const stat = fs.statSync(targetPath);
+        manifest.files.push({
+          projectId: entry.projectId || "",
+          nodeId: entry.nodeId || "",
+          field: entry.field || "",
+          assetId: entry.assetId || "",
+          kind: entry.kind || "",
+          originalName: entry.originalName || entry.filename || (entry.path ? path.basename(entry.path) : path.basename(targetPath)),
+          filename: path.basename(targetPath),
+          size: stat.size,
+          sha256: contentHash,
+          deduplicated: Boolean(existingTargetPath),
+          mime: source.mime || entry.mime || "",
+          source: source.source || "file",
+          sourceOrigin: entry.sourceOrigin || "",
+          portableDataRef: entry.portableDataRef || "",
+          sourcePath: source.sourcePath || entry.path || ""
+        });
+      } catch (error) {
+        manifest.files.push({
+          projectId: entry.projectId || "",
+          nodeId: entry.nodeId || "",
+          field: entry.field || "",
+          assetId: entry.assetId || "",
+          kind: entry.kind || "",
+          mime: entry.mime || "",
+          sourceOrigin: entry.sourceOrigin || "",
+          originalName: entry.originalName || entry.filename || (entry.path ? path.basename(entry.path) : ""),
+          sourcePath: entry.path || "",
+          error: String(error?.message || error)
+        });
       }
-      const stat = fs.statSync(targetPath);
-      manifest.files.push({
-        projectId: entry.projectId || "",
-        nodeId: entry.nodeId || "",
-        field: entry.field || "",
-        assetId: entry.assetId || "",
-        kind: entry.kind || "",
-        originalName: entry.originalName || entry.filename || (entry.path ? path.basename(entry.path) : path.basename(targetPath)),
-        filename: path.basename(targetPath),
-        size: stat.size,
-        sha256: contentHash,
-        deduplicated: Boolean(existingTargetPath),
-        mime: source.mime || entry.mime || "",
-        source: source.source || "file",
-        sourceOrigin: entry.sourceOrigin || "",
-        portableDataRef: entry.portableDataRef || "",
-        sourcePath: source.sourcePath || entry.path || ""
-      });
-    } catch (error) {
-      manifest.files.push({
-        projectId: entry.projectId || "",
-        nodeId: entry.nodeId || "",
-        field: entry.field || "",
-        assetId: entry.assetId || "",
-        kind: entry.kind || "",
-        mime: entry.mime || "",
-        sourceOrigin: entry.sourceOrigin || "",
-        originalName: entry.originalName || entry.filename || (entry.path ? path.basename(entry.path) : ""),
-        sourcePath: entry.path || "",
-        error: String(error?.message || error)
-      });
     }
+    manifest.copied = manifest.files.filter((entry) => !entry.error).length;
+    manifest.failed = manifest.files.filter((entry) => entry.error).length;
+    fs.writeFileSync(path.join(stagingPath, "wanjuan-external-assets-manifest.json"), JSON.stringify(manifest, null, 2));
+    if (manifest.failed) {
+      return {
+        folderPath,
+        folderName,
+        stagingPath: "",
+        createdByOperation: false,
+        copied: manifest.copied,
+        failed: manifest.failed,
+        manifest
+      };
+    }
+    fs.renameSync(stagingPath, folderPath);
+    return {
+      folderPath,
+      folderName,
+      stagingPath: "",
+      createdByOperation: true,
+      copied: manifest.copied,
+      failed: manifest.failed,
+      manifest
+    };
+  } finally {
+    if (fs.existsSync(stagingPath)) fs.rmSync(stagingPath, { recursive: true, force: true });
   }
-  manifest.copied = manifest.files.filter((entry) => !entry.error).length;
-  manifest.failed = manifest.files.filter((entry) => entry.error).length;
-  fs.writeFileSync(path.join(folderPath, "wanjuan-external-assets-manifest.json"), JSON.stringify(manifest, null, 2));
-  return {
-    folderPath,
-    folderName,
-    copied: manifest.copied,
-    failed: manifest.failed,
-    manifest
-  };
 }
 
 function summarizeExternalAssetBundle(assetBundle) {
@@ -770,7 +837,7 @@ function injectExternalAssetBundleSummary(text, assetBundle) {
 
 async function removeProjectAssets(payload = {}) {
   const downloadRoot = payload?.directory || defaultDownloadDirectory();
-  const projectId = sanitizePathSegment(payload?.projectId || "default", "default");
+  const projectId = assertSafeProjectAssetProjectId(payload?.projectId || "default");
   const projectRoot = path.join(mediaLibraryRoot(downloadRoot), projectId);
   try {
     if (fs.existsSync(projectRoot)) {
@@ -802,6 +869,8 @@ module.exports = {
   uniqueAssetExportPath,
   resolveAssetExportBuffer,
   validateExternalProjectAssetFiles,
+  assertSafeProjectAssetProjectId,
+  resolveExternalAssetManifestFile,
   copyExternalProjectAssetFiles,
   summarizeExternalAssetBundle,
   injectExternalAssetBundleSummary,

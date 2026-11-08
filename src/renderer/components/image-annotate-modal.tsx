@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { jsx, jsxs } from "react/jsx-runtime";
 import ReactCrop from "react-image-crop";
+import "../styles/image-editor.css";
 import { Check, Circle, Crop, Hash, Pencil, Pipette, Square, Trash2, Type, Undo, X as CloseX } from "lucide-react";
 
 export function WanJuanImageAnnotateModal({
@@ -518,7 +519,7 @@ export function WanJuanImageAnnotateModal({
                 crop: crop,
                 onChange: (nextCrop) => setCrop(nextCrop),
                 onComplete: (completed) => setCompletedCrop(completed),
-                className: `w-full h-full`,
+                className: `wanjuan-image-editor-crop w-full h-full`,
                 disabled: tool !== `crop`,
                 style: {
                   display: `flex`,

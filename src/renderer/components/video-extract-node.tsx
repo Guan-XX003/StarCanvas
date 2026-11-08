@@ -373,7 +373,7 @@ export const WanJuanVideoExtractNode = reactMemo(({
         className: `relative group/node w-full h-full min-w-[280px] min-h-[220px]`,
         children: [
           jsx(NodeResizer, {
-            color: `#3b82f6`,
+            color: `var(--wj-accent)`,
             isVisible: !!selected,
             minWidth: 280,
             minHeight: 220,

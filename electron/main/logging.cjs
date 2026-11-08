@@ -40,26 +40,20 @@ function truncateLogValue(value, limit = 2000) {
     : value;
 }
 
-function sanitizeLogString(value) {
-  if (typeof value !== "string") return value;
-  return truncateLogValue(
-    value
-      .replace(/([?&](?:token|access_token|api_key|apikey)=)[^&#\s"']+/gi, "$1[redacted]")
-      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
-  );
-}
+const { sanitizeLogPayload, diagnosticErrorClass, installDiagnosticConsole, DIAGNOSTIC_EVENTS } = require("../shared/diagnostic-policy.cjs");
 
-function sanitizeLogPayload(payload) {
-  if (!payload || typeof payload !== "object") return sanitizeLogString(payload);
-  if (Array.isArray(payload)) return payload.map((item) => sanitizeLogPayload(item));
-  return Object.fromEntries(
-    Object.entries(payload).map(([key, value]) => [
-      key,
-      /(api[-_]?key|secret|token|authorization|password|credential|access[-_]?key)/i.test(key)
-        ? "[redacted]"
-        : sanitizeLogPayload(value)
-    ])
-  );
+function rendererConsoleDiagnostic(event, level, message, line) {
+  // Electron 42 emits one details object; retain compatibility with older
+  // console-message arguments without persisting arbitrary renderer text.
+  const details = event && typeof event.message === "string"
+    ? event : { level, message, lineNumber: line };
+  const levels = { 0: "verbose", 1: "info", 2: "warning", 3: "error" };
+  const severity = levels[details.level] || details.level;
+  return {
+    level: ["verbose", "info", "warning", "error"].includes(severity) ? severity : "unknown",
+    messageLength: typeof details.message === "string" ? details.message.length : 0,
+    line: Number.isSafeInteger(details.lineNumber) && details.lineNumber >= 0 ? details.lineNumber : 0,
+  };
 }
 
 function appendDesktopLog(type, payload) {
@@ -67,7 +61,9 @@ function appendDesktopLog(type, payload) {
     const logPath = path.join(app.getPath("userData"), "desktop-diagnostics.log");
     const line = JSON.stringify({
       time: new Date().toISOString(),
-      type,
+      // Event names are source-owned kebab-case literals; never persist a
+      // renderer/provider supplied event value (including a syntactically valid ID).
+      type: DIAGNOSTIC_EVENTS.has(type) ? type : "application-event",
       payload: sanitizeLogPayload(payload)
     });
     fs.appendFile(logPath, `${line}\n`, () => {});
@@ -83,5 +79,8 @@ module.exports = {
   summarizeUploadError,
   truncateLogValue,
   sanitizeLogPayload,
+  diagnosticErrorClass,
+  installDiagnosticConsole,
+  rendererConsoleDiagnostic,
   appendDesktopLog
 };

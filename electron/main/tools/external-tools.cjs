@@ -8,7 +8,7 @@ const { execFile, execFileSync } = require("child_process");
 const { pipeline } = require("stream/promises");
 
 const { app, shell } = require("../electron-refs.cjs");
-const { formatErrorMessage } = require("../logging.cjs");
+const { formatErrorMessage, sanitizeLogPayload } = require("../logging.cjs");
 const { extensionFromMime } = require("../utils/mime.cjs");
 const { fileUrlFromLocalPath, localPathFromFileUrl, sanitizeFilename } = require("../utils/paths.cjs");
 const { bufferFromMediaPayload } = require("../media/payload.cjs");
@@ -135,7 +135,8 @@ function appendExtensionInstallLog(type, payload = {}) {
   try {
     const logPath = extensionInstallLogPath();
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.appendFileSync(logPath, `${JSON.stringify({ time: new Date().toISOString(), type, ...payload })}\n`, "utf8");
+    const event = ["command-start", "command-ok", "command-failed", "offline-toolpack-import-ok", "offline-toolpack-import-failed"].includes(type) ? type : "tool-event";
+    fs.appendFileSync(logPath, `${JSON.stringify({ time: new Date().toISOString(), type: event, diagnostic: sanitizeLogPayload(payload) })}\n`, "utf8");
   } catch {}
 }
 
@@ -799,9 +800,10 @@ LOG=${shellQuote(logPath)}
 MARKER=${shellQuote(markerPath)}
 rm -f "$MARKER"
 touch "$LOG"
-exec > >(tee -a "$LOG") 2>&1
+echo '{"stage":"started"}' >> "$LOG"
 finish() {
   code=$?
+  printf '{"exitCode":%s}\\n' "$code" >> "$LOG"
   if [ "$code" -eq 0 ]; then
     /bin/date -u '+{"ok":true,"completedAt":"%Y-%m-%dT%H:%M:%SZ"}' > "$MARKER"
     echo ""

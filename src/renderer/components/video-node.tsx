@@ -13,7 +13,8 @@ import { WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE } from "../lib/upload-defaults";
 import { useWanJuanMediaBudget } from "../lib/media-budget";
 import { TongyiWanxiangLogo } from "./icons";
 import { wanjuanClearMentionPickerPosition, wanjuanDeleteMentionTokenAsUnit, wanjuanFormatMentionToken, wanjuanLegacyMentionToken, wanjuanMentionRangeFromPicker, wanjuanReplaceMentionToken, wanjuanShouldShowMentionPicker } from "../lib/mention";
-import { parseSeedanceList } from "../lib/model-binding";
+import { parseSeedanceList, resolveModelApiBindingIdHelper } from "../lib/model-binding";
+import { resolveMediaModelContract } from "../lib/media-model-contract";
 import { WanJuanGetPreferredModel, WanJuanShouldAutoPreferredModel, WanJuanUseFavoriteModels } from "../lib/model-favorites";
 import { WanJuanNormalizeModelId, WanJuanParseModelList, WanJuanSameModelId } from "../lib/model-id";
 import { wanjuanResourceInList, wanjuanResourceKind, wanjuanResourceMatchesFilter, wanjuanResourceSameIdentity } from "../lib/resource";
@@ -141,11 +142,11 @@ export const WanJuanVideoNode = reactMemo(({
 	      isSeedanceOrWanxiang && !isTongyiWanxiang ?
 	      data.seedanceModelManual === !0 || (!data.seedanceSelectedModel && data.wanjuanModelManual === !0) :
 	      data.wanjuanModelManual === !0,
-      videoDurationOptions = parseSeedanceList(
-        data.videoDurations || (isSeedanceOrWanxiang ? `10 15` : `10
-		15`),
-      ),
-      firstVideoDuration = videoDurationOptions[0] || `10`,
+	      defaultVideoDurationOptions = parseSeedanceList(
+	        data.videoDurations || (isSeedanceOrWanxiang ? `10 15` : `10
+			15`),
+	      ),
+	      defaultFirstVideoDuration = defaultVideoDurationOptions[0] || `10`,
       seedanceResolutionOptions = parseSeedanceList(
         isTongyiWanxiang ?
         data.tongyiWanxiangResolutions || `720P 1080P` :
@@ -169,9 +170,9 @@ export const WanJuanVideoNode = reactMemo(({
         ),
       ),
       [selectedSeconds, setSelectedSeconds] = useState(
-        data.selectedSeconds && videoDurationOptions.includes(data.selectedSeconds) ?
-        data.selectedSeconds :
-        firstVideoDuration,
+	        data.selectedSeconds && defaultVideoDurationOptions.includes(data.selectedSeconds) ?
+	        data.selectedSeconds :
+	        defaultFirstVideoDuration,
       ),
 	      [seedanceResolution, setSeedanceResolution] = useState(
 	        data.selectedResolution &&
@@ -194,7 +195,7 @@ export const WanJuanVideoNode = reactMemo(({
       [seedanceApiConfigId, setSeedanceApiConfigId] = useState(
         isSeedanceOrWanxiang ?
         data.selectedApiConfigId ||
-        data.videoModelApiBindings?.[
+        resolveModelApiBindingIdHelper(data.videoModelApiBindings,
           data.selectedModel ||
           (activeVideoModelText &&
             activeVideoModelText
@@ -203,8 +204,7 @@ export const WanJuanVideoNode = reactMemo(({
 `,
             )[0]
             .trim()) ||
-          ``
-        ] ||
+          ``, ``) ||
         data.apiConfigId ||
         `` :
         ``,
@@ -361,7 +361,7 @@ export const WanJuanVideoNode = reactMemo(({
         }
         let resolvedApiConfigId =
           data.selectedApiConfigId ||
-          data.videoModelApiBindings?.[selectedModel] ||
+          resolveModelApiBindingIdHelper(data.videoModelApiBindings, selectedModel, ``) ||
           data.apiConfigId ||
           ``;
         resolvedApiConfigId !== seedanceApiConfigId && setSeedanceApiConfigId(resolvedApiConfigId);
@@ -437,16 +437,25 @@ export const WanJuanVideoNode = reactMemo(({
         () => document.removeEventListener(`keydown`, handleKeyDown, !0)
       );
     }, [isFullscreen]));
-    let selectedVideoProtocolName = data.videoModelProtocolBindings?.[selectedModel] || ``,
-      selectedVideoProtocol = selectedVideoProtocolName && data.modelProtocolRegistry?.[selectedVideoProtocolName] && typeof data.modelProtocolRegistry[selectedVideoProtocolName] === `object` ? data.modelProtocolRegistry[selectedVideoProtocolName] : {},
-      inferredVideoParameterMode = wanjuanResolveVideoParameterMode(selectedVideoProtocol),
-      videoParameterMode = isSeedanceOrWanxiang ? `ratio-quality` : data.videoParameterMode || inferredVideoParameterMode,
-      videoParameterModeOptions = [
-        { value: `ratio-quality`, label: `比例与清晰度` },
-        { value: `exact-resolution`, label: `精确分辨率` },
-      ],
-      videoQualityOptions = (Array.isArray(selectedVideoProtocol?.parameterOptions?.qualities) ? selectedVideoProtocol.parameterOptions.qualities : [`480P`, `720P`, `1080P`]).map((quality) => ({ label: String(quality), value: String(quality) })),
-      qualityModelVariants = selectedVideoProtocol?.qualityModelVariants && typeof selectedVideoProtocol.qualityModelVariants === `object` ? selectedVideoProtocol.qualityModelVariants : {},
+	    const videoModelContract = resolveMediaModelContract({
+        category: `video`, model: selectedModel, apiConfigs: data.apiConfigs,
+        apiBindings: data.videoModelApiBindings, protocolBindings: data.videoModelProtocolBindings,
+        registry: data.modelProtocolRegistry,
+        selectedApiConfigId: seedanceApiConfigId || data.selectedApiConfigId || data.apiConfigId,
+      });
+	    let selectedVideoProtocolName = videoModelContract.protocolName,
+	      selectedVideoProtocol = videoModelContract.protocol || {},
+	      inferredVideoParameterMode = wanjuanResolveVideoParameterMode(selectedVideoProtocol),
+	      videoParameterModeLocked = selectedVideoProtocol?.parameterModeLocked === true,
+	      videoParameterMode = isSeedanceOrWanxiang ? `ratio-quality` : videoParameterModeLocked ? inferredVideoParameterMode : data.videoParameterMode || inferredVideoParameterMode,
+	      videoParameterModeOptions = [
+	        { value: `ratio-quality`, label: `比例与清晰度` },
+	        { value: `exact-resolution`, label: `精确分辨率` },
+	      ],
+	      videoQualityOptions = (Array.isArray(selectedVideoProtocol?.parameterOptions?.qualities) ? selectedVideoProtocol.parameterOptions.qualities : [`480P`, `720P`, `1080P`]).map((quality) => ({ label: String(quality), value: String(quality) })),
+	      videoDurationOptions = (Array.isArray(selectedVideoProtocol?.parameterOptions?.durations) ? selectedVideoProtocol.parameterOptions.durations.map(String) : defaultVideoDurationOptions),
+	      firstVideoDuration = videoDurationOptions[0] || defaultFirstVideoDuration,
+	      qualityModelVariants = selectedVideoProtocol?.qualityModelVariants && typeof selectedVideoProtocol.qualityModelVariants === `object` ? selectedVideoProtocol.qualityModelVariants : {},
       videoResolutionOptions = data.videoResolutions ?
       parseSeedanceList(data.videoResolutions).map((value) => ({
         label: value,
@@ -456,16 +465,18 @@ export const WanJuanVideoNode = reactMemo(({
         label: option.value,
         value: option.value
       })),
-      videoAspectRatioOptions = (
-        data.videoAspectRatios ?
-        parseSeedanceList(data.videoAspectRatios) :
-        [`16:9`, `9:16`, `1:1`, `3:2`, `2:3`]
+	      videoAspectRatioOptions = (
+	        Array.isArray(selectedVideoProtocol?.parameterOptions?.aspectRatios) ?
+	        selectedVideoProtocol.parameterOptions.aspectRatios :
+	        data.videoAspectRatios ?
+	        parseSeedanceList(data.videoAspectRatios) :
+	        [`16:9`, `9:16`, `1:1`, `3:2`, `2:3`]
       ).map((aspectRatio) => ({
         label: aspectRatio,
         value: normalizeVideoAspectRatioValue(aspectRatio, size)
       })),
       seedanceBoundApiConfigId =
-      isSeedanceOrWanxiang && selectedModel && data.videoModelApiBindings ? data.videoModelApiBindings[selectedModel] || `` : ``,
+      isSeedanceOrWanxiang ? resolveModelApiBindingIdHelper(data.videoModelApiBindings, selectedModel, ``) : ``,
       seedanceBoundApiConfig = seedanceApiOptions.find(
         (apiConfig) => apiConfig.id === seedanceBoundApiConfigId,
       ),
@@ -758,8 +769,8 @@ export const WanJuanVideoNode = reactMemo(({
 	        nextSelectedModel && nextSelectedModel !== selectedModel && _(nextSelectedModel);
 	        wanjuanModelManualRef.current = activeVideoModelManual;
 	      }, [activeVideoModelText, activeVideoSelectedModel, activeVideoModelManual, data.wanjuanModelAuto, favoriteModels.favorites, selectedModel]),
-      useEffect(() => {
-        if (
+	      useEffect(() => {
+	        if (
           videoDurationOptions.length > 0 &&
           (!data.selectedSeconds || !videoDurationOptions.includes(data.selectedSeconds))
         ) {
@@ -776,8 +787,24 @@ export const WanJuanVideoNode = reactMemo(({
         firstVideoDuration,
         selectedSeconds,
         nodeId,
-        updateNodeData,
-      ]),
+	        updateNodeData,
+	      ]),
+	      useEffect(() => {
+	        if (isSeedanceOrWanxiang || videoQualityOptions.length === 0) return;
+	        if (!videoQualityOptions.some((option) => option.value === selectedVideoQuality)) {
+	          let nextQuality = videoQualityOptions[0].value;
+	          setSelectedVideoQuality(nextQuality);
+	          updateNodeData(nodeId, { selectedVideoQuality: nextQuality });
+	        }
+	      }, [isSeedanceOrWanxiang, selectedVideoProtocolName, selectedVideoQuality, videoQualityOptions, nodeId, updateNodeData]),
+	      useEffect(() => {
+	        if (isSeedanceOrWanxiang || videoAspectRatioOptions.length === 0) return;
+	        if (!videoAspectRatioOptions.some((option) => option.value === selectedAspectRatio)) {
+	          let nextRatio = videoAspectRatioOptions[0].value;
+	          setSelectedAspectRatio(nextRatio);
+	          updateNodeData(nodeId, { selectedAspectRatio: nextRatio });
+	        }
+	      }, [isSeedanceOrWanxiang, selectedVideoProtocolName, selectedAspectRatio, videoAspectRatioOptions, nodeId, updateNodeData]),
       useEffect(() => {
         data.selectedSeconds &&
           videoDurationOptions.includes(data.selectedSeconds) &&
@@ -826,6 +853,10 @@ export const WanJuanVideoNode = reactMemo(({
 	        data.videoUrl && !data.loading && setIsExpanded(!1);
 	      }, [data.videoUrl, data.loading]));
     let handleGenerate = () => {
+      if (selectedVideoProtocol?.blockedReason) {
+        data.onShowToast?.(selectedVideoProtocol.blockedReason);
+        return;
+      }
       if (!prompt.trim() && contextResources.images.length === 0 && contextResources.texts.length === 0) {
         data.onShowToast?.(`请输入提示词或连接参考节点`);
         return;
@@ -1084,7 +1115,7 @@ export const WanJuanVideoNode = reactMemo(({
       className: `flex flex-col items-center group/node transition-all w-full h-full min-w-[160px] min-h-[160px] ${selected ? `z-50` : `z-10`}`,
       children: [
         jsx(NodeResizer, {
-          color: `#3b82f6`,
+          color: `var(--wj-accent)`,
           isVisible: selected,
           minWidth: 160,
           minHeight: 160,
@@ -1708,7 +1739,7 @@ export const WanJuanVideoNode = reactMemo(({
                           }),
                           isMentionPickerOpen &&
                           jsxs(`div`, {
-			                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[#22272f] border border-[#3a4250] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden h-[320px] nopan`,
+			                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[var(--wj-menu-bg)] border border-[var(--wj-menu-border)] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden h-[320px] nopan`,
                             onWheel: (event) => event.stopPropagation(),
                             onClick: (event) => event.stopPropagation(),
                             children: [
@@ -1739,7 +1770,7 @@ export const WanJuanVideoNode = reactMemo(({
                                         .map((resource: any) =>
                                           jsxs(
                                             `div`, {
-	                                              className: `aspect-square bg-[#111827] rounded-lg border border-[#333b46] hover:border-blue-500 cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
+	                                              className: `aspect-square bg-[var(--wj-card-bg)] rounded-lg border border-[var(--wj-panel-border-soft)] hover:border-[var(--wj-control-hover-border)] cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
                                               onMouseDown: (event) =>
                                                 event.preventDefault(),
 	                                              onClick: (event) => {
@@ -1827,13 +1858,13 @@ export const WanJuanVideoNode = reactMemo(({
                                 return totalPages <= 1 ?
                                   null :
                                   jsxs(`div`, {
-	                                    className: `flex items-center justify-between p-2 border-t border-[#333b46] bg-[#20252c]`,
+	                                    className: `flex items-center justify-between p-2 border-t border-[var(--wj-panel-divider)] bg-[var(--wj-panel-section-header-bg)]`,
                                     children: [
                                       jsx(`button`, {
                                         disabled: currentPage === 1,
                                         onClick: () =>
                                           setCurrentPage((prevPage) => Math.max(1, prevPage - 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `上一页`,
                                       }),
                                       jsxs(`span`, {
@@ -1844,7 +1875,7 @@ export const WanJuanVideoNode = reactMemo(({
                                         disabled: currentPage === totalPages,
                                         onClick: () =>
                                           setCurrentPage((prevPage) => Math.min(totalPages, prevPage + 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `下一页`,
                                       }),
                                     ],
@@ -1916,7 +1947,7 @@ export const WanJuanVideoNode = reactMemo(({
 	                            },
 	                            onClick: (event) => event.stopPropagation(),
 	                            children: [
-	                              !isSeedanceOrWanxiang &&
+	                              !isSeedanceOrWanxiang && !videoParameterModeLocked &&
 	                              jsxs(`div`, {
 	                                children: [
 	                                  jsx(`div`, { className: `text-[10px] text-gray-500 mb-2 px-1`, children: `参数方式` }),
@@ -2404,8 +2435,15 @@ export const WanJuanVideoNode = reactMemo(({
 		                                      border: WanJuanNormalizeModelId(selectedModel || data.selectedModel) === WanJuanNormalizeModelId(model) ? `1px solid currentColor` : `1px solid transparent`,
 	                                    },
 	                                    onClick: () => {
-	                                      let modelProtocolName = data.videoModelProtocolBindings?.[model] || ``,
-	                                        modelProtocol = modelProtocolName && data.modelProtocolRegistry?.[modelProtocolName] && typeof data.modelProtocolRegistry[modelProtocolName] === `object` ? data.modelProtocolRegistry[modelProtocolName] : {},
+	                                      let modelProtocolContract = resolveMediaModelContract({
+	                                          category: `video`, model,
+	                                          apiConfigs: data.apiConfigs,
+	                                          apiBindings: data.videoModelApiBindings,
+	                                          protocolBindings: data.videoModelProtocolBindings,
+	                                          registry: data.modelProtocolRegistry,
+	                                          selectedApiConfigId: seedanceApiConfigId || data.selectedApiConfigId || data.apiConfigId,
+	                                        }),
+	                                        modelProtocol = modelProtocolContract.protocol || {},
 	                                        modelParameterMode = wanjuanResolveVideoParameterMode(modelProtocol),
 	                                        modelQualityVariants = modelProtocol?.qualityModelVariants && typeof modelProtocol.qualityModelVariants === `object` ? modelProtocol.qualityModelVariants : {},
 	                                        matchedQuality = Object.entries(modelQualityVariants).find(([, variantModel]) => WanJuanSameModelId(String(variantModel || ``), model))?.[0] || ``;
@@ -2644,15 +2682,18 @@ export const WanJuanVideoNode = reactMemo(({
                       }) :
                       jsxs(`div`, {
                             className: `flex items-center bg-[#2a2a2a] rounded-full p-1 pl-3 border border-[#333] hover:border-gray-500 transition-colors cursor-pointer group/btn`,
+                            title: selectedVideoProtocol?.blockedReason || undefined,
+                            "aria-disabled": !!selectedVideoProtocol?.blockedReason,
                             onClick: (event) => {
                               (event.stopPropagation(), handleGenerate());
                             },
                             children: [
                               jsx(`div`, {
                                 className: `flex items-center gap-1 mr-3 text-xs text-gray-300 group-hover/btn:text-white`,
-                                children: `生成`,
+                                children: selectedVideoProtocol?.blockedReason ? (selectedVideoProtocol.blockedLabel || `接口待确认`) : `生成`,
                               }),
                               jsx(`button`, {
+                                disabled: !!selectedVideoProtocol?.blockedReason,
                                 className: `bg-white text-black w-6 h-6 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors`,
                                 children: jsx(ArrowUp, {
                                   size: 14,

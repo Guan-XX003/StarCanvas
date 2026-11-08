@@ -1,6 +1,2 @@
-!macro customUnInstall
-  ${ifNot} ${isUpdated}
-    ; StarCanvas使用自定义 Electron userData 目录，升级过程不得删除。
-    RMDir /r "$APPDATA\wanjuan-ai-canvas-desktop-test"
-  ${endIf}
-!macroend
+; 用户卸载软件时保留画布项目、配置和本地素材。
+; 如需清理用户数据，应由应用内明确的清理入口单独操作。

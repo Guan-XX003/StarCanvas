@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { ApiBindings, ProtocolBindings, Ref, SetAny, SetState, StoredGlobalConfig, Toast, TransitResource, WjEdge } from "../lib/app-types";
-import { WANJUAN_BUILTIN_AGENT_ITEMS, WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION, WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS, WANJUAN_JIXIN_DEFAULT_DOC_URL, wanjuanApplyJixinBuiltinProtocolPatch, wanjuanApplySeedanceOptionDefaults, wanjuanBuildJixinBuiltinBasePatch, wanjuanBuildJixinBuiltinStoredGlobalConfig, wanjuanCloneBuiltinAgentConversations, wanjuanCloneBuiltinAgentItems, wanjuanHasUserAgentConfiguration, wanjuanHasUserModelConfiguration, wanjuanIsLegacyJixinDocUrl, wanjuanMergeModelText, wanjuanSyncJixinBuiltinStoredGlobalConfig } from "../lib/jixin-catalog";
+import { WANJUAN_BUILTIN_AGENT_ITEMS, WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION, WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS, WANJUAN_JIXIN_DEFAULT_DOC_URL, wanjuanApplySeedanceOptionDefaults, wanjuanBuildJixinBuiltinBasePatch, wanjuanBuildJixinBuiltinStoredGlobalConfig, wanjuanCloneBuiltinAgentConversations, wanjuanCloneBuiltinAgentItems, wanjuanHasUserAgentConfiguration, wanjuanHasUserModelConfiguration, wanjuanIsLegacyJixinDocUrl, wanjuanMergeModelText, wanjuanMigrateJixinBuiltinCatalog } from "../lib/jixin-catalog";
 import { WanJuanNormalizePerformanceProfile } from "../lib/performance-profile";
 import { compactGlobalTasks } from "../lib/app-root-helpers";
 import { normalizeThemeMode } from "../lib/app-utils";
@@ -12,6 +12,7 @@ import { normalizeUnifiedApiConfigs } from "../lib/unified-api-config";
 import { wanjuanCheckForUpdate, wanjuanChildWindowRefs, wanjuanGetOrCreateDeviceId, wanjuanVerifyActivationCode } from "../lib/collaboration";
 import { wanjuanNormalizeSeedanceVirtualPortraits } from "../lib/seedance";
 import { wanjuanNormalizeArkTrustedAssetConfig } from "../lib/ark-trusted-assets";
+import { recoverBackupRestoreTransaction } from "../lib/backup-restore-transaction";
 declare const chrome: any;
 
 interface UsePluginEnvEffectDeps {
@@ -232,6 +233,7 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
     settingsHydratedRef,
     showToast2,
   } = deps;
+  const backupRecoveryRef = useRef<Promise<any> | null>(null);
   useEffect(() => {
       let isExtension = typeof chrome < `u` && chrome.runtime && chrome.runtime.id;
       (setIsPluginEnv(!!isExtension),
@@ -253,6 +255,11 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
         setIsLoading(false);
       }, 2e3);
       if (isExtension) {
+        backupRecoveryRef.current = recoverBackupRestoreTransaction({
+          localforage: localforageModule.default,
+          chromeStorage: chrome.storage?.local,
+        });
+        backupRecoveryRef.current.then(() => {
         (chrome.tabs.query({
             active: true,
             currentWindow: true
@@ -478,8 +485,8 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                         settings.selectedAgentId = WANJUAN_BUILTIN_AGENT_ITEMS[0]?.id || ``;
                         settings.agentConversations = wanjuanCloneBuiltinAgentConversations();
                       }
-                    } else settings = wanjuanSyncJixinBuiltinStoredGlobalConfig({
-		                      ...wanjuanApplySeedanceOptionDefaults(wanjuanApplyJixinBuiltinProtocolPatch(settings)),
+                    } else settings = wanjuanMigrateJixinBuiltinCatalog({
+		                      ...settings,
 		                      jixinBuiltinBaseConfigVersion: WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION,
 		                    });
                     if (typeof chrome < `u`) {
@@ -853,6 +860,15 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
             setIsReady(true),
             clearTimeout(timeoutId));
         }
+        }).catch((error) => {
+          console.error(`Backup restore recovery failed; startup writes blocked`, error);
+          settingsHydratedRef.current = false;
+          projectHydratedRef.current = false;
+          setIsLoading(false);
+          setIsReady(false);
+          showToast2(`备份恢复未完成，已阻止保存以保护现有数据`);
+          clearTimeout(timeoutId);
+        });
       } else
         ((settingsHydratedRef.current = true),
           (projectHydratedRef.current = true),

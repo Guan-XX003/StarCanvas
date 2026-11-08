@@ -16,7 +16,33 @@ export const WANJUAN_APP_NOTIFICATION_API_FALLBACK_URL = `https://wanjuan-admin.
 export const WANJUAN_APP_NOTIFICATION_CACHE_KEY = `wanjuan.appNotifications.cache.v1`;
 export const WANJUAN_APP_NOTIFICATION_DISMISSED_KEY = `wanjuan.appNotifications.dismissed.v1`;
 export const WANJUAN_APP_NOTIFICATION_SESSION_TOAST_KEY = `wanjuan.appNotifications.sessionToast.v1`;
-export const WANJUAN_APP_NOTIFICATION_PLATFORM = `macos`;
+export function WanJuanNormalizeNotificationPlatform(value: unknown) {
+  const platform = String(value || ``).trim().toLowerCase();
+  if ([`macos`, `mac`, `darwin`].includes(platform)) return `macos`;
+  if ([`windows`, `win`, `win32`, `win64`].includes(platform)) return `windows`;
+  if ([`ios`, `iphone`, `ipad`].includes(platform)) return `ios`;
+  return [`linux`, `android`, `web`].includes(platform) ? platform : `web`;
+}
+
+export function WanJuanGetNotificationPlatform(browser: {
+  userAgentData?: { platform?: string };
+  userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+} | null = typeof navigator === `undefined` ? null : navigator) {
+  if (!browser) return `web`;
+  const hints = `${browser.userAgentData?.platform || ``} ${browser.userAgent || ``} ${browser.platform || ``}`;
+  // Mobile UAs also contain Linux/Mac tokens; classify those before desktop OSes.
+  if (/android/i.test(hints)) return `android`;
+  if (/iphone|ipad|ipod/i.test(hints)
+      || (/mac/i.test(hints) && Number(browser.maxTouchPoints) > 1)) return `ios`;
+  if (/windows|win32|win64/i.test(hints)) return `windows`;
+  if (/macintosh|macintel|macos|mac os|darwin/i.test(hints)) return `macos`;
+  if (/linux/i.test(hints)) return `linux`;
+  return `web`;
+}
+
+export const WANJUAN_APP_NOTIFICATION_PLATFORM = WanJuanGetNotificationPlatform();
 
 export function WanJuanDecodeBase64Utf8(base64: any) {
   try {
@@ -50,9 +76,9 @@ export function WanJuanCompareVersions(left: any, right: any) {
 
 export function WanJuanGetAppVersion() {
   try {
-    return chrome?.runtime?.getManifest?.()?.version || `1.4.7`;
+    return chrome?.runtime?.getManifest?.()?.version || `1.4.8`;
   } catch {
-    return `1.4.7`;
+    return `1.4.8`;
   }
 }
 
@@ -93,7 +119,16 @@ export function WanJuanFilterAppNotifications(items: any, {
   platform = WANJUAN_APP_NOTIFICATION_PLATFORM,
   now = Date.now(),
 } = {}) {
-  let platformAliases = new Set([`all`, platform, `mac`, `darwin`, `desktop`, `electron`, `macos`]);
+  const normalizedPlatform = WanJuanNormalizeNotificationPlatform(platform);
+  const aliases = {
+    macos: [`macos`, `mac`, `darwin`, `desktop`, `electron`],
+    windows: [`windows`, `win`, `win32`, `win64`, `desktop`, `electron`],
+    linux: [`linux`, `desktop`, `electron`],
+    android: [`android`, `mobile`],
+    ios: [`ios`, `iphone`, `ipad`, `mobile`],
+    web: [`web`],
+  };
+  const platformAliases = new Set([`all`, ...aliases[normalizedPlatform]]);
   return WanJuanNormalizeAppNotifications(items).filter((item) => {
     let platforms = item.platforms.length ? item.platforms : [`all`];
     if (!platforms.some((platformName) => platformAliases.has(platformName))) return !1;

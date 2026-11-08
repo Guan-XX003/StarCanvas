@@ -44,7 +44,7 @@ export function wanjuanRenderResourcePreview(resource: any, options: any = {}) {
     });
   if (resourceKind === `audio`)
     return jsxs(`div`, {
-      className: `w-full h-full bg-[#111827] flex flex-col items-center justify-center gap-1.5 p-2 text-center`,
+      className: `w-full h-full bg-[var(--wj-card-bg)] flex flex-col items-center justify-center gap-1.5 p-2 text-center`,
       children: [
         jsx(`div`, {
           className: `h-7 w-7 rounded-full border border-blue-400/35 bg-blue-400/10 text-blue-300 flex items-center justify-center text-sm`,
@@ -87,7 +87,7 @@ export function wanjuanRenderResourcePickerHeader({
   closeContent = `×`,
 }: any) {
   return jsxs(`div`, {
-    className: `p-3 border-b border-[#333b46] bg-[#20252c] wanjuan-mention-picker-header`,
+    className: `p-3 border-b border-[var(--wj-panel-divider)] bg-[var(--wj-panel-section-header-bg)] wanjuan-mention-picker-header`,
     children: [
       jsxs(`div`, {
         className: `flex items-center justify-between gap-3 mb-3`,
@@ -104,7 +104,7 @@ export function wanjuanRenderResourcePickerHeader({
         ],
       }),
       jsxs(`div`, {
-        className: `w-full flex bg-[#151a22] border border-[#343b46] rounded-lg p-1 wanjuan-mention-picker-tabs`,
+        className: `w-full flex bg-[var(--wj-filter-group-bg)] border border-[var(--wj-filter-group-border)] rounded-lg p-1 wanjuan-mention-picker-tabs`,
         children: wanjuanRenderResourceFilterTabs(activeKind, onSelectKind, setPage),
       }),
       wanjuanRenderResourceSourceTabs(activeSource, onSelectSource, favoriteOnly, setFavoriteOnly, setPage, !0),
@@ -125,7 +125,7 @@ export function WanJuanResourcePicker({
     totalPages = Math.ceil(filteredResources.length / 16),
     pageItems = filteredResources.slice((page - 1) * 16, page * 16);
 	  return jsxs(`div`, {
-	    className: `wanjuan-material-picker w-[380px] bg-[#22272f] border border-[#3a4250] rounded-lg z-[100] flex flex-col overflow-hidden`,
+	    className: `wanjuan-material-picker w-[380px] bg-[var(--wj-menu-bg)] border border-[var(--wj-menu-border)] rounded-lg z-[100] flex flex-col overflow-hidden`,
     style: {
       boxShadow: `18px 18px 36px -22px rgba(0,0,0,0.72), 0 8px 18px -14px rgba(0,0,0,0.5)`
     },
@@ -153,7 +153,7 @@ export function WanJuanResourcePicker({
             children: pageItems.map((resource) =>
               jsxs(
                 `div`, {
-	                  className: `aspect-square bg-[#111827] rounded-lg border border-[#333b46] hover:border-blue-500 cursor-pointer overflow-hidden relative group`,
+	                  className: `aspect-square bg-[var(--wj-card-bg)] rounded-lg border border-[var(--wj-panel-border-soft)] hover:border-[var(--wj-control-hover-border)] cursor-pointer overflow-hidden relative group`,
                   onClick: () => onSelect(resource),
                   title: resource.pageTitle || `素材`,
                   children: [
@@ -174,12 +174,12 @@ export function WanJuanResourcePicker({
       }),
       totalPages > 1 &&
       jsxs(`div`, {
-	        className: `flex items-center justify-between p-2 border-t border-[#333b46] bg-[#20252c]`,
+	        className: `flex items-center justify-between p-2 border-t border-[var(--wj-panel-divider)] bg-[var(--wj-panel-section-header-bg)]`,
         children: [
           jsx(`button`, {
             disabled: page === 1,
             onClick: () => setPage((prev) => Math.max(1, prev - 1)),
-	            className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	            className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
             children: `上一页`,
           }),
           jsxs(`span`, {
@@ -189,7 +189,7 @@ export function WanJuanResourcePicker({
           jsx(`button`, {
             disabled: page === totalPages,
             onClick: () => setPage((prev) => Math.min(totalPages, prev + 1)),
-	            className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	            className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
             children: `下一页`,
           }),
         ],

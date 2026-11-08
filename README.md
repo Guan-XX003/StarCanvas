@@ -105,6 +105,8 @@ StarCanvas是一款强大的本地桌面 AI 创作工作台，专为现代 AI �
 
 CLI / MCP 独立下载：[starcanvas-cli-1.4.7.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.7-release/starcanvas-cli-1.4.7.zip)
 
+CLI 主命令为 `starcanvas`，MCP 服务为 `starcanvas-mcp`；旧 `wanjuan` 名称暂时保留为兼容别名。
+
 ### 安装说明
 
 **macOS:**

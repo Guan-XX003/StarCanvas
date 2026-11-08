@@ -1,5 +1,6 @@
 import { clearEnterpriseConfigOverlay, installEnterpriseConfigOverlay } from "./enterprise-runtime";
 import type { EnterpriseConfigSnapshot } from "./enterprise-config-snapshot";
+import { setManagedRelayRuntimeState, startManagedRelayProvisioningSync } from "./managed-relay";
 
 export type AccountUser = {
   id: string;
@@ -66,7 +67,7 @@ export type AccountState = {
   loading: boolean;
   serviceConfigured: boolean;
   secureStorageAvailable: boolean;
-  secureStorageMode?: "system" | "local" | "unavailable";
+  secureStorageMode?: "system" | "local" | "unchecked" | "pending" | "unavailable";
   onboardingComplete: boolean;
   localMode: boolean;
   authenticated: boolean;
@@ -75,7 +76,32 @@ export type AccountState = {
   user: AccountUser | null;
   subscription: { plan?: string; status?: string; expiresAt?: string } | null;
   entitlements: string[];
-  wallet: { balance?: number; currency?: string } | null;
+  wallet: {
+    enabled?: boolean;
+    redeemEnabled?: boolean;
+    currency?: string;
+    cashAmount?: number;
+    promoAmount?: number;
+    reservedAmount?: number;
+    availableAmount?: number;
+    promoExpiresAt?: string | null;
+  } | null;
+  relay: {
+    status?: string;
+    managed?: boolean;
+    keyMasked?: string;
+    keyVersion?: string;
+  } | null;
+  featureFlags: {
+    passwordAuth?: boolean;
+    passwordRegistration?: boolean;
+    passwordReset?: boolean;
+    relayLegacyLink?: boolean;
+    relayAutoProvision?: boolean;
+    relayManagedConfig?: boolean;
+    relayWalletUi?: boolean;
+    relayRedeem?: boolean;
+  } | null;
   device: { id?: string; name?: string; platform?: string } | null;
   enterprise: EnterpriseConnection | null;
   enterpriseSnapshot: EnterpriseConfigSnapshot | null;
@@ -93,6 +119,7 @@ const emptyState: AccountState = {
   loading: true,
   serviceConfigured: false,
   secureStorageAvailable: false,
+  secureStorageMode: "unchecked",
   onboardingComplete: true,
   localMode: true,
   authenticated: false,
@@ -102,6 +129,8 @@ const emptyState: AccountState = {
   subscription: null,
   entitlements: [],
   wallet: null,
+  relay: null,
+  featureFlags: null,
   device: null,
   enterprise: null,
   enterpriseSnapshot: null,
@@ -118,6 +147,17 @@ const emptyState: AccountState = {
 let state: AccountState = { ...emptyState };
 const listeners = new Set<() => void>();
 let bootstrapPromise: Promise<AccountState> | null = null;
+let accountStateEpoch = 0;
+let provisioningScope = "";
+let stopProvisioning: (() => void) | null = null;
+
+export function accountIdentityScopeKey(value: Pick<AccountState, "authenticated" | "user"> | null | undefined) {
+  return `${value?.authenticated === true ? `authenticated` : `anonymous`}:${String(value?.user?.id || ``)}`;
+}
+
+function accountRequestScope() {
+  return `${accountStateEpoch}:${accountIdentityScopeKey(state)}`;
+}
 
 function desktop() {
   return (globalThis as any).wanjuanDesktop || {};
@@ -132,9 +172,39 @@ function reloadForEnterpriseScope() {
 }
 
 function patchState(next: Partial<AccountState>) {
-  state = { ...state, ...next };
+  const previousIdentity = accountIdentityScopeKey(state);
+  const updated = { ...state, ...next };
+  if (accountIdentityScopeKey(updated) !== previousIdentity) accountStateEpoch += 1;
+  state = updated;
+  setManagedRelayRuntimeState(state.relay);
+  syncManagedProvisioning();
   emit();
   return state;
+}
+
+// Keep provisioning state fresh even when the account settings panel is closed.
+// A scope change or disabled feature cancels the old account's timer.
+function syncManagedProvisioning() {
+  const scope = accountRequestScope();
+  const pending = state.authenticated === true && state.featureFlags?.relayManagedConfig === true
+    && state.relay?.managed === true && ["pending", "retrying"].includes(String(state.relay.status));
+  if (!pending || provisioningScope !== scope) {
+    stopProvisioning?.();
+    stopProvisioning = null;
+    provisioningScope = "";
+  }
+  if (!pending || stopProvisioning) return;
+  provisioningScope = scope;
+  stopProvisioning = startManagedRelayProvisioningSync({
+    isPending: () => accountRequestScope() === scope && state.authenticated === true
+      && state.featureFlags?.relayManagedConfig === true && state.relay?.managed === true
+      && ["pending", "retrying"].includes(String(state.relay.status)),
+    refresh: async () => {
+      const result = await refreshRelayAccount();
+      if (accountRequestScope() === scope && result?.ok && result.relay?.status === "active"
+        && state.featureFlags?.relayWalletUi === true) await refreshWallet();
+    },
+  });
 }
 
 function applyDesktopState(result: any, extra: Partial<AccountState> = {}) {
@@ -177,6 +247,87 @@ export function getAccountState() {
   return state;
 }
 
+function newIdempotencyKey(scope: string) {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `starcanvas-${scope}-${suffix}`;
+}
+
+async function invokeAccountCommerce(method: string, payload: Record<string, unknown> = {}) {
+  const operation = desktop()[method];
+  if (typeof operation !== "function") return { ok: false, error: "当前桌面端不支持该账号功能" };
+  try {
+    return await operation(payload);
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message || error) };
+  }
+}
+
+export async function refreshRelayAccount() {
+  const requestScope = accountRequestScope();
+  const result = await invokeAccountCommerce("accountRelay");
+  if (requestScope === accountRequestScope() && result?.ok && result.relay) patchState({ relay: result.relay });
+  return result;
+}
+
+export async function refreshWallet() {
+  const requestScope = accountRequestScope();
+  const result = await invokeAccountCommerce("accountWallet");
+  if (requestScope === accountRequestScope() && result?.ok && result.wallet) patchState({ wallet: result.wallet });
+  return result;
+}
+
+export function listWalletTransactions(filters: Record<string, unknown> = {}) {
+  return invokeAccountCommerce("accountWalletTransactions", filters);
+}
+
+export function listRelayUsageRecords(filters: Record<string, unknown> = {}) {
+  return invokeAccountCommerce("accountRelayUsage", filters);
+}
+
+export function getRechargeStore() {
+  return invokeAccountCommerce("accountRechargeStore");
+}
+
+export async function redeemWalletCode(code: string, idempotencyKey = newIdempotencyKey("redeem")) {
+  const result = await invokeAccountCommerce("accountWalletRedeem", { code, idempotencyKey });
+  if (result?.ok && result.wallet) patchState({ wallet: result.wallet });
+  return result;
+}
+
+export function sendRelayKeyCode(purpose: "reveal" | "regenerate") {
+  return invokeAccountCommerce("accountRelayKeySendCode", { purpose });
+}
+
+export async function revealRelayKey(code: string) {
+  const result = await invokeAccountCommerce("accountRelayKeyReveal", { code });
+  if (result?.ok && result.relay) patchState({ relay: result.relay });
+  return result;
+}
+
+export async function regenerateRelayKey(code: string, idempotencyKey = newIdempotencyKey("relay-key")) {
+  const result = await invokeAccountCommerce("accountRelayKeyRegenerate", { code, idempotencyKey });
+  if (result?.ok && result.relay) patchState({ relay: result.relay });
+  return result;
+}
+
+export function sendRelayLinkCode() {
+  return invokeAccountCommerce("accountRelayLinkSendCode");
+}
+
+export function verifyLegacyRelayAccount(username: string, password: string) {
+  return invokeAccountCommerce("accountRelayLinkVerifyLegacy", { username, password });
+}
+
+export function verifyLegacyRelayMfa(challenge: string, code: string) {
+  return invokeAccountCommerce("accountRelayLinkVerifyMfa", { challenge, code });
+}
+
+export async function confirmRelayLink(code: string, challenge: string, idempotencyKey = newIdempotencyKey("relay-link")) {
+  const result = await invokeAccountCommerce("accountRelayLinkConfirm", { code, challenge, idempotencyKey });
+  if (result?.ok && result.relay) patchState({ relay: result.relay });
+  return result;
+}
+
 export function subscribeAccount(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -198,7 +349,11 @@ export async function bootstrapAccount() {
 }
 
 export function openAccountAuth() {
-  return patchState({ authOpen: true, error: "", errorCode: "", errorStatus: 0 });
+  const next = patchState({ authOpen: true, error: "", errorCode: "", errorStatus: 0 });
+  // A failed anonymous capability probe is intentionally not cached by main.
+  // Re-opening the account surface provides a bounded recovery opportunity.
+  void bootstrapAccount();
+  return next;
 }
 
 export function closeAccountAuth() {
@@ -214,7 +369,7 @@ export async function continueWithLocalMode() {
   }
 }
 
-export async function sendAccountCode(identifier: string, purpose: "login" | "register" = "login") {
+export async function sendAccountCode(identifier: string, purpose: "login" | "register" | "reset_password" = "login") {
   patchState({ busy: true, error: "", errorCode: "", errorStatus: 0 });
   try {
     const result = await desktop().accountSendCode?.({ identifier, purpose });
@@ -230,7 +385,21 @@ export async function sendAccountCode(identifier: string, purpose: "login" | "re
   }
 }
 
-export async function loginAccount(payload: { identifier: string; code: string; inviteCode?: string; register?: boolean }) {
+export async function resetAccountPassword(identifier: string, code: string, newPassword: string) {
+  patchState({ busy: true, error: "", errorCode: "", errorStatus: 0 });
+  try {
+    const result = await desktop().accountPasswordReset?.({ identifier, code, newPassword });
+    if (!result?.ok) return applyDesktopError(result, "密码重置失败");
+    patchState({ busy: false });
+    await bootstrapAccount();
+    return result;
+  } catch (error) {
+    patchState({ busy: false, error: String((error as Error)?.message || error) });
+    return { ok: false, error: state.error };
+  }
+}
+
+export async function loginAccount(payload: { identifier: string; code?: string; password?: string; register?: boolean }) {
   patchState({ busy: true, error: "", errorCode: "", errorStatus: 0 });
   try {
     const result = await desktop().accountLogin?.(payload);

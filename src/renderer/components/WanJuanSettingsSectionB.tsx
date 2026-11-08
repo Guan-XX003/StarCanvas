@@ -82,6 +82,7 @@ export function WanJuanSettingsSectionB(props: any) {
     BACKUP_MODULE_LABELS,
     _e,
     apiConfigs,
+    modelProtocolRegistry,
     arkTrustedAssetConfig,
     appLanguage,
     applyConfigButlerBatchResults,
@@ -482,7 +483,7 @@ export function WanJuanSettingsSectionB(props: any) {
                           }),
                         ],
                       }),
-                      activeSettingsTab === `account` && jsx(WanJuanSettingsAccountTab, { showToast: showToast2 }),
+                      activeSettingsTab === `account` && jsx(WanJuanSettingsAccountTab, { showToast: showToast2, projects }),
                       activeSettingsTab === `basic` &&
                       jsx(WanJuanSettingsBasicTab, {
   $e,
@@ -877,6 +878,8 @@ export function WanJuanSettingsSectionB(props: any) {
                               imageModelSettingsExpanded &&
                               jsx(WanJuanImageModelSettingsPanel, {
   apiConfigs,
+  modelProtocolRegistry,
+  setApiConfigs,
   imageCompatResolutions,
   imageModelApiBindings,
   imageModels,
@@ -914,6 +917,8 @@ export function WanJuanSettingsSectionB(props: any) {
                               videoModelSettingsExpanded &&
                               jsx(WanJuanVideoModelSettingsPanel, {
   apiConfigs,
+  modelProtocolRegistry,
+  setApiConfigs,
   setVideoAspectRatios,
   setVideoDurations,
   setVideoModelApiBindings,

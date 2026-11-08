@@ -13,7 +13,8 @@ const path = require("path");
 
 const { app, BrowserWindow } = require("./electron-refs.cjs");
 const { TEST_BUILD_NAME, TEST_USER_DATA_DIR, TEST_USER_DATA_PATH } = require("./config.cjs");
-const { isBenignEpipeError, appendDesktopLog } = require("./logging.cjs");
+const { isBenignEpipeError, appendDesktopLog, sanitizeLogPayload, installDiagnosticConsole } = require("./logging.cjs");
+installDiagnosticConsole();
 const { setDesktopBaseUrl } = require("./runtime-state.cjs");
 const { createStaticServer } = require("./net/static-server.cjs");
 const { installFileAccessFilter } = require("./net/file-access-filter.cjs");
@@ -42,18 +43,24 @@ for (const stream of [process.stdout, process.stderr]) {
 }
 
 // 未捕获异常：良性 EPIPE 忽略，其余写入崩溃日志后重新抛出。
-process.on("uncaughtException", (error) => {
+function handleFatalDiagnostic(error, type) {
   if (isBenignEpipeError(error)) return;
   try {
     const crashLogPath = path.join(app.getPath("userData"), "desktop-main-crash.log");
     fs.appendFileSync(
       crashLogPath,
-      `${new Date().toISOString()} ${String(error?.stack || error?.message || error)}\n`,
+      `${JSON.stringify({ time: new Date().toISOString(), type, diagnostic: sanitizeLogPayload({ error }) })}\n`,
       "utf8"
     );
   } catch {}
-  throw error;
-});
+  // Preserve fatal termination without Node echoing the original message/stack
+  // (which may contain a provider response, signed URL, or user file path).
+  const fatal = new Error("MAIN_PROCESS_FATAL_ERROR");
+  fatal.stack = "Error: MAIN_PROCESS_FATAL_ERROR";
+  throw fatal;
+}
+process.on("uncaughtException", (error) => handleFatalDiagnostic(error, "main-uncaught-exception"));
+process.on("unhandledRejection", (error) => handleFatalDiagnostic(error, "main-unhandled-rejection"));
 
 // GPU 模式开关（off / performance / stable，默认 stable）。
 const legacyDisableGpu = process.env.WANJUAN_DISABLE_GPU === "1";
@@ -98,7 +105,6 @@ app.whenReady().then(async () => {
   installFileAccessFilter();
   const desktopBaseUrl = await createStaticServer();
   setDesktopBaseUrl(desktopBaseUrl);
-  await startAutomationServer();
   // IPC 注册放在 baseUrl 就绪之后，确保 isTrustedIpcEvent 始终有校验依据；
   // 注册仍先于 createMainWindow，渲染进程调用时 handler 均已就位。
   registerDesktopIpc();
@@ -110,7 +116,10 @@ app.whenReady().then(async () => {
     appVersion: app.getVersion(),
     packageName: "wanjuan-lingjing-desktop-test"
   });
-  createMainWindow(desktopBaseUrl);
+  const mainWindow = createMainWindow(desktopBaseUrl);
+  // 自动化凭据只在主窗口已经创建并显式注册后发布，避免打包版 CLI
+  // 在启动窗口尚不存在时拿到一个不可用的本机端点。
+  await startAutomationServer(mainWindow);
   scheduleAutomaticUpdateCheck();
 
   app.on("activate", () => {

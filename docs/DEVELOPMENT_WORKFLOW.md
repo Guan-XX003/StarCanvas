@@ -38,6 +38,12 @@ omm show generation-lifecycle
 
 ### 3. 源码测试
 
+先运行 `npm run verify:electron-runtime`，确认实际 Electron 二进制与
+`package.json` 和锁文件中的固定版本一致。`start`、`start:dev`、`debug` 和
+App 打包入口均执行该门禁；两个直接启动器也会先检查，再创建隔离 userData。
+版本不一致时先恢复锁文件对应的依赖，不要绕过门禁或改用同步安全存储。
+该检查仅使用 Electron Node 模式读取版本，不测试钥匙串、DPAPI 或真实登录。
+
 根据影响范围运行适用检查：
 
 ```bash
@@ -84,6 +90,10 @@ npm run arch:validate
 - 推送前再次运行 `npm run arch:validate`。
 - 只有用户明确要求时才更新版本号、更新日志和 GitHub Release。
 - 发布包不得包含临时用户数据路径、测试身份、密钥、Token 或私人媒体。
+
+Windows 发布前运行 `npm run test:windows-uninstall-data`。卸载与更新安装默认
+保留自定义 userData 目录中的画布项目、配置和本地资料；不要恢复 NSIS 自动
+删除 AppData 或在自定义卸载钩子中递归删除该目录。清理用户资料是独立操作。
 
 ## 完成标准
 

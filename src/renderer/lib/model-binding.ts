@@ -36,6 +36,7 @@ export function getModelBindingCandidatesHelper(modelKey: any) {
   if (!trimmedKey) return [];
   let normalizedKey = normalizeModelBindingKeyHelper(trimmedKey),
     candidates = new Set([trimmedKey, normalizedKey]),
+    visited = new Set<string>(),
     aliasMap = {
       "grok-video-3-10s": [`grok-videos`],
       "grok-videos": [`grok-video-3-10s`],
@@ -47,7 +48,8 @@ export function getModelBindingCandidatesHelper(modelKey: any) {
     },
     addCandidate = (key) => {
       let normalizedKey2 = normalizeModelBindingKeyHelper(key);
-      if (!normalizedKey2 || candidates.has(normalizedKey2)) return;
+      if (!normalizedKey2 || visited.has(normalizedKey2)) return;
+      visited.add(normalizedKey2);
       candidates.add(normalizedKey2), candidates.add(String(key).trim());
       let aliases = aliasMap[normalizedKey2];
       Array.isArray(aliases) && aliases.forEach(addCandidate);
@@ -75,6 +77,17 @@ export function resolveModelProtocolBindingHelper(obj: any, modelKey: any, fallb
   for (let [key, value] of Object.entries(obj))
     if (candidateSet.has(normalizeModelBindingKeyHelper(key)) && value) return value;
   return fallback;
+}
+
+/** Replace or clear aliases of one binding without mutating unrelated user configuration. */
+export function updateModelBindingHelper(bindings: Record<string, string> = {}, model: string, value: string) {
+  const next = { ...bindings };
+  const candidates = new Set(getModelBindingCandidatesHelper(model).map(normalizeModelBindingKeyHelper));
+  for (const key of Object.keys(next)) {
+    if (candidates.has(normalizeModelBindingKeyHelper(key))) delete next[key];
+  }
+  if (value) next[model] = value;
+  return next;
 }
 
 export function extractVideoTaskErrorHelper(result: any, fallbackMessage = `视频生成失败`) {

@@ -21,6 +21,10 @@ declare global {
   }
 }
 
+let activeTransitionEpoch = 0;
+let activeTransitionTimeline: any = null;
+let activeTransitionTimeout: number | null = null;
+
 /**
  * 根据主题名返回该主题的 [背景色, 强调色] 调色板二元组。
  * 未知主题回退到 graphite 配色。
@@ -28,8 +32,8 @@ declare global {
 export function wanjuanThemeTransitionPalette(theme: string): [string, string] {
   return (
     {
-      dark: [`#0b1020`, `rgba(138,180,248,0.34)`],
-      graphite: [`#171717`, `rgba(56,189,248,0.24)`],
+      dark: [`#111111`, `rgba(227,107,63,0.20)`],
+      graphite: [`#17191c`, `rgba(216,221,227,0.22)`],
       light: [`#f5fafb`, `rgba(108,140,163,0.32)`],
       "warm-light": [`#fbf7f1`, `rgba(186,141,90,0.30)`],
       "mist-blue": [`#f5f9fd`, `rgba(97,128,168,0.30)`],
@@ -39,7 +43,7 @@ export function wanjuanThemeTransitionPalette(theme: string): [string, string] {
       "chrome-teal": [`#f4fbf8`, `rgba(70,165,142,0.30)`],
       "sage-green": [`#f7fbf7`, `rgba(99,149,112,0.30)`],
     } as Record<string, [string, string]>
-  )[theme] || [`#20252c`, `rgba(138,180,248,0.34)`];
+  )[theme] || [`#17191c`, `rgba(227,107,63,0.20)`];
 }
 
 /**
@@ -62,6 +66,14 @@ export function wanjuanRunThemeTransitionFallback(
   const gsap = window.gsap;
   if (!gsap) return false;
 
+  const transitionEpoch = ++activeTransitionEpoch;
+  if (activeTransitionTimeout !== null) {
+    window.clearTimeout(activeTransitionTimeout);
+    activeTransitionTimeout = null;
+  }
+  activeTransitionTimeline?.kill?.();
+  activeTransitionTimeline = null;
+
   // 清理上一次残留的捕获层（杀掉其上所有 tween 并移除节点）。
   let captureEl = document.getElementById(`wanjuan-theme-transition-capture`);
   captureEl && gsap.killTweensOf?.(captureEl.querySelectorAll(`*`));
@@ -78,7 +90,7 @@ export function wanjuanRunThemeTransitionFallback(
   const oldBgColor =
     getComputedStyle(document.documentElement).getPropertyValue(`--wj-bg`) ||
     getComputedStyle(document.body).backgroundColor ||
-    `#20252c`;
+    `#17191c`;
   const viewportWidth = Math.max(
     1,
     window.innerWidth || document.documentElement.clientWidth || 1,
@@ -95,7 +107,7 @@ export function wanjuanRunThemeTransitionFallback(
   captureEl.style.setProperty(`--wanjuan-theme-transition-bg`, bgColor);
   captureEl.style.setProperty(`--wanjuan-theme-transition-accent`, accentColor);
   captureEl.style.setProperty(`--wanjuan-theme-transition-old-bg`, oldBgColor);
-  captureEl.innerHTML = `<svg class="wanjuan-theme-transition-old" viewBox="0 0 ${viewportWidth} ${viewportHeight}" preserveAspectRatio="none" aria-hidden="true"><defs><mask id="${maskId}" maskUnits="userSpaceOnUse"><rect width="${viewportWidth}" height="${viewportHeight}" fill="white"></rect><circle class="wanjuan-theme-transition-mask-circle" cx="${viewportWidth / 2}" cy="${viewportHeight / 2}" r="0" fill="black"></circle></mask></defs><rect width="${viewportWidth}" height="${viewportHeight}" fill="var(--wanjuan-theme-transition-old-bg, #20252c)" fill-opacity="0.92" mask="url(#${maskId})"></rect></svg><div class="wanjuan-theme-transition-ring"></div>`;
+  captureEl.innerHTML = `<svg class="wanjuan-theme-transition-old" viewBox="0 0 ${viewportWidth} ${viewportHeight}" preserveAspectRatio="none" aria-hidden="true"><defs><mask id="${maskId}" maskUnits="userSpaceOnUse"><rect width="${viewportWidth}" height="${viewportHeight}" fill="white"></rect><circle class="wanjuan-theme-transition-mask-circle" cx="${viewportWidth / 2}" cy="${viewportHeight / 2}" r="0" fill="black"></circle></mask></defs><rect width="${viewportWidth}" height="${viewportHeight}" fill="var(--wanjuan-theme-transition-old-bg, #17191c)" fill-opacity="0.92" mask="url(#${maskId})"></rect></svg><div class="wanjuan-theme-transition-ring"></div>`;
   document.body.appendChild(captureEl);
 
   const maskCircle = captureEl.querySelector(`.wanjuan-theme-transition-mask-circle`);
@@ -124,14 +136,16 @@ export function wanjuanRunThemeTransitionFallback(
   typeof applyTheme == `function` && applyTheme();
 
   // 时间线：扩散遮罩圆、放大并淡出光环、最后整体淡出并移除捕获层。
-  gsap
-    .timeline({
+  activeTransitionTimeline = gsap.timeline({
       defaults: {
         ease: `sine.inOut`,
       },
       onComplete: () => {
+        if (transitionEpoch !== activeTransitionEpoch) return;
         captureEl?.remove?.();
         document.documentElement.classList.remove(`wanjuan-theme-transitioning`);
+        window.__wanjuanThemeTransitionActive = false;
+        activeTransitionTimeline = null;
       },
     })
     .to(
@@ -208,8 +222,12 @@ export function wanjuanRunThemeTransition(
   const started = wanjuanRunThemeTransitionFallback(theme, applyTheme, radius);
 
   if (started) {
-    window.setTimeout(() => {
+    const transitionEpoch = activeTransitionEpoch;
+    activeTransitionTimeout = window.setTimeout(() => {
+      if (transitionEpoch !== activeTransitionEpoch) return;
       window.__wanjuanThemeTransitionActive = false;
+      document.documentElement.classList.remove(`wanjuan-theme-transitioning`);
+      activeTransitionTimeout = null;
     }, 760);
     return true;
   } else {

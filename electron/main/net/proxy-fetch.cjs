@@ -153,14 +153,36 @@ function serializeElectronNetHeaders(headers) {
   });
 }
 
+const FALLBACK_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function markProxyTransportError(error, requestCommitted) {
+  const next = error instanceof Error ? error : new Error(String(error || "Proxy transport failed"));
+  try {
+    Object.defineProperty(next, "proxyRequestCommitted", {
+      value: requestCommitted === true,
+      configurable: true,
+    });
+  } catch {
+    next.proxyRequestCommitted = requestCommitted === true;
+  }
+  return next;
+}
+
+function canFallbackProxyTransport(method, error) {
+  const normalizedMethod = String(method || "GET").toUpperCase();
+  if (FALLBACK_SAFE_METHODS.has(normalizedMethod)) return true;
+  return error?.proxyRequestCommitted === false;
+}
+
 function proxyHttpRequestViaElectronNet(url, options = {}) {
   return new Promise((resolve, reject) => {
     if (!net || typeof net.request !== "function") {
-      reject(new Error("Electron net.request is unavailable"));
+      reject(markProxyTransportError(new Error("Electron net.request is unavailable"), false));
       return;
     }
 
     let settled = false;
+    let requestCommitted = false;
     let req;
     let timeoutId = null;
     let responseStream;
@@ -172,7 +194,7 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
       if (settled) return;
       settled = true;
       cleanup();
-      if (error) reject(error);
+      if (error) reject(markProxyTransportError(error, requestCommitted));
       else resolve(result);
     };
 
@@ -259,7 +281,11 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
         });
       }
 
-      if (body && body.length > 0) req.write(body);
+      if (body && body.length > 0) {
+        requestCommitted = true;
+        req.write(body);
+      }
+      requestCommitted = true;
       req.end();
     } catch (error) {
       cleanup();
@@ -363,10 +389,18 @@ async function proxyHttpRequest(url, options = {}) {
     return await proxyHttpRequestViaElectronNet(url, options);
   } catch (error) {
     if (options.signal?.aborted || error?.name === "AbortError") throw error;
+    if (!canFallbackProxyTransport(options.method, error)) {
+      appendDesktopLog("proxy-http-electron-net-no-replay", {
+        url,
+        method: options.method || "GET",
+        error
+      });
+      throw error;
+    }
     appendDesktopLog("proxy-http-electron-net-fallback", {
       url,
       method: options.method || "GET",
-      error: formatErrorMessage(error)
+      error
     });
     return proxyHttpRequestViaNode(url, options);
   }
@@ -387,6 +421,8 @@ module.exports = {
   sanitizeProxyFetchHeaders,
   serializeProxyFetchHeaders,
   serializeElectronNetHeaders,
+  markProxyTransportError,
+  canFallbackProxyTransport,
   proxyHttpRequestViaElectronNet,
   proxyHttpRequestViaNode,
   proxyHttpRequest,

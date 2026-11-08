@@ -18,34 +18,36 @@ StarCanvas启动后会在当前用户数据目录创建一次性本机自动化�
 
 ## 正式版位置
 
-CLI/MCP 作为真实文件随安装包放在 `resources/wanjuan-cli`，不会只存在于 `app.asar` 中。
+CLI/MCP 作为真实文件随安装包放在 `resources/starcanvas-cli`，不会只存在于 `app.asar` 中。
 
 macOS：
 
 ```bash
-node "/Applications/StarCanvas.app/Contents/Resources/wanjuan-cli/wanjuan.mjs" status
+node "/Applications/StarCanvas.app/Contents/Resources/starcanvas-cli/starcanvas.mjs" status
 ```
 
 Windows：在StarCanvas安装目录下使用：
 
 ```powershell
-node ".\resources\wanjuan-cli\wanjuan.mjs" status
+node ".\resources\starcanvas-cli\starcanvas.mjs" status
 ```
 
 源码开发目录中可以使用：
 
 ```bash
-npm run wanjuan -- status
-npm run wanjuan -- models
-npm run wanjuan -- tasks
+npm run starcanvas -- status
+npm run starcanvas -- models
+npm run starcanvas -- tasks
 ```
+
+旧版 `wanjuan` / `wanjuan-mcp` 命令与 `resources/wanjuan-cli` 路径暂时保留为兼容别名；新配置统一使用 StarCanvas 名称。
 
 ## CLI 命令
 
 提交图片任务：
 
 ```bash
-npm run wanjuan -- image generate \
+npm run starcanvas -- image generate \
   --prompt "一只在月球散步的橘猫，电影感光影" \
   --model "gpt-image-2" \
   --size "1024x1024"
@@ -56,7 +58,7 @@ npm run wanjuan -- image generate \
 提交图生视频任务：
 
 ```bash
-npm run wanjuan -- video generate \
+npm run starcanvas -- video generate \
   --prompt "镜头缓慢推进，猫咪抬头看向星空" \
   --model "wan2.7-i2v-flash-720P" \
   --image "/绝对路径/输入图片.png" \
@@ -67,7 +69,7 @@ npm run wanjuan -- video generate \
 提交即梦天玑专用任务：
 
 ```bash
-npm run wanjuan -- tianji generate \
+npm run starcanvas -- tianji generate \
   --prompt "首帧人物转头看向镜头" \
   --mode first-frame \
   --image "/绝对路径/首帧.png" \
@@ -79,7 +81,7 @@ npm run wanjuan -- tianji generate \
 已审核天玑人像使用专用参数：
 
 ```bash
-npm run wanjuan -- tianji generate \
+npm run starcanvas -- tianji generate \
   --prompt "镜头缓慢推进" \
   --mode reference-media \
   --portrait-asset-id '<final-active-id>'
@@ -90,9 +92,9 @@ npm run wanjuan -- tianji generate \
 生成命令立即返回 `nodeId`。以下命令同时接受 `taskId` 或该 `nodeId`：
 
 ```bash
-npm run wanjuan -- task get automation-video-...
-npm run wanjuan -- task wait automation-video-... --timeout 600
-npm run wanjuan -- task cancel automation-video-...
+npm run starcanvas -- task get automation-video-...
+npm run starcanvas -- task wait automation-video-... --timeout 600
+npm run starcanvas -- task cancel automation-video-...
 ```
 
 如果模型、接口配置或输入参数导致任务根本没有创建，自动化任务会快速进入 `failed`，`task wait` 不会一直等到完整超时时间。
@@ -102,7 +104,7 @@ npm run wanjuan -- task cancel automation-video-...
 源码目录启动：
 
 ```bash
-npm run wanjuan:mcp
+npm run starcanvas:mcp
 ```
 
 正式 macOS 安装包配置示例：
@@ -110,31 +112,31 @@ npm run wanjuan:mcp
 ```json
 {
   "mcpServers": {
-    "wanjuan-lingjing": {
+    "starcanvas": {
       "command": "node",
       "args": [
-        "/Applications/StarCanvas.app/Contents/Resources/wanjuan-cli/wanjuan-mcp.mjs"
+        "/Applications/StarCanvas.app/Contents/Resources/starcanvas-cli/starcanvas-mcp.mjs"
       ]
     }
   }
 }
 ```
 
-Windows 将 `args` 改为安装目录下 `resources\\wanjuan-cli\\wanjuan-mcp.mjs` 的绝对路径。
+Windows 将 `args` 改为安装目录下 `resources\\starcanvas-cli\\starcanvas-mcp.mjs` 的绝对路径。
 
 MCP 工具：
 
-- `wanjuan_status`
-- `wanjuan_list_models`
-- `wanjuan_list_tasks`
-- `wanjuan_generate_image`
-- `wanjuan_generate_video`
-- `wanjuan_generate_tianji_video`
-- `wanjuan_get_task`
-- `wanjuan_wait_task`
-- `wanjuan_cancel_task`
+- `starcanvas_status`
+- `starcanvas_list_models`
+- `starcanvas_list_tasks`
+- `starcanvas_generate_image`
+- `starcanvas_generate_video`
+- `starcanvas_generate_tianji_video`
+- `starcanvas_get_task`
+- `starcanvas_wait_task`
+- `starcanvas_cancel_task`
 
-MCP 的 `wanjuan_generate_tianji_video` 提供等价的 `portraitAssetIds` 数组。该字段走严格的已审核人像通道，不能由普通 `images` 或任意 `asset://` 字符串替代。
+MCP 的 `starcanvas_generate_tianji_video` 提供等价的 `portraitAssetIds` 数组。该字段走严格的已审核人像通道，不能由普通 `images` 或任意 `asset://` 字符串替代。
 
 MCP Server 的 stdout 只输出 JSON-RPC 消息；工具错误作为 MCP 结果返回。
 
@@ -153,5 +155,5 @@ MCP Server 的 stdout 只输出 JSON-RPC 消息；工具错误作为 MCP 结果�
 - App 启动和退出都会尽力清理旧凭据。
 - 参考文件必须使用有效绝对路径，远程资源只允许 `http/https`。
 - 请求体限制为 2MB；参考图片文件限制为 100MB。
-- 生成操作可能产生费用，智能体应在调用 `wanjuan_generate_image` 或 `wanjuan_generate_video` 前获得用户授权。
+- 生成操作可能产生费用，智能体应在调用 `starcanvas_generate_image` 或 `starcanvas_generate_video` 前获得用户授权。
 - 本地已授权客户端可以读取任务提示词、状态和结果 URL；不要把自动化凭据文件共享给其他用户或进程。

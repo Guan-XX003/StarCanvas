@@ -9,6 +9,8 @@
  */
 
 /** 极心内置的天玑 Seedance 视频模型清单。 */
+import { JIXIN_H3_MODEL, JIXIN_H3_PROTOCOL_NAME, JIXIN_H3_PROTOCOL } from "./jixin-h3";
+
 export const WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS = [
   `doubao-seedance-2-0-260128`,
   `doubao-seedance-2-0-fast-260128`,
@@ -77,7 +79,7 @@ export const WANJUAN_JIXIN_DEFAULT_API_URL = `https://jixing.guancn.uk`;
 export const WANJUAN_JIXIN_DEFAULT_DOC_URL = `https://kcn07wr6x9xu.feishu.cn/wiki/RBPHwKfzhiq7Xuk06M8c3NgInKd`;
 export const WANJUAN_CONFIG_BUTLER_DEFAULT_MODEL = `gpt-5.5`;
 export const WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID = `builtin-jixin-base`;
-export const WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION = `2026-07-11-wan27-protocols-v3`;
+export const WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION = `2026-10-01-model-catalog-v7`;
 export const wanjuanIsLegacyJixinDocUrl = (url: any) => {
   let normalizedUrl = String(url || ``).trim().replace(/\/+$/, ``);
   return normalizedUrl === `${WANJUAN_JIXIN_DEFAULT_API_URL}/docs` ||
@@ -93,6 +95,7 @@ export const WANJUAN_JIXIN_BUILTIN_TEXT_MODELS = [
   `deepseek-v3.2-thinking`,
   `deepseek-v3.2`,
   // Claude 系列
+  `claude-opus-5`,
   `claude-opus-4-6`,
   `claude-opus-4-5-20251101`,
   `claude-sonnet-4-6`,
@@ -101,6 +104,7 @@ export const WANJUAN_JIXIN_BUILTIN_TEXT_MODELS = [
   `qwen3.7-max`,
   `qwen3.6-plus`,
   // Gemini 系列
+  `gemini-3.8-flash`,
   `gemini-3.1-pro-preview`,
   `gemini-3.1-pro`,
   `gemini-3-pro`,
@@ -128,6 +132,7 @@ export const WANJUAN_JIXIN_BUILTIN_IMAGE_MODELS = [
   `gpt-image-1.5`,
   `lconai-gpt-image-2`,
   // Gemini Image 系列
+  `gemini-3.1-flash-lite-image`,
   `gemini-3.1-flash-image-preview-4k`,
   `gemini-3.1-flash-image-preview-2k`,
   `gemini-3.1-flash-image-preview`,
@@ -157,6 +162,7 @@ export const WANJUAN_JIXIN_BUILTIN_VIDEO_MODELS = [
   `grok-video-3`,
   `grok-image-video`,
   `grok-imagine-video-1.5-preview`,
+  JIXIN_H3_MODEL,
 ];
 export const WANJUAN_JIXIN_BUILTIN_TONGYI_WANXIANG_TEXT_MODELS = [
   `wan2.7-t2v-1080P`,
@@ -210,12 +216,14 @@ export const WANJUAN_JIXIN_BUILTIN_TEXT_PROTOCOLS = {
     [model]: `极鑫文本兼容`,
   }), {}),
   // Gemini 系列按智创文档建议使用 Generate Content 协议
+  [`gemini-3.8-flash`]: `极鑫文本兼容`,
   [`gemini-3-pro`]: `Gemini 文本原生`,
   [`gemini-3.1-pro`]: `Gemini 文本原生`,
   [`gemini-3.1-pro-preview`]: `Gemini 文本原生`,
   [`gemini-3.1-flash-lite-preview`]: `Gemini 文本原生`,
   [`gemini-3-flash-preview`]: `Gemini 文本原生`,
   // Claude 系列按智创文档使用 Messages 协议
+  [`claude-opus-5`]: `极鑫文本兼容`,
   [`claude-opus-4-6`]: `极鑫 Claude Messages 兼容`,
   [`claude-opus-4-5-20251101`]: `极鑫 Claude Messages 兼容`,
   [`claude-sonnet-4-6`]: `极鑫 Claude Messages 兼容`,
@@ -230,6 +238,7 @@ export const WANJUAN_JIXIN_BUILTIN_IMAGE_PROTOCOLS = {
   // Z-Image
   [`Z-Image-Turbo`]: `极鑫图片兼容`,
   // Gemini Image 系列
+  [`gemini-3.1-flash-lite-image`]: `极鑫 Gemini Lite 图片原生（实验）`,
   [`gemini-3.1-flash-image-preview-4k`]: `极鑫 Gemini 图片兼容`,
   [`gemini-3.1-flash-image-preview-2k`]: `极鑫 Gemini 图片兼容`,
   [`gemini-3.1-flash-image-preview`]: `极鑫 Gemini 图片兼容`,
@@ -254,6 +263,7 @@ export const WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS = {
     ...bindings,
     [model]: /^grok-/i.test(model) ? `极鑫 Grok 视频兼容` : `极鑫 Veo/Omni 视频兼容`,
   }), {}),
+  [JIXIN_H3_MODEL]: JIXIN_H3_PROTOCOL_NAME,
   [`grok-image-video`]: `极鑫 Grok Image Video 兼容`,
   [`sora_video2`]: `极鑫 Sora 视频兼容`,
   [`sora-video2`]: `极鑫 Sora 视频兼容`,
@@ -293,6 +303,7 @@ export const WANJUAN_JIXIN_BUILTIN_AUDIO_PROTOCOL_BINDINGS = {
   }), {}),
 };
 export const WANJUAN_JIXIN_BUILTIN_PROTOCOLS = {
+  [JIXIN_H3_PROTOCOL_NAME]: JIXIN_H3_PROTOCOL,
   [`极鑫文本兼容`]: {
     category: `text`,
     requestType: `openai-chat`,
@@ -405,6 +416,25 @@ export const WANJUAN_JIXIN_BUILTIN_PROTOCOLS = {
     },
     responseMapping: {
       image: [`candidates.0.content.parts.0.inlineData.data`, `candidates.0.content.parts.0.inline_data.data`, `candidates.0.content.parts.0.fileData.fileUri`, `candidates.0.content.parts.0.file_data.file_uri`, `candidates.0.content.parts.0.text`, `text`],
+    },
+  },
+  [`极鑫 Gemini Lite 图片原生（实验）`]: {
+    category: `image`,
+    requestType: `gemini-generate-content`,
+    submitPath: `/v1beta/models/{model}:generateContent`,
+    contentType: `application/json`,
+    experimental: true,
+    parameterAdapter: {
+      sizeValueMode: `preset`,
+      aspectRatioValueMode: `ratio`,
+      fixedImageSize: `1K`,
+    },
+    validationNotes: [
+      `Google 原生契约仅支持 1K；生产 type1 渠道尚无成功调用样本。`,
+      `参考图仅按 Gemini inline_data/file part 发送，不假定 OpenAI Images 编辑协议可用。`,
+    ],
+    responseMapping: {
+      image: [`candidates.0.content.parts.0.inlineData.data`, `candidates.0.content.parts.0.inline_data.data`],
     },
   },
   [`极鑫视频兼容`]: {
@@ -1085,6 +1115,16 @@ export const wanjuanSyncJixinBuiltinStoredGlobalConfig = (settings: any = {}) =>
     storedGlobalConfigs: nextConfigs,
     activeStoredGlobalConfigId: settings.activeStoredGlobalConfigId || builtinConfig.id,
   };
+};
+export const wanjuanMigrateJixinBuiltinCatalog = (settings: any = {}) => {
+  // A catalog update must not merge built-in model/API/protocol bindings into an
+  // active manual preset. Refresh the stored built-in preset independently, and
+  // only merge the catalog into live settings when that built-in preset is active.
+  const activeBuiltin = settings.activeStoredGlobalConfigId === WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID;
+  const liveSettings = activeBuiltin ?
+    wanjuanApplySeedanceOptionDefaults(wanjuanBuildJixinBuiltinBasePatch(settings)) :
+    settings;
+  return wanjuanSyncJixinBuiltinStoredGlobalConfig(liveSettings);
 };
 export const WANJUAN_BUILTIN_AGENT_ITEMS = [{
     id: `agent-seedance-prompt-optimizer`,

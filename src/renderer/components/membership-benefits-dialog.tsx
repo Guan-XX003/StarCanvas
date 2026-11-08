@@ -76,7 +76,7 @@ export function WanJuanMembershipBenefitsDialog({
             <div>
               <div className="wanjuan-membership-title-line">
                 <h3 id="wanjuan-membership-dialog-title">StarCanvas会员</h3>
-                <span className="wanjuan-membership-beta-tag">内测开放</span>
+                <span className="wanjuan-membership-beta-tag">会员服务</span>
               </div>
               <p id="wanjuan-membership-dialog-description">为个人创作与团队协作提供更完整的模型和提示词能力</p>
             </div>
@@ -102,7 +102,7 @@ export function WanJuanMembershipBenefitsDialog({
         </div>
 
         <footer className="wanjuan-membership-dialog-footer">
-          <p>开通会员需要内测码，详情联系 QQ：<strong>{WANJUAN_MEMBERSHIP_CONTACT_QQ}</strong>。</p>
+          <p>注册账号无需内测码；会员服务详情请联系 QQ：<strong>{WANJUAN_MEMBERSHIP_CONTACT_QQ}</strong>。</p>
           <button type="button" className="wanjuan-account-outline-button" onClick={copyQQ} aria-label={`复制 QQ ${WANJUAN_MEMBERSHIP_CONTACT_QQ}`}>
             <Copy size={14} />复制 QQ
           </button>

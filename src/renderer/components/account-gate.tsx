@@ -5,7 +5,6 @@ import {
   Building2,
   CheckCircle2,
   Cloud,
-  KeyRound,
   LockKeyhole,
   ShieldCheck,
   UserRound,
@@ -17,6 +16,7 @@ import {
   continueWithLocalMode,
   getAccountState,
   loginAccount,
+  resetAccountPassword,
   sendAccountCode,
   subscribeAccount,
 } from "../lib/account";
@@ -26,12 +26,34 @@ const isValidAccountEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test
 function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
   const account = useSyncExternalStore(subscribeAccount, getAccountState, getAccountState);
   const [register, setRegister] = useState(false);
+  const [loginMethod, setLoginMethod] = useState<"password" | "otp" | "reset">("otp");
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [password, setPassword] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [notice, setNotice] = useState("");
   const [formError, setFormError] = useState("");
+  const passwordAuthEnabled = account.featureFlags?.passwordAuth === true;
+  const passwordRegistrationEnabled = account.featureFlags?.passwordRegistration === true;
+  const passwordResetEnabled = account.featureFlags?.passwordReset === true;
+  const activeRegister = register && passwordRegistrationEnabled;
+  const activeLoginMethod = passwordAuthEnabled ? loginMethod : "otp";
+  const needsPassword = activeRegister || activeLoginMethod !== "otp";
+  const needsCode = activeRegister || activeLoginMethod !== "password";
+  const reset = !activeRegister && activeLoginMethod === "reset" && passwordResetEnabled;
+  const changeMode = (nextRegister: boolean, method: "password" | "otp" | "reset" = "password") => {
+    const allowedRegister = nextRegister && passwordRegistrationEnabled;
+    const allowedMethod = method === "password" && !passwordAuthEnabled ? "otp" : method === "reset" && !passwordResetEnabled ? "otp" : method;
+    setRegister(allowedRegister); setLoginMethod(allowedMethod); setPassword(""); setCode(""); setNotice(""); setFormError("");
+  };
+
+  useEffect(() => {
+    if ((!passwordRegistrationEnabled && register) || (!passwordAuthEnabled && loginMethod === "password") || (!passwordResetEnabled && loginMethod === "reset")) {
+      setRegister(false);
+      setLoginMethod("otp");
+      setPassword("");
+    }
+  }, [loginMethod, passwordAuthEnabled, passwordRegistrationEnabled, passwordResetEnabled, register]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -46,7 +68,7 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
       setFormError("请输入有效的邮箱地址");
       return;
     }
-    const result = await sendAccountCode(identifier, register ? "register" : "login");
+    const result = await sendAccountCode(identifier, activeRegister ? "register" : reset ? "reset_password" : "login");
     if (result?.ok) {
       setCooldown(60);
       setNotice("验证码已发送，请检查邮箱");
@@ -60,7 +82,14 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
       setFormError("请输入有效的邮箱地址");
       return;
     }
-    await loginAccount({ identifier, code, inviteCode, register });
+    if (reset) {
+      const result = await resetAccountPassword(identifier, code, password);
+      if (!result.ok) { setFormError(result.error || "密码重置失败"); return; }
+      changeMode(false);
+      setNotice("密码已重置，请重新登录");
+      return;
+    }
+    await loginAccount({ identifier, ...(needsCode ? { code } : {}), ...(needsPassword ? { password } : {}), register: activeRegister });
   };
 
   return (
@@ -95,15 +124,15 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
 
       <section className="wanjuan-account-auth-form-panel">
         <div className="wanjuan-account-auth-tabs" role="tablist" aria-label="登录方式">
-          <button type="button" className={!register ? "is-active" : ""} onClick={() => setRegister(false)}>登录</button>
-          <button type="button" className={register ? "is-active" : ""} onClick={() => setRegister(true)}>注册</button>
+          <button type="button" className={!activeRegister ? "is-active" : ""} onClick={() => changeMode(false, "otp")}>登录</button>
+          {passwordRegistrationEnabled && <button type="button" className={activeRegister ? "is-active" : ""} onClick={() => changeMode(true)}>注册</button>}
         </div>
 
         <div className="wanjuan-account-form-heading">
           <UserRound size={20} />
           <div>
-            <strong>{register ? "创建StarCanvas账号" : "欢迎回来"}</strong>
-            <span>{register ? "内测阶段可通过邀请码创建账号" : "使用邮箱验证码登录"}</span>
+            <strong>{activeRegister ? "创建StarCanvas账号" : "欢迎回来"}</strong>
+            <span>{activeRegister ? "使用邮箱、密码和邮箱验证码注册" : reset ? "验证邮箱后设置新密码" : activeLoginMethod === "password" ? "使用邮箱和密码登录" : "使用邮箱验证码登录"}</span>
           </div>
         </div>
 
@@ -129,7 +158,12 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
             />
           </label>
 
-          <label>
+          {needsPassword && <label>
+            <span>登录密码</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={activeRegister || reset ? "new-password" : "current-password"} placeholder="密码长度须为 12–200 个字符" />
+          </label>}
+
+          {needsCode && <label>
             <span>验证码</span>
             <div className="wanjuan-account-code-row">
               <input
@@ -149,22 +183,8 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
                 {cooldown > 0 ? `${cooldown}s` : "获取验证码"}
               </button>
             </div>
-          </label>
+          </label>}
 
-          {register && (
-            <label>
-              <span>邀请码</span>
-              <div className="wanjuan-account-input-with-icon">
-                <KeyRound size={16} />
-                <input
-                  type="text"
-                  value={inviteCode}
-                  onChange={(event) => setInviteCode(event.target.value)}
-                  placeholder="内测邀请码"
-                />
-              </div>
-            </label>
-          )}
 
           {(account.error || formError || notice) && (
             <div className={account.error || formError ? "wanjuan-account-form-error" : "wanjuan-account-form-success"}>
@@ -175,12 +195,16 @@ function AccountAuthSurface({ welcome = false }: { welcome?: boolean }) {
           <button
             type="submit"
             className="wanjuan-account-primary-button"
-            disabled={account.busy || !isValidAccountEmail(identifier) || !code.trim() || !account.serviceConfigured}
+            disabled={account.busy || !isValidAccountEmail(identifier) || (needsCode && !/^\d{6}$/.test(code)) || (needsPassword && ([...password].length < 12 || [...password].length > 200)) || !account.serviceConfigured}
           >
-            <span>{account.busy ? "正在验证" : register ? "注册并继续" : "登录并继续"}</span>
+            <span>{account.busy ? "正在验证" : activeRegister ? "注册并继续" : reset ? "重置密码" : "登录并继续"}</span>
             {!account.busy && <ArrowRight size={17} />}
           </button>
         </form>
+        {!activeRegister && <div className="wanjuan-account-action-row">
+          {passwordAuthEnabled && <button type="button" className="wanjuan-account-outline-button" onClick={() => changeMode(false, activeLoginMethod === "otp" ? "password" : "otp")}>{activeLoginMethod === "otp" ? "密码登录" : "验证码登录"}</button>}
+          {passwordResetEnabled && <button type="button" className="wanjuan-account-outline-button" onClick={() => changeMode(false, "reset")}>忘记密码</button>}
+        </div>}
 
         <div className="wanjuan-account-local-divider"><span>或者</span></div>
         <button type="button" className="wanjuan-account-local-button" disabled={account.busy} onClick={continueWithLocalMode}>

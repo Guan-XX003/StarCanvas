@@ -2,8 +2,8 @@
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { useLayoutEffect, useRef } from "react";
 import { agentChatOuterPadding, agentChatRailStyle, agentMessagesScrollStyle, formatAgentAttachmentSize, formatAgentTime, getAgentAttachmentMeta, releaseAgentAttachment, renderAgentAttachmentGlyph, renderAgentIconSurface } from "../lib/agent";
-import { renderCopyGlyph } from "../lib/app-root-helpers";
 import { WanJuanAgentConfigPanel } from "../components/agent-config-panel";
+import { AgentCardMenu } from "./agent-card-menu";
 
 export function WanJuanSettingsSectionA(props: any) {
   const {
@@ -14,7 +14,6 @@ export function WanJuanSettingsSectionA(props: any) {
     textApiConfigId,
     textModelApiBindings,
     updateSelectedAgent,
-    Trash2,
     activeView,
     addAgentReferenceFile,
     agentAttachmentInputRef,
@@ -163,8 +162,11 @@ export function WanJuanSettingsSectionA(props: any) {
                       className: `flex-1 overflow-y-auto px-3 pb-3 pt-2 space-y-2 custom-scrollbar`,
                       children: filteredAgentItems.length > 0 ?
                         filteredAgentItems.map((agent) =>
-                          jsxs(
+                          jsxs(`div`, {
+                            className: `wanjuan-agent-card-wrap relative`,
+                            children: [jsxs(
                             `button`, {
+                              type: `button`,
                               onClick: () => setSelectedAgentId(agent.id),
                               className: `wanjuan-agent-role-card ${selectedAgentId === agent.id ? `wanjuan-agent-role-card-active` : ``} group relative w-full text-left rounded-2xl border p-3 transition-colors`,
                               style: selectedAgentId === agent.id ?
@@ -203,7 +205,7 @@ export function WanJuanSettingsSectionA(props: any) {
                                       className: `flex-1 min-w-0`,
                                       children: [
                                         jsxs(`div`, {
-                                          className: `flex items-center justify-between gap-2`,
+                                          className: `flex items-center justify-between gap-2 pr-7`,
                                           children: [
                                             jsx(`div`, {
                                               className: `truncate text-sm font-semibold`,
@@ -212,17 +214,6 @@ export function WanJuanSettingsSectionA(props: any) {
                                                 color: selectedAgentId === agent.id ? `#111827` : agentTheme.textPrimary,
                                               },
                                               children: agent.name,
-                                            }),
-                                            jsx(`span`, {
-                                              className: `text-[10px] whitespace-nowrap`,
-                                              "data-wanjuan-i18n-skip": true,
-                                              style: {
-                                                color: selectedAgentId === agent.id ? `rgba(17,24,39,0.72)` : agentTheme.textMuted,
-                                              },
-                                              children: formatAgentTime(
-                                                (agentConversations[agent.id] || []).slice(-1)[0]
-                                                ?.createdAt || agent.updatedAt,
-                                              ),
                                             }),
                                           ],
                                         }),
@@ -238,7 +229,7 @@ export function WanJuanSettingsSectionA(props: any) {
                                           className: `mt-2 flex items-center gap-2 text-[10px] text-gray-500`,
                                           children: [
                                             jsx(`span`, {
-                                              className: `rounded-full px-2 py-0.5 text-[10px]`,
+                                              className: `flex-shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px]`,
                                               style: selectedAgentId === agent.id ?
                                                 {
                                                   border: `1px solid rgba(17,24,39,0.30)`,
@@ -257,12 +248,23 @@ export function WanJuanSettingsSectionA(props: any) {
                                                 `对话`,
                                             }),
                                             jsx(`span`, {
-                                              className: `truncate max-w-[110px]`,
+                                              className: `min-w-0 flex-1 truncate max-w-[110px]`,
                                               "data-wanjuan-i18n-skip": true,
                                               style: {
                                                 color: selectedAgentId === agent.id ? `rgba(17,24,39,0.82)` : agentTheme.textSecondary,
                                               },
                                               children: agent.model || agentT(`未绑定模型`),
+                                            }),
+                                            jsx(`span`, {
+                                              className: `ml-auto flex-shrink-0 whitespace-nowrap text-[10px]`,
+                                              "data-wanjuan-i18n-skip": true,
+                                              style: {
+                                                color: selectedAgentId === agent.id ? `rgba(17,24,39,0.72)` : agentTheme.textMuted,
+                                              },
+                                              children: formatAgentTime(
+                                                (agentConversations[agent.id] || []).slice(-1)[0]
+                                                ?.createdAt || agent.updatedAt,
+                                              ),
                                             }),
                                           ],
                                         }),
@@ -270,41 +272,16 @@ export function WanJuanSettingsSectionA(props: any) {
                                     }),
                                   ],
                                 }),
-                                jsxs(`div`, {
-                                  className: `absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 bg-[#181f29] pl-2`,
-                                  children: [
-                                    jsx(`button`, {
-                                      onClick: (event) => {
-                                        (event.preventDefault(),
-                                          event.stopPropagation(),
-                                          duplicateSelectedAgent());
-                                      },
-                                      className: `p-1.5 text-gray-500 hover:text-gray-100 rounded-md hover:bg-[#202734] transition-colors`,
-                                      title: `复制智能体`,
-                                      children: renderCopyGlyph(14),
-                                    }),
-                                    jsx(`button`, {
-                                      onClick: (event) => {
-                                        (event.preventDefault(),
-                                          event.stopPropagation(),
-                                          setSelectedAgentId(agent.id),
-                                          setTimeout(
-                                            () => deleteSelectedAgent(),
-                                            0,
-                                          ));
-                                      },
-                                      className: `wanjuan-danger-icon-action p-1.5 text-red-400 hover:text-red-300 rounded-md hover:bg-red-500/10 transition-colors`,
-                                      title: `删除智能体`,
-                                      children: jsx(Trash2, {
-                                        size: 14,
-                                      }),
-                                    }),
-                                  ],
-                                }),
                               ],
-                            },
-                            agent.id,
-                          ),
+                            }),
+                            jsx(AgentCardMenu, {
+                              agent, activeView, t: agentT,
+                              onEdit: (target) => { setSelectedAgentId(target.id); setAgentConfigOpen(true); },
+                              onDuplicate: duplicateSelectedAgent,
+                              onClearConversation: clearSelectedAgentConversation,
+                              onDelete: deleteSelectedAgent,
+                            })],
+                          }, agent.id),
                         ) :
                         jsxs(`div`, {
                           className: `rounded-2xl border border-dashed px-4 py-8 text-center`,
@@ -421,32 +398,6 @@ export function WanJuanSettingsSectionA(props: any) {
                         jsxs(`div`, {
                           className: `flex items-center gap-2 flex-shrink-0 min-w-0`,
                           children: [
-                            jsx(`button`, {
-                              onClick: () => setAgentConfigOpen(true),
-                              className: `inline-flex items-center gap-2 rounded-full border border-[#54565a] bg-[linear-gradient(180deg,rgba(72,74,78,0.82),rgba(56,58,61,0.92))] px-3 py-1.5 text-[11px] text-[#d7dadd] hover:border-[#6a6c70]/60 hover:text-white transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]`,
-                              title: `编辑智能体配置`,
-                              children: `编辑`,
-                            }),
-                            jsx(`button`, {
-                              onClick: clearSelectedAgentConversation,
-                              className: `wanjuan-danger-text-action inline-flex items-center gap-2 rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-200 hover:border-red-300/60 hover:text-red-100 transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]`,
-                              title: `清空当前智能体聊天记录`,
-                              children: `清空`,
-                            }),
-                            jsx(`button`, {
-                              onClick: duplicateSelectedAgent,
-                              className: `p-2 text-gray-500 hover:text-[#eef0f2] transition-colors rounded-xl hover:bg-[#2e3033] border border-transparent hover:border-[#6a6c70]/40`,
-                              title: `复制智能体`,
-                              children: renderCopyGlyph(16),
-                            }),
-                            jsx(`button`, {
-                              onClick: deleteSelectedAgent,
-                              className: `wanjuan-danger-icon-action p-2 text-red-400 hover:text-red-300 transition-colors rounded-xl hover:bg-red-500/10 border border-transparent hover:border-red-400/30`,
-                              title: `删除智能体`,
-                              children: jsx(Trash2, {
-                                size: 16
-                              }),
-                            }),
                             jsx(`span`, {
                               className: `max-w-[180px] truncate rounded-full px-3 py-1 text-[11px]`,
                               "data-wanjuan-i18n-skip": Boolean(selectedAgent?.model),
@@ -689,11 +640,7 @@ export function WanJuanSettingsSectionA(props: any) {
                                                 className: `px-4 py-4 text-sm leading-7 whitespace-pre-wrap break-words`,
                                                 "data-wanjuan-i18n-skip": true,
                                                 style: {
-                                                  // 原 dark 分支写死深蓝 rgba(16,24,39)/rgba(14,20,33)，石墨灰也走它→偏蓝。
-                                                  // 改用 agentTheme.cardBg（按主题取色：石墨灰=中性灰，曜石黑=深蓝灰）。
-                                                  background: isLightAgentTheme ?
-                                                    `linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,250,251,0.96))` :
-                                                    agentTheme.cardBg,
+                                                  background: agentTheme.cardBg,
                                                   color: agentTheme.textPrimary,
                                                 },
                                                 children: message.content,
@@ -935,8 +882,9 @@ export function WanJuanSettingsSectionA(props: any) {
                                                 []
                                               ));
                                           },
-                                          className: `wanjuan-danger-text-action px-4 py-2 rounded-2xl border border-red-400/35 bg-red-500/10 text-xs text-red-200 hover:border-red-300/55 hover:text-red-100 transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`,
-                                          children: `清空`,
+                                          className: `wanjuan-agent-clear-draft px-4 py-2 rounded-2xl text-xs transition-colors`,
+                                          title: agentT(`清空草稿和附件`),
+                                          children: agentT(`清空草稿`),
                                         }),
                                         jsxs(`button`, {
                                           onClick: sendAgentMessage,

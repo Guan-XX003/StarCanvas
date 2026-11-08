@@ -46,6 +46,26 @@ function createCloudPromptWorkspaceController(options = {}) {
     memberIdentifier: "",
     memberRole: "viewer",
   };
+  let syncEpoch = 0;
+  let bootstrapEpoch = 0;
+  const syncInFlight = new Map();
+  const queueFlushInFlight = new Map();
+  const currentSyncScope = () => ({
+    accountId: String(state.account?.id || ""),
+    workspaceId: String(state.activeWorkspaceId || ""),
+    epoch: syncEpoch,
+  });
+  const syncScopeKey = (scope) => `${scope.epoch}:${scope.accountId}:${scope.workspaceId}`;
+  const isCurrentSyncScope = (scope) =>
+    state.authenticated === true &&
+    String(state.account?.id || "") === scope.accountId &&
+    String(state.activeWorkspaceId || "") === scope.workspaceId &&
+    syncEpoch === scope.epoch;
+  const advanceSyncScope = () => {
+    syncEpoch += 1;
+    state.syncing = false;
+    state.membersLoading = false;
+  };
 
   const activeWorkspace = () => state.workspaces.find((item) => item.id === state.activeWorkspaceId) || null;
   const personalWorkspace = () => state.workspaces.find((item) => item.kind === "personal") || null;
@@ -56,8 +76,17 @@ function createCloudPromptWorkspaceController(options = {}) {
       state.templates = [];
       return state.templates;
     }
-    state.templates = await store.listTemplates(state.account.id, state.activeWorkspaceId, { includeArchived: true });
+    const scope = currentSyncScope();
+    const templates = await store.listTemplates(scope.accountId, scope.workspaceId, { includeArchived: true });
+    if (isCurrentSyncScope(scope)) state.templates = templates;
     return state.templates;
+  };
+  const updateTemplatesForScope = async (scope) => {
+    if (!isCurrentSyncScope(scope)) return { stale: true };
+    const templates = await store.listTemplates(scope.accountId, scope.workspaceId, { includeArchived: true });
+    if (!isCurrentSyncScope(scope)) return { stale: true };
+    state.templates = templates;
+    return templates;
   };
   const markOffline = (result) => {
     state.offline = result?.offline === true || Number(result?.status || 0) >= 500;
@@ -73,11 +102,11 @@ function createCloudPromptWorkspaceController(options = {}) {
     return true;
   };
 
-  const queueEntryAllowed = (entry) => {
-    const source = state.workspaces.find((item) => item.id === entry.workspaceId);
+  const queueEntryAllowed = (entry, workspaces = state.workspaces) => {
+    const source = workspaces.find((item) => item.id === entry.workspaceId);
     if (!source || !permissionAllows(source, entry.operation)) return false;
     if (entry.operation === "template.copy") {
-      const target = state.workspaces.find((item) => item.id === entry.targetWorkspaceId);
+      const target = workspaces.find((item) => item.id === entry.targetWorkspaceId);
       return target?.permissions?.canCreate === true;
     }
     return true;
@@ -91,8 +120,9 @@ function createCloudPromptWorkspaceController(options = {}) {
     return denied;
   };
 
-  const executeQueueEntry = async (entry) => {
-    if (!queueEntryAllowed(entry)) {
+  const executeQueueEntry = async (entry, context = {}) => {
+    const workspaces = context.workspaces || state.workspaces;
+    if (!queueEntryAllowed(entry, workspaces)) {
       await store.removeQueueEntry(entry.id);
       if (entry.templateId) {
         const existing = (await store.listTemplates(entry.accountId, entry.workspaceId, { includeArchived: true }))
@@ -110,6 +140,7 @@ function createCloudPromptWorkspaceController(options = {}) {
       revision: entry.revision,
       idempotencyKey: entry.idempotencyKey,
     });
+    if (context.isCurrent && !context.isCurrent()) return { stale: true };
     if (result?.ok) {
       if (entry.operation === "template.create") {
         if (entry.templateId) await store.removeTemplate(entry.accountId, entry.workspaceId, entry.templateId);
@@ -153,48 +184,97 @@ function createCloudPromptWorkspaceController(options = {}) {
       await store.removeQueueEntry(entry.id);
       return result;
     }
-    markOffline(result);
+    if (!context.isCurrent || context.isCurrent()) markOffline(result);
     return result;
   };
 
-  const flushQueue = async () => {
-    if (!state.account?.id || state.offline) return;
-    const queue = await store.listQueue(state.account.id);
-    for (const entry of queue) {
-      const result = await executeQueueEntry(entry);
-      if (result?.offline) break;
+  const flushQueue = async (context = {}) => {
+    const accountId = String(context.accountId || state.account?.id || "");
+    if (!accountId || state.offline) return;
+    const existing = queueFlushInFlight.get(accountId);
+    if (existing) return existing;
+    const promise = (async () => {
+      const queue = await store.listQueue(accountId);
+      for (const entry of queue) {
+        if (context.isCurrent && !context.isCurrent()) break;
+        const result = await executeQueueEntry(entry, context);
+        if (context.isCurrent && !context.isCurrent()) {
+          // Navigation is not permission revocation. Keep pending work for a
+          // later retry; a request may have reached the server already.
+          break;
+        }
+        if (result?.offline) break;
+      }
+      if (!context.isCurrent || context.isCurrent()) {
+        if (context.scope) await updateTemplatesForScope(context.scope);
+        else await updateTemplates();
+      }
+    })();
+    queueFlushInFlight.set(accountId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (queueFlushInFlight.get(accountId) === promise) queueFlushInFlight.delete(accountId);
     }
-    await updateTemplates();
   };
 
   const syncActiveWorkspace = async (options2 = {}) => {
-    if (!state.authenticated || !state.account?.id || !state.activeWorkspaceId || state.syncing) return;
-    state.syncing = true;
-    state.error = "";
-    try {
-      state.offline = false;
-      await flushQueue();
-      const cursor = options2.force ? "" : String(await store.getCursor(state.account.id, state.activeWorkspaceId) || "");
-      const result = cursor
-        ? await invoke({ operation: "template.changes", workspaceId: state.activeWorkspaceId, cursor })
-        : await invoke({ operation: "template.list", workspaceId: state.activeWorkspaceId, includeArchived: true });
-      if (!result?.ok) {
-        markOffline(result);
-        return;
+    if (!state.authenticated || !state.account?.id || !state.activeWorkspaceId) return;
+    const scope = currentSyncScope();
+    const key = syncScopeKey(scope);
+    const existing = syncInFlight.get(key);
+    if (existing) return existing;
+    const workspaces = state.workspaces.map((workspace) => ({ ...workspace, permissions: { ...(workspace.permissions || {}) } }));
+    const promise = (async () => {
+      if (isCurrentSyncScope(scope)) {
+        state.syncing = true;
+        state.error = "";
       }
-      await store.applyRemoteChanges(
-        state.account.id,
-        state.activeWorkspaceId,
-        result.items || [],
-        result.tombstones || [],
-        { replace: !cursor }
-      );
-      await store.setCursor(state.account.id, state.activeWorkspaceId, result.nextCursor || cursor || "");
-      await updateTemplates();
-      state.offline = false;
-      state.error = "";
+      try {
+        if (isCurrentSyncScope(scope)) state.offline = false;
+        await flushQueue({
+          accountId: scope.accountId,
+          scope,
+          workspaces,
+          isCurrent: () => isCurrentSyncScope(scope),
+        });
+        if (!isCurrentSyncScope(scope)) return { stale: true };
+        const cursor = options2.force ? "" : String(await store.getCursor(scope.accountId, scope.workspaceId) || "");
+        if (!isCurrentSyncScope(scope)) return { stale: true };
+        const result = cursor
+          ? await invoke({ operation: "template.changes", workspaceId: scope.workspaceId, cursor })
+          : await invoke({ operation: "template.list", workspaceId: scope.workspaceId, includeArchived: true });
+        if (!isCurrentSyncScope(scope)) return { stale: true };
+        if (!result?.ok) {
+          markOffline(result);
+          return result;
+        }
+        const applied = await store.applyRemoteChanges(
+          scope.accountId,
+          scope.workspaceId,
+          result.items || [],
+          result.tombstones || [],
+          { replace: !cursor, isCurrent: () => isCurrentSyncScope(scope) }
+        );
+        if (applied?.stale || !isCurrentSyncScope(scope)) {
+          return { stale: true };
+        }
+        await store.setCursor(scope.accountId, scope.workspaceId, result.nextCursor || cursor || "");
+        if (!isCurrentSyncScope(scope)) return { stale: true };
+        const listed = await updateTemplatesForScope(scope);
+        if (listed?.stale) return listed;
+        state.offline = false;
+        state.error = "";
+        return result;
+      } finally {
+        if (isCurrentSyncScope(scope)) state.syncing = false;
+      }
+    })();
+    syncInFlight.set(key, promise);
+    try {
+      return await promise;
     } finally {
-      state.syncing = false;
+      if (syncInFlight.get(key) === promise) syncInFlight.delete(key);
     }
   };
 
@@ -205,10 +285,14 @@ function createCloudPromptWorkspaceController(options = {}) {
       if (options2.sync) await syncActiveWorkspace();
       return state;
     }
+    const previousScope = currentSyncScope();
+    const previousAuthenticated = state.authenticated;
+    const requestEpoch = ++bootstrapEpoch;
     state.loading = true;
     state.lastBootstrapAt = now;
     try {
       const result = await invoke({ operation: "bootstrap" });
+      if (requestEpoch !== bootstrapEpoch) return state;
       state.initialized = true;
       state.authenticated = result?.authenticated === true;
       state.mock = result?.mock === true;
@@ -216,6 +300,7 @@ function createCloudPromptWorkspaceController(options = {}) {
       state.offline = result?.offline === true;
       state.error = String(result?.error || "");
       if (!state.authenticated || !state.account?.id) {
+        if (previousAuthenticated || previousScope.accountId || previousScope.workspaceId) advanceSyncScope();
         state.workspaces = [];
         state.activeWorkspaceId = "";
         state.templates = [];
@@ -227,14 +312,19 @@ function createCloudPromptWorkspaceController(options = {}) {
         return state;
       }
       await store.ensureAccountIsolation(state.account.id);
+      if (requestEpoch !== bootstrapEpoch) return state;
       const remoteWorkspaces = (result.workspaces || []).map(normalizePromptWorkspace).filter((item) => item.id && item.permissions?.canRead === true);
       const cachedWorkspaces = await store.getWorkspaceCache(state.account.id);
+      if (requestEpoch !== bootstrapEpoch) return state;
       const previousWorkspaceId = state.activeWorkspaceId;
       state.workspaces = state.offline ? cachedWorkspaces : remoteWorkspaces;
       if (!state.offline) {
         await store.setWorkspaceCache(state.account.id, remoteWorkspaces);
+        if (requestEpoch !== bootstrapEpoch) return state;
         await store.pruneUnauthorizedWorkspaces(state.account.id, remoteWorkspaces.map((item) => item.id));
+        if (requestEpoch !== bootstrapEpoch) return state;
         await pruneUnauthorizedQueue();
+        if (requestEpoch !== bootstrapEpoch) return state;
       }
       if (!state.workspaces.some((item) => item.id === state.activeWorkspaceId)) {
         state.activeWorkspaceId = personalWorkspace()?.id || state.workspaces[0]?.id || "";
@@ -244,16 +334,23 @@ function createCloudPromptWorkspaceController(options = {}) {
           state.invitations = [];
         }
       }
+      if (
+        previousAuthenticated !== state.authenticated ||
+        previousScope.accountId !== String(state.account?.id || "") ||
+        previousScope.workspaceId !== String(state.activeWorkspaceId || "")
+      ) advanceSyncScope();
       await updateTemplates();
       if (options2.sync && state.activeWorkspaceId && !state.offline) await syncActiveWorkspace();
       return state;
     } finally {
-      state.loading = false;
+      if (requestEpoch === bootstrapEpoch) state.loading = false;
     }
   };
 
   const loadSharing = async (workspaceId = state.activeWorkspaceId) => {
     if (!state.authenticated || !workspaceId) return { members: [], invitations: [] };
+    const scope = currentSyncScope();
+    if (scope.workspaceId !== workspaceId) return { stale: true };
     state.membersLoading = true;
     try {
       const workspace = state.workspaces.find((item) => item.id === workspaceId);
@@ -261,18 +358,21 @@ function createCloudPromptWorkspaceController(options = {}) {
         invoke({ operation: "member.list", workspaceId }),
         workspace?.permissions?.canShare ? invoke({ operation: "invitation.list", workspaceId }) : Promise.resolve({ ok: true, items: [] }),
       ]);
+      if (!isCurrentSyncScope(scope)) return { stale: true };
       state.members = membersResult?.ok ? membersResult.items || [] : [];
       state.invitations = invitationsResult?.ok ? invitationsResult.items || [] : [];
       const failure = !membersResult?.ok ? membersResult : !invitationsResult?.ok ? invitationsResult : null;
       state.error = failure ? String(failure.error || "成员与共享服务暂不可用") : "";
       return { members: state.members, invitations: state.invitations };
     } finally {
-      state.membersLoading = false;
+      if (isCurrentSyncScope(scope)) state.membersLoading = false;
     }
   };
   const loadInvitationInbox = async () => {
     if (!state.authenticated) return [];
+    const scope = currentSyncScope();
     const result = await invoke({ operation: "invitation.inbox" });
+    if (!isCurrentSyncScope(scope)) return { stale: true };
     state.invitationInbox = result?.ok ? result.items || [] : [];
     if (!result?.ok) state.error = String(result.error || "邀请服务暂不可用");
     return state.invitationInbox;
@@ -503,7 +603,9 @@ function createCloudPromptWorkspaceController(options = {}) {
       return true;
     }
     if (action === "cloud-sharing-open") {
+      const scope = currentSyncScope();
       await Promise.all([loadSharing(state.activeWorkspaceId), loadInvitationInbox()]);
+      if (!isCurrentSyncScope(scope)) return false;
       state.activeSection = "sharing";
       requestRender();
       return true;
@@ -659,7 +761,9 @@ function createCloudPromptWorkspaceController(options = {}) {
 
   const handleField = async (field, value) => {
     if (field === "cloudWorkspaceId") {
-      state.activeWorkspaceId = String(value || "");
+      const nextWorkspaceId = String(value || "");
+      if (state.activeWorkspaceId !== nextWorkspaceId) advanceSyncScope();
+      state.activeWorkspaceId = nextWorkspaceId;
       state.editor = null;
       state.activeSection = "templates";
       state.members = [];
@@ -858,6 +962,8 @@ function createCloudPromptWorkspaceController(options = {}) {
   };
 
   const reset = () => {
+    bootstrapEpoch += 1;
+    advanceSyncScope();
     Object.assign(state, {
       initialized: false,
       authenticated: false,

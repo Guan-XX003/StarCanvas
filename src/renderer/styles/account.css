@@ -495,6 +495,48 @@
   padding: 18px;
 }
 
+.wanjuan-cloud-project-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wanjuan-cloud-project-controls label {
+  display: grid;
+  gap: 5px;
+  min-width: min(220px, 100%);
+  color: var(--wj-muted, #94a3b8);
+  font-size: 11px;
+}
+
+.wanjuan-cloud-project-controls select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 6px;
+  color: var(--wj-text, #f8fafc);
+  background: var(--wj-panel, #1f2937);
+}
+
+.wanjuan-cloud-project-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wanjuan-cloud-project-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--wj-text, #f8fafc);
+  font-size: 12px;
+}
+
 .wanjuan-account-band-heading,
 .wanjuan-account-band-title {
   display: flex;
@@ -552,7 +594,7 @@
 
 .wanjuan-account-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   margin-top: 15px;
   overflow: hidden;
@@ -590,6 +632,211 @@
   margin: 11px 0 0;
   color: var(--wj-muted, #94a3b8);
   font-size: 10px;
+}
+
+.wanjuan-account-managed-relay-row,
+.wanjuan-account-wallet-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.wanjuan-account-managed-relay-row > div,
+.wanjuan-account-wallet-metrics > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 7px;
+  background: var(--wj-surface-2, #252a32);
+}
+
+.wanjuan-account-managed-relay-row span,
+.wanjuan-account-managed-relay-row strong,
+.wanjuan-account-wallet-metrics span,
+.wanjuan-account-wallet-metrics strong {
+  display: block;
+}
+
+.wanjuan-account-managed-relay-row span,
+.wanjuan-account-wallet-metrics span {
+  color: var(--wj-muted, #94a3b8);
+  font-size: 10px;
+}
+
+.wanjuan-account-managed-relay-row strong,
+.wanjuan-account-wallet-metrics strong {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--wj-text, #f8fafc);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wanjuan-account-wallet-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.wanjuan-account-wallet-metrics .is-primary {
+  border-color: color-mix(in srgb, var(--wj-accent) 45%, var(--wj-border) 55%);
+  background: color-mix(in srgb, var(--wj-accent) 8%, var(--wj-surface-2) 92%);
+}
+
+.wanjuan-account-wallet-metrics .is-primary strong {
+  color: var(--wj-accent, #38bdf8);
+  font-size: 17px;
+}
+
+.wanjuan-account-wallet-metrics small {
+  display: block;
+  margin-top: 5px;
+  color: var(--wj-muted, #94a3b8);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.wanjuan-account-wallet-metrics small span { display: inline; }
+
+.wanjuan-account-action-row,
+.wanjuan-account-inline-form,
+.wanjuan-account-redeem-row,
+.wanjuan-account-record-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wanjuan-account-icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 6px;
+  background: var(--wj-surface-2, #252a32);
+  color: var(--wj-muted, #94a3b8);
+  cursor: pointer;
+}
+
+.wanjuan-account-icon-button:disabled { cursor: not-allowed; opacity: .45; }
+
+.wanjuan-account-inline-form,
+.wanjuan-account-redeem-row {
+  padding: 11px;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 7px;
+  background: var(--wj-surface-2, #252a32);
+}
+
+.wanjuan-account-inline-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 180px;
+}
+
+.wanjuan-account-inline-form label span {
+  flex: 0 0 auto;
+  color: var(--wj-muted, #94a3b8);
+  font-size: 10px;
+}
+
+.wanjuan-account-inline-form input,
+.wanjuan-account-redeem-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--wj-surface, #1f242b);
+  color: var(--wj-text, #f8fafc);
+  font-size: 11px;
+}
+
+.wanjuan-account-inline-form input:focus,
+.wanjuan-account-redeem-row input:focus {
+  border-color: var(--wj-accent, #38bdf8);
+}
+
+.wanjuan-account-redeem-row > svg { flex: 0 0 auto; color: var(--wj-accent, #38bdf8); }
+
+.wanjuan-account-record-tabs {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--wj-border, #4b5563);
+}
+
+.wanjuan-account-record-tabs button {
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wj-muted, #94a3b8);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.wanjuan-account-record-tabs button.is-active {
+  background: var(--wj-accent, #38bdf8);
+  color: var(--wj-selected-text, #111827);
+}
+
+.wanjuan-account-record-list { margin-top: 4px; }
+
+.wanjuan-account-record-filters {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.25fr) minmax(104px, .8fr) minmax(128px, 1fr) minmax(128px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.wanjuan-account-record-filters label { display: grid; gap: 5px; min-width: 0; }
+.wanjuan-account-record-filters label span { color: var(--wj-muted, #94a3b8); font-size: 9px; }
+.wanjuan-account-record-filters input,
+.wanjuan-account-record-filters select {
+  min-width: 0;
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--wj-border, #4b5563);
+  border-radius: 6px;
+  background: var(--wj-surface, #1f242b);
+  color: var(--wj-text, #f8fafc);
+  padding: 0 9px;
+  font-size: 10px;
+}
+
+.wanjuan-account-record-more { width: 100%; margin-top: 8px; }
+
+.wanjuan-account-record,
+.wanjuan-account-record-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 9px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--wj-border) 62%, transparent);
+}
+
+.wanjuan-account-record:last-child { border-bottom: 0; }
+.wanjuan-account-record > div:last-child { text-align: right; }
+.wanjuan-account-record strong,
+.wanjuan-account-record span { display: block; }
+.wanjuan-account-record strong { color: var(--wj-text, #f8fafc); font-size: 11px; }
+.wanjuan-account-record span { margin-top: 3px; color: var(--wj-muted, #94a3b8); font-size: 9px; }
+.wanjuan-account-record-empty { justify-content: center; color: var(--wj-muted, #94a3b8); font-size: 11px; }
+
+@media (max-width: 860px) {
+  .wanjuan-account-managed-relay-row,
+  .wanjuan-account-wallet-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wanjuan-account-inline-form { align-items: stretch; flex-wrap: wrap; }
+  .wanjuan-account-record-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wanjuan-account-record-filters > button { grid-column: 1 / -1; }
 }
 
 .wanjuan-membership-dialog-backdrop {

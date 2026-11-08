@@ -1,1 +1,7 @@
 Combines model IDs, protocol registry entries, API bindings, favorites, provider catalogs, and explicit node choices to resolve a concrete request contract.
+
+`lib/media-model-contract.ts` is shared by image/video canvas controls and generation hooks. Model aliases use `model-binding.ts` in both layers without changing the model sent on the wire. Explicit generation callback channel overrides the node channel, which overrides the model's default API binding. Legacy category-less protocol entries remain supported; explicit image/video categories cannot cross. Video nodes with empty protocol snapshots fall back to live global bindings. Manual task refresh resolves aliases only as a credential fallback, retaining each submitted task's recorded API endpoint/profile.
+
+Image/video API configs can carry `imageProtocolBindings` or `videoProtocolBindings` for per-channel protocol overrides. The existing model/API binding row exposes the category-matching registered profiles; selecting a channel resolves that profile for both node parameters and the generation request. Missing or cross-category explicit channel profiles fail closed before upload/submission. Task snapshots persist the selected video protocol name and immutable poll URL.
+
+Video model-picker clicks resolve the newly selected model through the same channel-aware contract before initializing parameter mode and quality variants. They must not read only the global model protocol binding, which can disagree with the channel used at submit time.

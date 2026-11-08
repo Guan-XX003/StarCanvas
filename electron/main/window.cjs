@@ -4,8 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, shell, dialog } = require("./electron-refs.cjs");
 const { TEST_PROXY_FETCH_SELFTEST, TEST_PROXY_FETCH_SELFTEST_URL } = require("./config.cjs");
-const { appendDesktopLog, formatErrorMessage, truncateLogValue } = require("./logging.cjs");
-const { isSafeExternalUrl } = require("./net/security.cjs");
+const { appendDesktopLog, formatErrorMessage, truncateLogValue, rendererConsoleDiagnostic } = require("./logging.cjs");
+const { isSafeExternalUrl, createAppNavigationGuard } = require("./net/security.cjs");
 const { loadTextApiSelfTestConfig } = require("./self-test.cjs");
 const { setAutomationWindow } = require("./automation-server.cjs");
 const {
@@ -69,6 +69,7 @@ function createMainWindow(baseUrl) {
     }
   });
   setAutomationWindow(win);
+  win.once("closed", () => setAutomationWindow(null));
 
   let hasShownWindow = false;
   let hasRunProxyFetchSelfTest = false;
@@ -381,8 +382,9 @@ function createMainWindow(baseUrl) {
     recoverRenderer("unresponsive");
   });
   win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    console.log("renderer-console", { level, message: truncateLogValue(message), line, sourceId });
-    appendDesktopLog("renderer-console", { level, message, line, sourceId });
+    const diagnostic = rendererConsoleDiagnostic(_event, level, message, line);
+    console.log("renderer-console", diagnostic);
+    appendDesktopLog("renderer-console", diagnostic);
   });
   win.webContents.on("did-finish-load", () => {
     blankScreenHits = 0;
@@ -763,12 +765,10 @@ function createMainWindow(baseUrl) {
     if (isSafeExternalUrl(url)) shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });
-  win.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith(baseUrl)) {
-      event.preventDefault();
-      if (isSafeExternalUrl(url)) shell.openExternal(url).catch(() => {});
-    }
-  });
+  const guardAppNavigation = createAppNavigationGuard(baseUrl, (url) => shell.openExternal(url));
+  win.webContents.on("will-navigate", guardAppNavigation);
+  win.webContents.on("will-redirect", guardAppNavigation);
+  return win;
 }
 
 

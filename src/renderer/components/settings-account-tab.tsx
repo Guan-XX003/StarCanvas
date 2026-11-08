@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   connectEnterpriseWorkspace,
+  accountIdentityScopeKey,
   disconnectEnterpriseWorkspace,
   getAccountState,
   logoutAccount,
@@ -37,6 +38,8 @@ import { buildEnterpriseConfigDraft } from "../lib/enterprise-config-snapshot";
 import { EnterpriseGatewayCreateDialog } from "./enterprise-gateway-create-dialog";
 import { EnterpriseManagementPanel } from "./enterprise-management-panel";
 import { WanJuanMembershipBenefitsDialog } from "./membership-benefits-dialog";
+import { AccountRelayWallet } from "./account-relay-wallet";
+import { CloudProjectPanel } from "./cloud-project-panel";
 
 const planLabels: Record<string, string> = {
   free: "本地免费版",
@@ -58,7 +61,7 @@ function AccountStatusPill({ account }: { account: ReturnType<typeof getAccountS
   return <span className="wanjuan-account-pill"><UserRound size={13} />本地模式</span>;
 }
 
-export function WanJuanSettingsAccountTab({ showToast = () => {} }: { showToast?: (message: string) => void }) {
+export function WanJuanSettingsAccountTab({ showToast = () => {}, projects = [] }: { showToast?: (message: string) => void; projects?: any[] }) {
   const account = useSyncExternalStore(subscribeAccount, getAccountState, getAccountState);
   const [enterprisePanel, setEnterprisePanel] = useState<"connect" | "create" | "takeover" | null>(null);
   const [gatewayUrl, setGatewayUrl] = useState(account.enterprise?.gatewayUrl || "");
@@ -142,9 +145,14 @@ export function WanJuanSettingsAccountTab({ showToast = () => {} }: { showToast?
         <div className="wanjuan-account-metrics">
           <div><span>当前方案</span><strong>{planLabels[account.subscription?.plan || "free"] || account.subscription?.plan || "本地免费版"}</strong></div>
           <div><span>会员状态</span><strong>{account.subscription?.status === "active" ? "有效" : "未开通"}</strong></div>
+          <div><span>有效期至</span><strong>{account.subscription?.expiresAt ? new Date(account.subscription.expiresAt).toLocaleDateString() : "--"}</strong></div>
         </div>
         <p className="wanjuan-account-band-note">企业空间的会员权益由企业管理员单独管理。</p>
       </section>
+
+      {account.authenticated && <AccountRelayWallet key={`wallet:${accountIdentityScopeKey(account)}`} account={account} showToast={showToast} />}
+
+      {account.authenticated && <CloudProjectPanel key={`cloud:${accountIdentityScopeKey(account)}`} projects={projects} />}
 
       <section className="wanjuan-account-settings-band">
         <div className="wanjuan-account-band-heading">
@@ -153,7 +161,7 @@ export function WanJuanSettingsAccountTab({ showToast = () => {} }: { showToast?
         </div>
         <div className="wanjuan-account-security-row">
           <div><ShieldCheck size={17} /><span>令牌加密存储</span></div>
-          <strong className={account.secureStorageAvailable ? "is-ok" : "is-warning"}>{account.secureStorageMode === "system" ? "系统安全存储" : account.secureStorageMode === "local" ? "本机加密存储" : "不可用"}</strong>
+          <strong className={account.secureStorageAvailable ? "is-ok" : "is-warning"}>{account.secureStorageMode === "system" ? "系统安全存储可用" : account.secureStorageMode === "local" ? "本机加密存储" : account.secureStorageMode === "pending" ? "安全存储检测中" : account.secureStorageMode === "unavailable" ? "安全存储不可用" : "安全存储尚未检测"}</strong>
         </div>
         <div className="wanjuan-account-security-row">
           <div><Cloud size={17} /><span>云端身份校验</span></div>

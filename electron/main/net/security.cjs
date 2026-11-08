@@ -46,8 +46,43 @@ function isSafeExternalUrl(rawUrl) {
   }
 }
 
+// A prefix comparison is not an origin check: a longer port or userinfo can
+// retain the textual prefix while navigating to a different origin. Never
+// expose the desktop preload bridge to such a document.
+function classifyAppNavigation(rawUrl, appBaseUrl) {
+  let target;
+  let base;
+  try {
+    if (typeof rawUrl !== "string" || typeof appBaseUrl !== "string") return "deny";
+    target = new URL(rawUrl);
+    base = new URL(appBaseUrl);
+  } catch {
+    return "deny";
+  }
+  if (!["http:", "https:"].includes(base.protocol) || base.username || base.password) return "deny";
+  if (target.username || target.password) return "deny";
+  if (["http:", "https:"].includes(target.protocol) && target.origin === base.origin) return "allow";
+  return isSafeExternalUrl(rawUrl) ? "external" : "deny";
+}
+
+function createAppNavigationGuard(appBaseUrl, openExternal) {
+  if (typeof openExternal !== "function") throw new TypeError("Navigation handler required");
+  return (event, rawUrl) => {
+    const decision = classifyAppNavigation(rawUrl, appBaseUrl);
+    if (decision === "allow") return;
+    event.preventDefault();
+    if (decision === "external") {
+      // Desktop shell failure must not turn a denied navigation into an
+      // unhandled rejection (nor log a potentially sensitive external URL).
+      try { Promise.resolve(openExternal(rawUrl)).catch(() => {}); } catch {}
+    }
+  };
+}
+
 module.exports = {
   isBlockedNetworkHost,
   assertPublicHttpUrl,
-  isSafeExternalUrl
+  isSafeExternalUrl,
+  classifyAppNavigation,
+  createAppNavigationGuard
 };

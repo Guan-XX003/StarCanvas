@@ -5,20 +5,29 @@ const http = require("node:http");
 const path = require("node:path");
 const { BrowserWindow, app } = require("./electron-refs.cjs");
 
-const AUTOMATION_FILE_NAME = "wanjuan-automation.json";
+const AUTOMATION_FILE_NAMES = ["starcanvas-automation.json", "wanjuan-automation.json"];
 const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_REFERENCE_FILE_BYTES = 100 * 1024 * 1024;
 let server = null;
 let automationInfo = null;
 let registeredWindow = null;
-function infoPath() { return path.join(app.getPath("userData"), AUTOMATION_FILE_NAME); }
+function infoPaths() { return AUTOMATION_FILE_NAMES.map((name) => path.join(app.getPath("userData"), name)); }
 function writeInfo() {
-  fs.mkdirSync(path.dirname(infoPath()), { recursive: true });
-  fs.writeFileSync(infoPath(), `${JSON.stringify(automationInfo, null, 2)}\n`, { mode: 0o600 });
-  try { fs.chmodSync(infoPath(), 0o600); } catch {}
+  const serialized = `${JSON.stringify(automationInfo, null, 2)}\n`;
+  for (const target of infoPaths()) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, serialized, { mode: 0o600 });
+    try { fs.chmodSync(target, 0o600); } catch {}
+  }
 }
-function removeInfo() { try { fs.rmSync(infoPath(), { force: true }); } catch {} }
-function setAutomationWindow(win) { registeredWindow = win; }
+function removeInfo() {
+  for (const target of infoPaths()) {
+    try { fs.rmSync(target, { force: true }); } catch {}
+  }
+}
+function setAutomationWindow(win) {
+  registeredWindow = win && !win.isDestroyed?.() ? win : null;
+}
 function getWindow() { return registeredWindow && !registeredWindow.isDestroyed?.() ? registeredWindow : BrowserWindow.getAllWindows?.().find((win) => !win.isDestroyed?.()) || null; }
 async function evaluate(method, payload) {
   const win = getWindow();
@@ -140,11 +149,12 @@ function createServer() {
     } catch (error) { return send(res, Number(error?.statusCode || 500), { ok: false, error: String(error?.message || error) }); }
   });
 }
-async function startAutomationServer() {
+async function startAutomationServer(win) {
+  if (win) setAutomationWindow(win);
   if (server) return automationInfo;
   // 上次异常退出可能留下旧端口和旧 token；新实例启动前先同步清理。
   removeInfo();
-  automationInfo = { protocol: "wanjuan-automation", protocolVersion: 1, host: "127.0.0.1", port: 0, token: crypto.randomBytes(32).toString("hex"), pid: process.pid, appVersion: app.getVersion?.() || "", startedAt: Date.now() };
+  automationInfo = { protocol: "starcanvas-automation", protocolVersion: 1, host: "127.0.0.1", port: 0, token: crypto.randomBytes(32).toString("hex"), pid: process.pid, appVersion: app.getVersion?.() || "", startedAt: Date.now() };
   server = createServer();
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => { automationInfo.port = server.address().port; writeInfo(); resolve(); }); });
   return automationInfo;

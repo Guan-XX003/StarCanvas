@@ -6,7 +6,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wanjuan-mcp-test-"));
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "starcanvas-mcp-test-"));
 const infoFile = path.join(tempRoot, "automation.json");
 const token = "mcp-test-token-0000000000000000000000001";
 const requests = [];
@@ -30,24 +30,27 @@ const server = http.createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 fs.writeFileSync(infoFile, JSON.stringify({ host: "127.0.0.1", port: server.address().port, token, pid: process.pid }));
 
-const child = spawn(process.execPath, [path.resolve("bin/wanjuan-mcp.mjs")], { env: { ...process.env, WANJUAN_AUTOMATION_FILE: infoFile }, stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn(process.execPath, [path.resolve(process.env.STARCANVAS_MCP_PATH || "bin/starcanvas-mcp.mjs")], { env: { ...process.env, STARCANVAS_AUTOMATION_FILE: infoFile }, stdio: ["pipe", "pipe", "pipe"] });
 const replies = new Map();
 readline.createInterface({ input: child.stdout }).on("line", (line) => { const value = JSON.parse(line); replies.set(value.id, value); });
 const send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`);
 send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
 send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "wanjuan_status", arguments: {} } });
-send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "wanjuan_generate_image", arguments: { prompt: "test" } } });
-send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "wanjuan_generate_tianji_video", arguments: { prompt: "test", mode: "reference-media", portraitAssetIds: ["asset-reviewed-mock"] } } });
+send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "starcanvas_status", arguments: {} } });
+send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "starcanvas_generate_image", arguments: { prompt: "test" } } });
+send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "starcanvas_generate_tianji_video", arguments: { prompt: "test", mode: "reference-media", portraitAssetIds: ["asset-reviewed-mock"] } } });
+send({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "wanjuan_status", arguments: {} } });
 
 const deadline = Date.now() + 5000;
-while (replies.size < 5 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-assert.equal(replies.get(1)?.result?.serverInfo?.name, "wanjuan-lingjing");
+while (replies.size < 6 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal(replies.get(1)?.result?.serverInfo?.name, "starcanvas");
 assert.equal(replies.get(2)?.result?.tools?.length, 9);
+assert.equal(replies.get(2)?.result?.tools?.every((tool) => tool.name.startsWith("starcanvas_")), true);
 assert.equal(replies.get(3)?.result?.structuredContent?.ready, true);
 assert.equal(replies.get(4)?.result?.structuredContent?.nodeId, "automation-image-test");
 assert.equal(replies.get(5)?.result?.structuredContent?.mode, "first-last");
-const tianjiTool = replies.get(2)?.result?.tools?.find((tool) => tool.name === "wanjuan_generate_tianji_video");
+assert.equal(replies.get(6)?.result?.structuredContent?.ready, true);
+const tianjiTool = replies.get(2)?.result?.tools?.find((tool) => tool.name === "starcanvas_generate_tianji_video");
 assert.equal(tianjiTool?.inputSchema?.properties?.portraitAssetIds?.maxItems, 9);
 assert.deepEqual(requests.find((request) => request.path === "/v1/tianji/generate")?.body?.portraitAssetIds, ["asset-reviewed-mock"]);
 

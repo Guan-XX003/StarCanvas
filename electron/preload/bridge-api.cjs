@@ -116,6 +116,7 @@ exposeGlobal("wanjuanDesktop", {
   enterpriseTeamTemplates: async (payload = {}) =>
     ipcRenderer.invoke("wanjuan:enterprise-team-templates", payload),
   cloudPrompts: async (payload = {}) => ipcRenderer.invoke("wanjuan:cloud-prompts", payload),
+  cloudProjects: async (payload = {}) => ipcRenderer.invoke("wanjuan:cloud-projects", payload),
   accountBootstrap: async () => {
     const result = await ipcRenderer.invoke("wanjuan:account-bootstrap");
     resetEnterpriseStorageOverlay();
@@ -134,6 +135,20 @@ exposeGlobal("wanjuanDesktop", {
     return result;
   },
   accountMe: async () => ipcRenderer.invoke("wanjuan:account-me"),
+  accountPasswordReset: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-password-reset", payload),
+  accountRelay: async () => ipcRenderer.invoke("wanjuan:account-relay"),
+  accountWallet: async () => ipcRenderer.invoke("wanjuan:account-wallet"),
+  accountWalletTransactions: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-wallet-transactions", payload),
+  accountRelayUsage: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-usage", payload),
+  accountRechargeStore: async () => ipcRenderer.invoke("wanjuan:account-recharge-store"),
+  accountWalletRedeem: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-wallet-redeem", payload),
+  accountRelayKeySendCode: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-key-send-code", payload),
+  accountRelayKeyReveal: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-key-reveal", payload),
+  accountRelayKeyRegenerate: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-key-regenerate", payload),
+  accountRelayLinkSendCode: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-link-send-code", payload),
+  accountRelayLinkVerifyLegacy: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-link-verify-legacy", payload),
+  accountRelayLinkVerifyMfa: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-link-verify-mfa", payload),
+  accountRelayLinkConfirm: async (payload = {}) => ipcRenderer.invoke("wanjuan:account-relay-link-confirm", payload),
   accountContinueLocal: async () => {
     const result = await ipcRenderer.invoke("wanjuan:account-local-mode");
     window.dispatchEvent(new CustomEvent("wanjuan:account-session-changed"));

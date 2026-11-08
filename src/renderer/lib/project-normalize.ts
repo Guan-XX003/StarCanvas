@@ -29,6 +29,25 @@ export const normalizeProjectIdSelection = (candidates, allowedValues) => {
       return matches.length ? [...new Set(matches)] : [...allowedValues];
     };
 
+const RESERVED_PROJECT_IDS = new Set([`_blobs`, `_projects`, `_trash`, `_migrations`]);
+
+export const isSafeBackupProjectId = (value) => {
+      const id = String(value || ``).trim();
+      if (!id || id.length > 128 || id.startsWith(`_`) || RESERVED_PROJECT_IDS.has(id.toLowerCase())) return false;
+      return id === `default` || /^(?:proj|project|recovered)-[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id);
+    };
+
+export const assertSafeBackupProjects = (projects) => {
+      const ids = new Set();
+      for (const project of Array.isArray(projects) ? projects : []) {
+        const id = String(project?.id || ``).trim();
+        if (!isSafeBackupProjectId(id)) throw new Error(`BACKUP_PROJECT_ID_INVALID`);
+        if (ids.has(id)) throw new Error(`BACKUP_PROJECT_ID_DUPLICATE`);
+        ids.add(id);
+      }
+      return true;
+    };
+
 export const normalizeProjectResourceMap = (input) => {
               let source = input && typeof input == `object` ? input : {},
                 result = {};

@@ -8,9 +8,10 @@ const { spawn } = require("node:child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
 const electronPath = require("electron");
+const packagedExecutable = process.env.WANJUAN_MEMBERSHIP_QA_PACKAGED_EXECUTABLE || "";
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wanjuan-membership-qa-"));
 const userDataPath = path.join(tempRoot, "user-data");
-const qaRoot = path.join(projectRoot, "docs", "qa");
+const qaRoot = process.env.WANJUAN_MEMBERSHIP_QA_OUTPUT_DIR || path.join(projectRoot, "docs", "qa");
 const port = Number(process.env.WANJUAN_MEMBERSHIP_QA_PORT || 9486);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -31,12 +32,15 @@ async function waitForTarget() {
 }
 
 async function run() {
-  const child = spawn(electronPath, [projectRoot, `--remote-debugging-port=${port}`], {
+  const executable = packagedExecutable || electronPath;
+  const args = packagedExecutable ? [`--remote-debugging-port=${port}`] : [projectRoot, `--remote-debugging-port=${port}`];
+  const child = spawn(executable, args, {
     cwd: projectRoot,
     stdio: ["ignore", "ignore", "pipe"],
     env: {
       ...process.env,
       WANJUAN_TEST_USER_DATA_PATH: userDataPath,
+      WANJUAN_ALLOW_PACKAGED_TEST_USER_DATA: packagedExecutable ? "1" : "0",
       WANJUAN_ALLOW_RANDOM_PORT: "1",
       WANJUAN_DISABLE_UPDATE_CHECK: "1",
       WANJUAN_GPU_MODE: "off",
@@ -124,14 +128,15 @@ async function run() {
     await evaluate("(() => { const button = document.querySelector('.wanjuan-membership-benefits-button'); button.focus(); button.click(); })()");
     await waitFor("!!document.querySelector('.wanjuan-membership-dialog')", "会员权益弹窗");
     const dialogText = await evaluate("document.querySelector('.wanjuan-membership-dialog')?.innerText || ''");
+    assert.equal(/85\s*折|8\.5\s*折|15%\s*off/i.test(dialogText), false, "membership must not advertise model discounts");
     for (const expected of [
       "StarCanvas会员",
       "19.9",
       "/月",
-      "内测开放",
+      "会员服务",
+      "注册账号无需内测码",
       "企业模型统一管理",
       "云端提示词库",
-      "极鑫模型 85 折",
       "3379084564",
     ]) assert.equal(dialogText.includes(expected), true, `弹窗缺少：${expected}`);
     assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')"), "关闭会员权益");

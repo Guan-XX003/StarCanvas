@@ -18,17 +18,17 @@ export function use_clearSelectedAgentConversation(deps: UseClearSelectedAgentCo
     setAgentConversations,
     showToast2,
   } = deps;
-  const clearSelectedAgentConversation = () => {
-            if (!selectedAgent) return;
-            let conversation = agentConversations[selectedAgent.id] || [];
+  const clearSelectedAgentConversation = (targetAgent = selectedAgent) => {
+            if (!targetAgent) return;
+            let conversation = agentConversations[targetAgent.id] || [];
             if (conversation.length === 0) {
               showToast2(`当前没有聊天记录`);
               return;
             }
-            if (!confirm(`确定清空当前智能体的聊天记录吗？`)) return;
+            if (!confirm(`确定清空智能体“${targetAgent.name || `智能体`}”的聊天记录吗？`)) return;
             (setAgentConversations((prevConversations) => ({
                 ...prevConversations,
-                [selectedAgent.id]: [],
+                [targetAgent.id]: [],
               })),
               showToast2(`已清空聊天记录`));
           };

@@ -11,7 +11,9 @@ app.whenReady().then(async () => {
   const {
     persistProjectAsset,
     diagnoseProjectAssets,
-    copyExternalProjectAssetFiles
+    copyExternalProjectAssetFiles,
+    resolveExternalAssetManifestFile,
+    removeProjectAssets
   } = require("../electron/main/assets/project-assets.cjs");
   const {
     beginProjectMigration,
@@ -239,6 +241,31 @@ app.whenReady().then(async () => {
   assert.equal(bundle.manifest.files[0].filename, bundle.manifest.files[1].filename);
   assert.equal(bundle.manifest.files[1].deduplicated, true);
   assert.equal(fs.readdirSync(bundle.folderPath).filter((name) => name !== "wanjuan-external-assets-manifest.json").length, 1);
+
+  const sentinelFolder = path.join(root, "backup-assets");
+  fs.mkdirSync(sentinelFolder, { recursive: true });
+  fs.writeFileSync(path.join(sentinelFolder, "sentinel.txt"), "keep");
+  const failedBundle = copyExternalProjectAssetFiles(path.join(root, "other.json"), [
+    { projectId: "project-a", nodeId: "missing", field: "imageUrl", assetId: "missing", kind: "image", path: path.join(root, "does-not-exist.png") }
+  ], "backup-assets");
+  assert.equal(failedBundle.failed, 1);
+  assert.equal(fs.readFileSync(path.join(sentinelFolder, "sentinel.txt"), "utf8"), "keep");
+
+  const manifestDir = path.join(root, "manifest-check");
+  fs.mkdirSync(manifestDir, { recursive: true });
+  const manifestFile = path.join(manifestDir, "safe.png");
+  fs.writeFileSync(manifestFile, Buffer.from("safe"));
+  const manifestEntry = { filename: "safe.png", size: 4, sha256: require("../electron/main/utils/crypto.cjs").sha256File(manifestFile) };
+  assert.equal(resolveExternalAssetManifestFile(manifestDir, manifestEntry), fs.realpathSync(manifestFile));
+  const outsideFile = path.join(root, "outside.png");
+  fs.writeFileSync(outsideFile, Buffer.from("outside"));
+  fs.symlinkSync(outsideFile, path.join(manifestDir, "linked.png"));
+  assert.equal(resolveExternalAssetManifestFile(manifestDir, { filename: "linked.png", size: 7 }), "");
+  const linkedManifestDir = path.join(root, "linked-manifest-check");
+  fs.symlinkSync(manifestDir, linkedManifestDir);
+  assert.equal(resolveExternalAssetManifestFile(linkedManifestDir, manifestEntry), "");
+  await assert.rejects(() => removeProjectAssets({ directory: root, projectId: "_blobs" }), /PROJECT_ASSET_PROJECT_ID_INVALID/);
+  assert.equal(fs.existsSync(path.join(root, "媒体库", "_blobs")), false);
 
   console.log("storage lab electron integration passed");
 }).then(() => {

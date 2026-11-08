@@ -123,7 +123,7 @@ export function wanjuanRenderResourceSourceTabs(
       jsx("button", {
         "aria-pressed": favoriteOnly,
         "data-active": favoriteOnly ? "true" : undefined,
-        className: `wanjuan-resource-favorite-filter w-8 h-8 inline-flex items-center justify-center rounded-lg border transition-colors ${favoriteOnly ? "wanjuan-resource-favorite-filter-active" : ""}`,
+        className: `wanjuan-resource-favorite-filter w-8 h-8 inline-flex items-center justify-center transition-colors ${favoriteOnly ? "wanjuan-resource-favorite-filter-active" : ""}`,
         title: favoriteOnly ? "显示全部收藏筛选" : "只看收藏",
         onClick: () => {
           setFavoriteOnly(!favoriteOnly);

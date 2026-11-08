@@ -19,6 +19,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
 
 try {
   const storage = require("../electron/main/local-secret-storage.cjs");
+  assert.equal(storage.isAdHocSignatureOutput("Executable=/tmp/StarCanvas\nSignature=adhoc\nTeamIdentifier=not set\n"), true);
+  assert.equal(storage.isAdHocSignatureOutput("Signature=Developer ID Application: Example\nTeamIdentifier=ABCDE12345\n"), false);
   const secret = "sk-local-fallback-secret";
   assert.equal(storage.secretStorageMode(), "local");
   const encrypted = storage.encryptLocalSecret(secret);
@@ -33,6 +35,9 @@ try {
   const secondEncrypted = storage.encryptLocalSecret("second-local-secret");
   assert.equal(systemProbeCount, 0, "existing local key must avoid safeStorage during encryption");
   assert.equal(storage.decryptLocalSecret(secondEncrypted), "second-local-secret");
+  systemProbeCount = 0;
+  assert.equal(storage.decryptLocalSecret(Buffer.from("legacy-system-ciphertext").toString("base64")), "");
+  assert.equal(systemProbeCount, 0, "local mode must not probe Keychain for legacy system ciphertext");
   console.log("local secret storage: AES-GCM fallback and 0600 master key passed");
 } finally {
   Module._load = originalLoad;

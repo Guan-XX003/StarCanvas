@@ -1,5 +1,7 @@
 /** 图像模型设置面板。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
+import { MediaChannelProtocolSelect } from "./media-channel-protocol-select";
+import { resolveModelApiBindingIdHelper, updateModelBindingHelper } from "../lib/model-binding";
 declare const chrome: any;
 
 export function WanJuanImageModelSettingsPanel({
@@ -7,6 +9,8 @@ export function WanJuanImageModelSettingsPanel({
   imageCompatResolutions,
   imageModelApiBindings,
   imageModels,
+  modelProtocolRegistry,
+  setApiConfigs,
   setImageCompatResolutions,
   setImageModelApiBindings,
   setImageModels,
@@ -76,17 +80,9 @@ export function WanJuanImageModelSettingsPanel({
                                                   }),
                                                   jsxs(`select`, {
                                                     className: `w-52 bg-[#1a1a1a] border border-[#333] text-gray-300 text-xs px-2 py-1.5 rounded-lg outline-none focus:border-blue-500 hover:bg-[#222] transition-colors wanjuan-settings-control wanjuan-settings-select`,
-                                                    value: imageModelApiBindings[
-                                                      model
-                                                    ] || ``,
+                                                    value: resolveModelApiBindingIdHelper(imageModelApiBindings, model, ``),
                                                     onChange: (event) => {
-                                                      let next = {
-                                                        ...imageModelApiBindings,
-                                                      };
-                                                      event.target.value ?
-                                                        (next[model] =
-                                                          event.target.value) :
-                                                        delete next[model];
+                                                      let next = updateModelBindingHelper(imageModelApiBindings, model, event.target.value);
                                                       setImageModelApiBindings(
                                                         next,
                                                       );
@@ -110,6 +106,11 @@ export function WanJuanImageModelSettingsPanel({
                                                         ),
                                                       ),
                                                     ],
+                                                  }),
+                                                  jsx(MediaChannelProtocolSelect, {
+                                                    category: `image`, model, apiConfigs,
+                                                    apiBindings: imageModelApiBindings,
+                                                    registry: modelProtocolRegistry, setApiConfigs,
                                                   }),
                                                 ],
                                               },

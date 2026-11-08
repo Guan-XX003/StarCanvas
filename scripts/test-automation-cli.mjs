@@ -9,11 +9,11 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { validateTianjiPayload } = require("../electron/main/automation-server.cjs");
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wanjuan-cli-test-"));
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "starcanvas-cli-test-"));
 const infoFile = path.join(tempRoot, "automation.json");
 const token = "cli-test-token-0000000000000000000000001";
 const requests = [];
-const cliPath = path.resolve(process.env.WANJUAN_CLI_PATH || "bin/wanjuan.mjs");
+const cliPath = path.resolve(process.env.STARCANVAS_CLI_PATH || process.env.WANJUAN_CLI_PATH || "bin/starcanvas.mjs");
 const runCli = (args, env) => new Promise((resolve) => {
   const child = spawn(process.execPath, [cliPath, ...args], { env, cwd: tempRoot, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
@@ -36,7 +36,14 @@ const server = http.createServer(async (req, res) => {
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   fs.writeFileSync(infoFile, JSON.stringify({ host: "127.0.0.1", port: server.address().port, token, pid: process.pid }));
-  const env = { ...process.env, WANJUAN_AUTOMATION_FILE: infoFile };
+  const env = { ...process.env, STARCANVAS_AUTOMATION_FILE: infoFile };
+  const help = await runCli(["--help"], env);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /StarCanvas CLI/);
+  const version = await runCli(["--version"], env);
+  assert.equal(version.status, 0, version.stderr);
+  const expectedVersion = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  assert.equal(version.stdout.trim(), expectedVersion);
   const tianji = await runCli(["tianji", "generate", "--prompt", "mock only", "--mode", "reference-media", "--portrait-asset-id", "asset-reviewed-mock", "--image", "/tmp/ordinary.png", "--video", "/tmp/ref.mp4", "--audio", "/tmp/ref.wav", "--duration", "5", "--ratio", "16:9"], env);
   assert.equal(tianji.status, 0, tianji.stderr);
   assert.equal(JSON.parse(tianji.stdout).nodeId, "automation-tianji-cli");
@@ -63,6 +70,16 @@ try {
   assert.deepEqual(validateTianjiPayload({ prompt: "mock", mode: "reference-media", portraitAssetIds: ["asset-reviewed-mock"] }).portraitAssetIds, ["asset-reviewed-mock"]);
   assert.throws(() => validateTianjiPayload({ prompt: "mock", mode: "text-to-video", portraitAssetIds: ["asset-reviewed-mock"] }), /仅支持 reference-media/);
   assert.throws(() => validateTianjiPayload({ prompt: "mock", mode: "reference-media", images: Array(9).fill("https://media.example.invalid/a.png"), portraitAssetIds: ["asset-reviewed-mock"] }), /合计最多 9 个/);
+  const legacyCli = path.resolve("bin/wanjuan.mjs");
+  const legacy = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [legacyCli, "--help"], { env, cwd: tempRoot, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  assert.equal(legacy.status, 0, legacy.stderr);
+  assert.match(legacy.stdout, /StarCanvas CLI/);
 } finally {
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(tempRoot, { recursive: true, force: true });

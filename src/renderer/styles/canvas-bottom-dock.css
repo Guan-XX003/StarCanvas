@@ -172,25 +172,6 @@ html .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[c
   box-shadow: none !important;
 }
 
-html.theme-light .wanjuan-canvas-bottom-dock,
-html.theme-warm-light .wanjuan-canvas-bottom-dock,
-html.theme-mist-blue .wanjuan-canvas-bottom-dock,
-html.theme-chrome-blue .wanjuan-canvas-bottom-dock,
-html.theme-sage-green .wanjuan-canvas-bottom-dock,
-html.theme-light .wanjuan-canvas-dock-popover,
-html.theme-warm-light .wanjuan-canvas-dock-popover,
-html.theme-mist-blue .wanjuan-canvas-dock-popover,
-html.theme-chrome-blue .wanjuan-canvas-dock-popover,
-html.theme-sage-green .wanjuan-canvas-dock-popover {
-  --wj-surface-2: #f8fafc;
-  --wj-surface-3: #e8eef5;
-  --wj-border: #c3ccd8;
-  --wj-text: #263445;
-  --wj-muted: #64748b;
-  --wj-control-hover-text: #172033;
-  --wj-accent: #dce5ef;
-  --wj-accent-contrast: #172033;
-}
 
 @media (max-width: 920px) {
   .wanjuan-canvas-bottom-dock {

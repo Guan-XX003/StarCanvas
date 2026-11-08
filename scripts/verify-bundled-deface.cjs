@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { assertMacDefaceRuntime } = require("./portable-python-runtime.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
 const platformKey = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : process.platform;
@@ -42,6 +43,7 @@ if (!fs.existsSync(licensePath)) {
   throw new Error(`Bundled Deface license notice is missing for ${platformKey}-${archKey}: ${licensePath}`);
 }
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+if (platformKey === "darwin") assertMacDefaceRuntime(runtimeRoot);
 if (manifest.platform !== platformKey || manifest.arch !== archKey || manifest.requiresSystemPython !== false) {
   throw new Error(`Bundled Deface manifest does not match ${platformKey}-${archKey}`);
 }

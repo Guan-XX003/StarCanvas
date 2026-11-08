@@ -4,7 +4,7 @@
  * 复杂的 saveEditedVideo 仍留在组件内（依赖较多），此处只管「打开哪段媒体在编辑」的状态与打开/裁剪回写。
  */
 import { useCallback, useRef, useState } from "react";
-import { wanjuanApplyEditedImageToCanvasNodes, wanjuanPrepareImageEditorSource } from "../lib/image-editor";
+import { wanjuanAppendEditedImageToCanvasNodes, wanjuanPrepareImageEditorSource } from "../lib/image-editor";
 
 export function useMediaEditors({ setNodes, projectIdRef, showToast }: { setNodes: (updater: any) => void; projectIdRef?: any; showToast?: (message: string) => void }) {
   const [previewImageUrl, setPreviewImageUrl] = useState<any>(null);
@@ -33,6 +33,7 @@ export function useMediaEditors({ setNodes, projectIdRef, showToast }: { setNode
     if (!imageEditState || typeof imageUrl !== `string` || !imageUrl.startsWith(`data:image/`)) {
       throw new Error(`编辑器没有生成有效图片`);
     }
+    const editedNodeId = `${imageEditState.id}-image-edit-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     let persisted = null;
     if (window.wanjuanDesktop?.persistProjectAsset) {
       persisted = await window.wanjuanDesktop.persistProjectAsset({
@@ -40,7 +41,7 @@ export function useMediaEditors({ setNodes, projectIdRef, showToast }: { setNode
         filename: `edited-image-${Date.now()}.png`,
         mime: `image/png`,
         projectId: projectIdRef?.current || (typeof globalThis !== `undefined` && globalThis.__wanjuanCurrentProjectId) || `default`,
-        nodeId: imageEditState.id,
+        nodeId: editedNodeId,
         field: `imageUrl`,
         kind: `image`,
         directory: ``,
@@ -52,10 +53,14 @@ export function useMediaEditors({ setNodes, projectIdRef, showToast }: { setNode
       }
     }
     setNodes((nodes: any[]) =>
-      wanjuanApplyEditedImageToCanvasNodes(nodes, imageEditState.id, { dataUrl: imageUrl, persisted }),
+      wanjuanAppendEditedImageToCanvasNodes(nodes, imageEditState.id, {
+        dataUrl: imageUrl,
+        persisted,
+        editedNodeId,
+      }),
     );
     setImageEditState(null);
-    showToast?.(`图片编辑已保存`);
+    showToast?.(`编辑后的图片已作为新节点放到画布`);
   }, [imageEditState, projectIdRef, setNodes, showToast]);
 
   const handleImageEditorError = useCallback((error: any) => {

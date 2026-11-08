@@ -232,7 +232,7 @@ async function run() {
       storedGlobalConfigs,
       globalTasks: [historicalVideoTask],
       activeStoredGlobalConfigId: "custom-preset",
-      jixinBuiltinBaseConfigVersion: "2026-07-11-wan27-protocols-v3",
+      jixinBuiltinBaseConfigVersion: "2026-09-29-model-catalog-v5",
     })}, resolve))`, true);
     await send("Page.reload", { ignoreCache: true });
     await waitFor(`document.body && document.body.innerText.includes('设置')`, "app reload");

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const AUTOMATION_FILE_NAME = "wanjuan-automation.json";
+const AUTOMATION_FILE_NAMES = ["starcanvas-automation.json", "wanjuan-automation.json"];
 const DEFAULT_REQUEST_TIMEOUT_MS = 12000;
 const DEFAULT_MISSING_TASK_GRACE_MS = 12000;
 
@@ -13,13 +13,15 @@ function unique(values) {
 }
 
 export function automationCandidates() {
+  const explicit = process.env.STARCANVAS_AUTOMATION_FILE || process.env.WANJUAN_AUTOMATION_FILE;
+  if (explicit) return unique([explicit]);
+  const userDataCandidates = (root) => AUTOMATION_FILE_NAMES.map((name) => path.join(root, name));
   return unique([
-    process.env.WANJUAN_AUTOMATION_FILE,
-    path.join(process.cwd(), ".wanjuan-dev-user-data", AUTOMATION_FILE_NAME),
-    path.join(packageRoot, ".wanjuan-dev-user-data", AUTOMATION_FILE_NAME),
-    process.platform === "darwin" ? path.join(os.homedir(), "Library", "Application Support", "wanjuan-ai-canvas-desktop-test", AUTOMATION_FILE_NAME) : "",
-    process.platform === "win32" && process.env.APPDATA ? path.join(process.env.APPDATA, "wanjuan-ai-canvas-desktop-test", AUTOMATION_FILE_NAME) : "",
-    process.platform === "linux" ? path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "wanjuan-ai-canvas-desktop-test", AUTOMATION_FILE_NAME) : "",
+    ...userDataCandidates(path.join(process.cwd(), ".wanjuan-dev-user-data")),
+    ...userDataCandidates(path.join(packageRoot, ".wanjuan-dev-user-data")),
+    ...(process.platform === "darwin" ? userDataCandidates(path.join(os.homedir(), "Library", "Application Support", "wanjuan-ai-canvas-desktop-test")) : []),
+    ...(process.platform === "win32" && process.env.APPDATA ? userDataCandidates(path.join(process.env.APPDATA, "wanjuan-ai-canvas-desktop-test")) : []),
+    ...(process.platform === "linux" ? userDataCandidates(path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "wanjuan-ai-canvas-desktop-test")) : []),
   ]);
 }
 
@@ -84,7 +86,7 @@ async function requestWithInfo(info, method, endpoint, body, timeoutMs) {
   }
 }
 
-export async function wanjuanRequest(method, endpoint, body, options = {}) {
+export async function starcanvasRequest(method, endpoint, body, options = {}) {
   const infos = readAutomationInfos();
   if (!infos.length) throw new Error("找不到运行中的StarCanvas，请先启动应用");
   const timeoutMs = Math.max(1000, Number(options.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS));
@@ -108,7 +110,7 @@ export async function wanjuanRequest(method, endpoint, body, options = {}) {
   throw new Error(lastConnectionError ? "StarCanvas自动化端点不可用，已自动跳过失效凭据；请重启应用后重试" : "没有可用的StarCanvas自动化端点；请启动或重启应用");
 }
 
-export async function waitForTask(id, options = {}) {
+export async function waitForStarCanvasTask(id, options = {}) {
   const taskId = String(id || "").trim();
   if (!taskId) throw new Error("必须提供 taskId 或 nodeId");
   const timeoutMs = Math.max(1000, Number(options.timeoutMs || 600000));
@@ -116,7 +118,7 @@ export async function waitForTask(id, options = {}) {
   const missingGraceMs = Math.max(0, Number(options.missingGraceMs ?? DEFAULT_MISSING_TASK_GRACE_MS));
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const result = await wanjuanRequest("GET", `/v1/tasks/${encodeURIComponent(taskId)}?materialize=1`);
+    const result = await starcanvasRequest("GET", `/v1/tasks/${encodeURIComponent(taskId)}?materialize=1`);
     if (result.task) {
       if (!["pending", "submitting", "running"].includes(result.task.status)) return result;
     } else if (Date.now() - startedAt >= missingGraceMs) {
@@ -126,3 +128,7 @@ export async function waitForTask(id, options = {}) {
   }
   throw new Error(`等待任务超时（${Math.round(timeoutMs / 1000)} 秒）`);
 }
+
+// Compatibility exports for existing scripts and MCP configurations.
+export const wanjuanRequest = starcanvasRequest;
+export const waitForTask = waitForStarCanvasTask;

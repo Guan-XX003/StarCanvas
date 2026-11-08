@@ -1,22 +1,37 @@
 {
   "name": "wanjuan-lingjing",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "private": true,
   "description": "StarCanvas - macOS AI 创作画布桌面应用",
   "author": "",
   "main": "electron/main/index.cjs",
   "bin": {
+    "starcanvas": "bin/starcanvas.mjs",
+    "starcanvas-mcp": "bin/starcanvas-mcp.mjs",
     "wanjuan": "bin/wanjuan.mjs",
     "wanjuan-mcp": "bin/wanjuan-mcp.mjs"
   },
   "type": "module",
   "scripts": {
+    "verify:electron-runtime": "node scripts/verify-electron-runtime.cjs",
+    "test:electron-runtime": "node --test scripts/test-electron-runtime.cjs",
+    "prestart": "node scripts/verify-electron-runtime.cjs",
+    "prestart:dev": "node scripts/verify-electron-runtime.cjs",
+    "predebug": "node scripts/verify-electron-runtime.cjs",
+    "prebuild": "node scripts/verify-electron-runtime.cjs",
+    "prebuild:win": "node scripts/verify-electron-runtime.cjs",
+    "prebuild:win:x64": "node scripts/verify-electron-runtime.cjs",
+    "prebuild:win:x86": "node scripts/verify-electron-runtime.cjs",
+    "prebuild:win:ia32": "node scripts/verify-electron-runtime.cjs",
     "build:web": "vite build --config vite.config.mjs",
     "start": "electron .",
     "start:dev": "node scripts/start-dev.cjs",
     "debug": "cross-env WANJUAN_DEBUG=1 electron .",
     "prepare:bundled-deface": "node scripts/prepare-bundled-deface.cjs",
     "verify:bundled-deface": "node scripts/verify-bundled-deface.cjs",
+    "verify:packaged-runtime": "node scripts/verify-packaged-runtime-deps.cjs",
+    "test:packaged-runtime": "node --test scripts/test-packaged-runtime-deps.cjs",
+    "test:portable-python": "node --test scripts/test-portable-python-runtime.cjs",
     "build": "vite build --config vite.config.mjs && electron-builder",
     "build:win": "vite build --config vite.config.mjs && electron-builder --win --x64",
     "build:win:x64": "vite build --config vite.config.mjs && electron-builder --win --x64",
@@ -25,6 +40,10 @@
     "build:win:ia32": "vite build --config vite.config.mjs && electron-builder --win --ia32",
     "typecheck": "tsc --noEmit",
     "test:lib": "node scripts/test-lib.mjs",
+    "test:image-editor": "node scripts/test-image-editor-derived-node.mjs",
+    "test:release-diagnostics": "node --test scripts/test-release-diagnostics.cjs",
+    "test:h3-video": "node scripts/test-h3-video.cjs",
+    "test:media-canvas": "node scripts/test-media-canvas-flow.cjs",
     "test:windows-paths": "node scripts/test-windows-file-url-paths.cjs",
     "test:extension-tools": "node scripts/test-extension-tool-runtime.cjs",
     "test:bundled-deface": "node scripts/test-bundled-deface-contract.cjs && node scripts/test-deface-windows-staging.cjs",
@@ -34,27 +53,39 @@
     "test:storage": "node scripts/test-storage-lab.mjs",
     "test:storage:electron": "node scripts/test-storage-electron.cjs",
     "test:storage:state": "node scripts/test-storage-state-policy.mjs",
+    "test:backup-restore-transaction": "node scripts/test-backup-restore-transaction.mjs",
+    "test:storage-write-barrier:electron": "electron scripts/test-storage-write-barrier-electron.cjs",
     "scan:storage-preview": "node scripts/scan-storage-migration-preview.mjs",
     "test:migrate-project": "node scripts/migrate-project-media-test.mjs",
     "test:migrated-project:electron": "electron scripts/test-migrated-project-electron.cjs",
     "test:storage:real-project": "electron scripts/test-real-project-transaction.cjs",
     "test:file-filter": "electron scripts/test-file-access-filter.cjs",
+    "test:navigation-security": "node --test scripts/test-navigation-security.cjs",
     "test:canvas-perf": "node scripts/test-canvas-performance.cjs",
+    "test:canvas-dock": "node scripts/test-canvas-dock-interactions.cjs",
+    "test:theme-system": "node scripts/test-theme-system.cjs",
     "test:global-config": "npm run build:web && node scripts/test-global-config-switching.cjs",
     "test:ark-assets": "node scripts/test-ark-trusted-assets.cjs",
     "account:dev": "node scripts/account-dev-server.cjs",
     "test:account": "node scripts/test-account-contract.cjs",
     "test:account:main": "node scripts/test-account-main.cjs",
+    "test:account:provisioning": "node --test scripts/test-managed-relay-provisioning.cjs scripts/test-account-global-provisioning.cjs",
+    "test:account:secure-storage": "node --test scripts/test-account-secret-storage.cjs",
+    "test:account:otp-helper": "node scripts/test-account-fusion-otp-helper.cjs",
+    "test:account:lifecycle": "node scripts/test-account-lifecycle-races.cjs",
     "test:cloud-prompts": "node scripts/test-cloud-prompts.cjs",
     "test:cloud-prompts:production": "electron scripts/test-cloud-prompts-production.cjs",
     "test:enterprise-gateway": "node scripts/test-enterprise-gateway.cjs",
     "test:preload-proxy": "node scripts/test-preload-proxy.cjs",
+    "test:preload-legacy-origin": "node --test scripts/test-preload-legacy-origin.cjs",
+    "test:proxy-transport": "node scripts/test-proxy-transport-fallback.cjs",
     "test:enterprise-overlay-cache": "node scripts/test-enterprise-overlay-cache.cjs",
     "test:automation-canvas-state": "node scripts/test-automation-canvas-state.cjs",
     "test:enterprise-team-templates": "node scripts/test-enterprise-team-templates.cjs",
     "test:local-secret-storage": "node scripts/test-local-secret-storage.cjs",
     "test:local-data-cleanup": "node scripts/test-local-data-cleanup.cjs",
     "test:version": "node scripts/test-version-consistency.cjs",
+    "test:windows-uninstall-data": "node scripts/test-windows-uninstall-data-policy.cjs",
     "test:automation:app": "node scripts/test-automation-app.cjs --dev",
     "test:automation:package": "node scripts/test-automation-app.cjs --packaged",
     "test:automation:client": "node scripts/test-automation-client.mjs",
@@ -63,10 +94,13 @@
     "arch:status": "omm status",
     "arch:validate": "omm validate",
     "arch:view": "omm view --port 3030",
+    "starcanvas": "node bin/starcanvas.mjs",
+    "starcanvas:mcp": "node bin/starcanvas-mcp.mjs",
     "wanjuan": "node bin/wanjuan.mjs",
     "wanjuan:mcp": "node bin/wanjuan-mcp.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "1.4.0",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",
     "gsap": "^3.15.0",
@@ -84,15 +118,15 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "cross-env": "^7.0.3",
-    "electron": "^39.8.5",
-    "electron-builder": "^26.8.1",
+    "electron": "42.11.15",
+    "electron-builder": "26.15.3",
     "typescript": "^5.7.0",
     "vite": "^8.0.16"
   },
   "build": {
     "appId": "com.wanjuan.lingjing",
     "productName": "StarCanvas",
-    "artifactName": "StarCanvas-1.4.7-${arch}.${ext}",
+    "artifactName": "StarCanvas-1.4.8-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -103,6 +137,14 @@
     "extraResources": [
       {
         "from": "bin",
+        "to": "starcanvas-cli"
+      },
+      {
+        "from": "docs/AUTOMATION_CLI.md",
+        "to": "starcanvas-cli/README.md"
+      },
+      {
+        "from": "bin",
         "to": "wanjuan-cli"
       },
       {
@@ -110,13 +152,13 @@
         "to": "wanjuan-cli/README.md"
       }
     ],
-    "afterPack": "scripts/copy-platform-tool-runtime.cjs",
+    "afterPack": "scripts/after-pack.cjs",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "extendInfo": {
-        "CFBundleShortVersionString": "1.4.7",
-        "CFBundleVersion": "1.4.7"
+        "CFBundleShortVersionString": "1.4.8",
+        "CFBundleVersion": "1.4.8"
       }
     },
     "win": {
@@ -132,7 +174,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "StarCanvas",
-      "deleteAppDataOnUninstall": true,
+      "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh"
     }
   },

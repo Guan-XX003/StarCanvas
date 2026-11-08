@@ -6,6 +6,7 @@ import { useCallback, useMemo } from "react";
 import type { SetAny, Toast } from "../lib/app-types";
 import { getAgentOptionList } from "../lib/agent";
 import { getProjectOptionList } from "../lib/app-root-helpers";
+import { assertSafeBackupProjects } from "../lib/project-normalize";
 
 interface UseHandleBackupImportFileDeps {
   applyExternalAssetBundleToBackupPayload: any;
@@ -56,6 +57,7 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                         agentOptions = availableModules.includes(`agents`) ?
                                         getAgentOptionList(normalizedModules.agents?.chromeStorage?.agents) :
                                         [];
+                                      availableModules.includes(`projects`) && assertSafeBackupProjects(normalizedModules.projects?.chromeStorage?.projects);
                                       setBackupDialogTab(availableModules.includes(`projects`) ? `projects` : availableModules.includes(`agents`) ? `agents` : `settings`),
                                         setBackupDialogState({
                                           mode: `import`,
@@ -98,6 +100,7 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                           agentList = availableModules.includes(`agents`) ?
                                           getAgentOptionList(normalizedModules.agents?.chromeStorage?.agents) :
                                           [];
+                                        availableModules.includes(`projects`) && assertSafeBackupProjects(normalizedModules.projects?.chromeStorage?.projects);
                                         setBackupDialogTab(availableModules.includes(`projects`) ? `projects` : availableModules.includes(`agents`) ? `agents` : `settings`),
                                           setBackupDialogState({
                                             mode: `import`,

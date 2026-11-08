@@ -530,7 +530,7 @@ export const WanJuanTextNode = reactMemo(({
                           }),
                           isMentionPickerOpen &&
                           jsxs(`div`, {
-			                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[#22272f] border border-[#3a4250] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden`,
+			                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[var(--wj-menu-bg)] border border-[var(--wj-menu-border)] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden`,
                             onClick: (event) => event.stopPropagation(),
                             children: [
                               wanjuanRenderResourcePickerHeader({
@@ -559,7 +559,7 @@ export const WanJuanTextNode = reactMemo(({
                                         .map((resource: any) =>
                                           jsxs(
                                             `div`, {
-	                                              className: `aspect-square bg-[#111827] rounded-lg border border-[#333b46] hover:border-blue-500 cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
+	                                              className: `aspect-square bg-[var(--wj-card-bg)] rounded-lg border border-[var(--wj-panel-border-soft)] hover:border-[var(--wj-control-hover-border)] cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
 	                                              onClick: (event) => {
 	                                                let mentionRange = wanjuanMentionRangeFromPicker(event.currentTarget, prompt),
 	                                                  updatedPrompt = wanjuanReplaceMentionToken(prompt, mentionRange);
@@ -607,13 +607,13 @@ export const WanJuanTextNode = reactMemo(({
                                 return totalPages <= 1 ?
                                   null :
                                   jsxs(`div`, {
-	                                    className: `flex items-center justify-between p-2 border-t border-[#333b46] bg-[#20252c]`,
+	                                    className: `flex items-center justify-between p-2 border-t border-[var(--wj-panel-divider)] bg-[var(--wj-panel-section-header-bg)]`,
                                     children: [
                                       jsx(`button`, {
                                         disabled: currentPage === 1,
                                         onClick: () =>
                                           setCurrentPage((prev) => Math.max(1, prev - 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `上一页`,
                                       }),
                                       jsxs(`span`, {
@@ -624,7 +624,7 @@ export const WanJuanTextNode = reactMemo(({
                                         disabled: currentPage === totalPages,
                                         onClick: () =>
                                           setCurrentPage((prev) => Math.min(totalPages, prev + 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `下一页`,
                                       }),
                                     ],

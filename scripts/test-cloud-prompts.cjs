@@ -308,6 +308,174 @@ async function testSendTargetsAndCloudCopy() {
   await assert.rejects(() => deniedController.sendTemplateToWorkspace({ title: "X", content: "X" }, "viewer"), /没有创建权限/);
 }
 
+async function testWorkspaceSyncScopeRace() {
+  const store = createCloudPromptStore({ adapter: createMemoryCloudPromptAdapter() });
+  let releaseWorkspaceA;
+  let markWorkspaceAStarted;
+  const workspaceAStarted = new Promise((resolve) => { markWorkspaceAStarted = resolve; });
+  const workspaceAResult = new Promise((resolve) => { releaseWorkspaceA = resolve; });
+  const workspaces = [
+    { id: "workspace-a", name: "A", kind: "personal", role: "owner", permissions: { canRead: true, canCreate: true, canEdit: true } },
+    { id: "workspace-b", name: "B", kind: "organization", role: "editor", permissions: { canRead: true, canCreate: true, canEdit: true } },
+  ];
+  const invoke = async (payload) => {
+    if (payload.operation === "bootstrap") return { ok: true, authenticated: true, account: { id: "account-a" }, workspaces };
+    if (payload.operation === "template.list" && payload.workspaceId === "workspace-a") {
+      markWorkspaceAStarted();
+      return workspaceAResult;
+    }
+    if (payload.operation === "template.list" && payload.workspaceId === "workspace-b") {
+      return {
+        ok: true,
+        items: [{ id: "template-b", workspaceId: "workspace-b", title: "B", content: "B", type: "text", tags: [], parameters: {} }],
+        tombstones: [],
+        nextCursor: "cursor-b",
+      };
+    }
+    return { ok: true, items: [], tombstones: [], nextCursor: "" };
+  };
+  const controller = createCloudPromptWorkspaceController({ store, invoke });
+  await controller.prepare({ force: true });
+  const syncA = controller.handleField("cloudWorkspaceId", "workspace-a");
+  await workspaceAStarted;
+  const syncB = controller.handleField("cloudWorkspaceId", "workspace-b");
+  await syncB;
+  releaseWorkspaceA({
+    ok: true,
+    items: [{ id: "template-a", workspaceId: "workspace-a", title: "A", content: "A", type: "text", tags: [], parameters: {} }],
+    tombstones: [],
+    nextCursor: "cursor-a",
+  });
+  await syncA;
+
+  assert.equal(controller.peek().activeWorkspaceId, "workspace-b");
+  assert.deepEqual(controller.peek().templates.map((item) => item.id), ["template-b"]);
+  assert.deepEqual((await store.listTemplates("account-a", "workspace-b")).map((item) => item.id), ["template-b"]);
+  assert.deepEqual(await store.listTemplates("account-a", "workspace-a"), [], "stale A response must not be committed after switching to B");
+  assert.equal(await store.getCursor("account-a", "workspace-b"), "cursor-b");
+  assert.equal(await store.getCursor("account-a", "workspace-a"), undefined);
+
+  const accountStore = createCloudPromptStore({ adapter: createMemoryCloudPromptAdapter() });
+  let activeAccount = "account-a";
+  let releaseAccountA;
+  let markAccountAStarted;
+  const accountAStarted = new Promise((resolve) => { markAccountAStarted = resolve; });
+  const accountAResult = new Promise((resolve) => { releaseAccountA = resolve; });
+  const accountController = createCloudPromptWorkspaceController({
+    store: accountStore,
+    invoke: async (payload) => {
+      if (payload.operation === "bootstrap") {
+        return {
+          ok: true,
+          authenticated: true,
+          account: { id: activeAccount },
+          workspaces: [{ id: `workspace-${activeAccount}`, name: activeAccount, kind: "personal", role: "owner", permissions: { canRead: true, canCreate: true, canEdit: true } }],
+        };
+      }
+      if (payload.operation === "template.list" && payload.workspaceId === "workspace-account-a") {
+        markAccountAStarted();
+        return accountAResult;
+      }
+      if (payload.operation === "template.list" && payload.workspaceId === "workspace-account-b") {
+        return {
+          ok: true,
+          items: [{ id: "template-account-b", workspaceId: "workspace-account-b", title: "B", content: "B", type: "text", tags: [], parameters: {} }],
+          tombstones: [],
+          nextCursor: "cursor-account-b",
+        };
+      }
+      return { ok: true, items: [], tombstones: [], nextCursor: "" };
+    },
+  });
+  await accountController.prepare({ force: true });
+  const staleAccountSync = accountController.syncActiveWorkspace();
+  await accountAStarted;
+  accountController.reset();
+  activeAccount = "account-b";
+  await accountController.prepare({ force: true, sync: true });
+  releaseAccountA({
+    ok: true,
+    items: [{ id: "template-account-a", workspaceId: "workspace-account-a", title: "A", content: "A", type: "text", tags: [], parameters: {} }],
+    tombstones: [],
+    nextCursor: "cursor-account-a",
+  });
+  await staleAccountSync;
+
+  assert.equal(accountController.peek().account.id, "account-b");
+  assert.deepEqual(accountController.peek().templates.map((item) => item.id), ["template-account-b"]);
+  assert.deepEqual(await accountStore.listTemplates("account-a", "workspace-account-a"), [], "late account A response must not recreate its cache after account switch");
+
+  const cursorBaseStore = createCloudPromptStore({ adapter: createMemoryCloudPromptAdapter() });
+  let releaseCursor;
+  let markCursorStarted;
+  const cursorStarted = new Promise((resolve) => { markCursorStarted = resolve; });
+  const heldCursor = new Promise((resolve) => { releaseCursor = resolve; });
+  const cursorStore = {
+    ...cursorBaseStore,
+    async getCursor(accountId, workspaceId) {
+      if (workspaceId === "workspace-a") {
+        markCursorStarted();
+        return heldCursor;
+      }
+      return cursorBaseStore.getCursor(accountId, workspaceId);
+    },
+  };
+  const cursorCalls = [];
+  const cursorController = createCloudPromptWorkspaceController({
+    store: cursorStore,
+    invoke: async (payload) => {
+      if (payload.operation === "bootstrap") return { ok: true, authenticated: true, account: { id: "cursor-account" }, workspaces };
+      cursorCalls.push(payload);
+      return { ok: true, items: [], tombstones: [], nextCursor: "" };
+    },
+  });
+  await cursorController.prepare({ force: true });
+  const heldCursorSync = cursorController.syncActiveWorkspace();
+  await cursorStarted;
+  await cursorController.handleField("cloudWorkspaceId", "workspace-b");
+  releaseCursor("");
+  await heldCursorSync;
+  assert.equal(cursorCalls.some((call) => call.workspaceId === "workspace-a"), false, "scope must be rechecked after an awaited cursor read");
+
+  const listBaseStore = createCloudPromptStore({ adapter: createMemoryCloudPromptAdapter() });
+  let holdFinalList = false;
+  let releaseFinalList;
+  let markFinalListStarted;
+  const finalListStarted = new Promise((resolve) => { markFinalListStarted = resolve; });
+  const heldFinalList = new Promise((resolve) => { releaseFinalList = resolve; });
+  const listStore = {
+    ...listBaseStore,
+    async applyRemoteChanges(...args) {
+      const result = await listBaseStore.applyRemoteChanges(...args);
+      if (args[1] === "workspace-a") holdFinalList = true;
+      return result;
+    },
+    async listTemplates(accountId, workspaceId, options) {
+      const result = await listBaseStore.listTemplates(accountId, workspaceId, options);
+      if (workspaceId === "workspace-a" && holdFinalList) {
+        markFinalListStarted();
+        await heldFinalList;
+      }
+      return result;
+    },
+  };
+  const listController = createCloudPromptWorkspaceController({
+    store: listStore,
+    invoke: async (payload) => {
+      if (payload.operation === "bootstrap") return { ok: true, authenticated: true, account: { id: "list-account" }, workspaces };
+      return { ok: true, items: [{ id: `template-${payload.workspaceId}`, workspaceId: payload.workspaceId, title: payload.workspaceId, content: payload.workspaceId, type: "text", tags: [], parameters: {} }], tombstones: [], nextCursor: "cursor" };
+    },
+  });
+  await listController.prepare({ force: true });
+  const heldListSync = listController.syncActiveWorkspace();
+  await finalListStarted;
+  await listController.handleField("cloudWorkspaceId", "workspace-b");
+  releaseFinalList();
+  await heldListSync;
+  assert.equal(listController.peek().activeWorkspaceId, "workspace-b");
+  assert.deepEqual(listController.peek().templates.map((item) => item.id), ["template-workspace-b"], "late listTemplates result must not overwrite the current workspace view");
+}
+
 async function testSharingContractsAndUi() {
   const calls = [];
   const service = createCloudPromptService({
@@ -407,6 +575,7 @@ async function main() {
   await testPermissionDefaults();
   await testConflictDetailsPreserved();
   await testSendTargetsAndCloudCopy();
+  await testWorkspaceSyncScopeRace();
   await testSharingContractsAndUi();
   await testWorkspaceSendMenuIsNotClipped();
   console.log("cloud prompt tests passed");

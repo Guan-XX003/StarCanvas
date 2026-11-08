@@ -5,7 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const { app } = require("./electron-refs.cjs");
-const { decryptLocalSecret, encryptLocalSecret, secretStorageMode } = require("./local-secret-storage.cjs");
+const { decryptSecret, encryptSecret, secretStorageMode } = require("./account-secret-storage.cjs");
 const { readOrCreateAccountDevice } = require("./account-device.cjs");
 const {
   clearEnterpriseGatewayLocalState,
@@ -27,16 +27,19 @@ const {
   writeEnterpriseSnapshotCache,
 } = require("./enterprise-gateway-client.cjs");
 const { createEnterpriseUploadSource } = require("./enterprise-upload-source.cjs");
+const { withPreparedCloudAsset } = require("./assets/cloud-project-media.cjs");
 const {
   normalizeEnterpriseTeamConflictDetails,
   normalizeEnterpriseTeamTemplateResponse,
   sanitizeEnterpriseTeamTemplateInput,
 } = require("../shared/enterprise-team-template-contract.cjs");
 
-const ACCOUNT_STATE_VERSION = 2;
+const ACCOUNT_STATE_VERSION = 3;
 const ACCOUNT_REQUEST_TIMEOUT_MS = 15000;
 const DEFAULT_OFFLINE_GRACE_MS = 72 * 60 * 60 * 1000;
 const WANJUAN_ACCOUNT_DEFAULT_API_URL = "https://account.guancn.uk";
+const WANJUAN_MANAGED_RELAY_PLACEHOLDER = "__WANJUAN_MANAGED_RELAY__";
+const WANJUAN_MANAGED_RELAY_HOST = "jixing.guancn.uk";
 const SESSION_INVALID_CODES = new Set([
   "ACCOUNT_DISABLED",
   "DEVICE_REVOKED",
@@ -50,7 +53,66 @@ const SESSION_INVALID_CODES = new Set([
 let accessToken = "";
 let accountStateCache = null;
 let refreshPromise = null;
+let refreshPromiseEpoch = -1;
+let accountLifecycleEpoch = 0;
+let enterpriseLifecycleEpoch = 0;
 let accountOrganizationsCache = [];
+let managedRelayBootstrapTimer = null;
+let managedRelayBootstrapAttempt = 0;
+const PUBLIC_CAPABILITIES_MAX_ATTEMPTS = 2;
+const publicCapabilitiesCacheByBaseUrl = new Map();
+const publicCapabilitiesPromiseByBaseUrl = new Map();
+const activeCloudUploads = new Set();
+
+function advanceAccountLifecycle() {
+  accountLifecycleEpoch += 1;
+  for (const controller of activeCloudUploads) controller.abort();
+  activeCloudUploads.clear();
+  if (managedRelayBootstrapTimer) clearTimeout(managedRelayBootstrapTimer);
+  managedRelayBootstrapTimer = null;
+  managedRelayBootstrapAttempt = 0;
+  return accountLifecycleEpoch;
+}
+
+function advanceEnterpriseLifecycle() {
+  enterpriseLifecycleEpoch += 1;
+  return enterpriseLifecycleEpoch;
+}
+
+function enterpriseScopeKey(enterprise) {
+  if (!enterprise || typeof enterprise !== "object") return "";
+  return [
+    enterprise.mode || "",
+    enterprise.organization?.id || "",
+    enterprise.gatewayId || "",
+    enterprise.gatewayUrl || "",
+    enterprise.certificateFingerprint || "",
+  ].map((value) => String(value)).join("\n");
+}
+
+function assertCurrentEnterpriseSecret(enterprise, expectedEpoch) {
+  if (expectedEpoch !== enterpriseLifecycleEpoch
+      || enterpriseScopeKey(enterprise) !== enterpriseScopeKey(readAccountState().enterprise)) {
+    throw new AccountRequestError("企业连接已变更，已忽略过期操作", {
+      status: 409, code: "ENTERPRISE_SESSION_CHANGED",
+    });
+  }
+}
+
+function assertCurrentAccountLifecycle(expectedEpoch) {
+  if (expectedEpoch !== accountLifecycleEpoch) {
+    throw new AccountRequestError("账号已切换，已忽略过期响应", {
+      status: 409,
+      code: "ACCOUNT_SESSION_CHANGED",
+    });
+  }
+}
+
+// Captures the exact login lifecycle, including logout and re-login to the same account.
+function createAccountOperationGuard() {
+  const epoch = accountLifecycleEpoch;
+  return () => assertCurrentAccountLifecycle(epoch);
+}
 
 class AccountRequestError extends Error {
   constructor(message, options = {}) {
@@ -77,6 +139,9 @@ function defaultAccountState() {
     subscription: null,
     entitlements: [],
     wallet: null,
+    relay: null,
+    featureFlags: null,
+    relayManagedKeyEncrypted: "",
     device: null,
     session: null,
     enterprise: null,
@@ -119,24 +184,7 @@ function writeAccountState(patch = {}) {
 }
 
 function canEncryptSecrets() {
-  return secretStorageMode() !== "unavailable";
-}
-
-function encryptSecret(value) {
-  const text = String(value || "");
-  if (!text) return "";
-  if (!canEncryptSecrets()) throw new Error("系统安全存储不可用，登录令牌未保存");
-  return encryptLocalSecret(text);
-}
-
-function decryptSecret(value) {
-  const encoded = String(value || "");
-  if (!encoded || !canEncryptSecrets()) return "";
-  try {
-    return decryptLocalSecret(encoded);
-  } catch {
-    return "";
-  }
+  return ["system", "local"].includes(secretStorageMode());
 }
 
 function isPrivateLanHostname(hostname) {
@@ -169,7 +217,7 @@ function accountApiUrl() {
 
 function sanitizeAccountState(state = readAccountState(), extra = {}) {
   const now = Date.now();
-  const authenticated = !!state.user && (!!accessToken || !!state.session?.refreshTokenEncrypted);
+  const authenticated = extra.requiresLogin !== true && !!state.user && (!!accessToken || !!state.session?.refreshTokenEncrypted);
   const offlineGraceUntil = Number(state.lastVerifiedAt || 0) + DEFAULT_OFFLINE_GRACE_MS;
   const gatewayHost = getEnterpriseGatewayStatus();
   const ownedEnterprises = accountOrganizationsCache.filter((item) =>
@@ -190,7 +238,9 @@ function sanitizeAccountState(state = readAccountState(), extra = {}) {
     user: state.user || null,
     subscription: state.subscription || null,
     entitlements: Array.isArray(state.entitlements) ? state.entitlements : [],
-    wallet: state.wallet || null,
+    wallet: normalizeWallet(state.wallet),
+    relay: normalizeRelayMetadata(state.relay),
+    featureFlags: normalizeAccountFeatureFlags(state.featureFlags, state.relay, state.wallet),
     device: state.device || null,
     enterprise: state.enterprise ? {
       mode: state.enterprise.mode || "member",
@@ -307,10 +357,13 @@ function isSessionInvalidError(error) {
 }
 
 function isOfflineEligibleError(error) {
-  return error?.network === true || Number(error?.status || 0) >= 500;
+  return error?.network === true || Number(error?.status || 0) >= 500
+    || String(error?.code || "").startsWith("SECURE_STORAGE_");
 }
 
 function clearInvalidAccountSession(error) {
+  advanceAccountLifecycle();
+  advanceEnterpriseLifecycle();
   accessToken = "";
   accountOrganizationsCache = [];
   stopEnterpriseGateway({ disableAutoStart: true }).catch(() => {});
@@ -321,6 +374,9 @@ function clearInvalidAccountSession(error) {
     subscription: null,
     entitlements: [],
     wallet: null,
+    relay: null,
+    featureFlags: null,
+    relayManagedKeyEncrypted: "",
     device: null,
     session: null,
     enterprise: null,
@@ -334,60 +390,377 @@ function clearInvalidAccountSession(error) {
   });
 }
 
-function applyAccountPayload(payload = {}, tokens = {}) {
-  const state = readAccountState();
+async function applyAccountPayload(payload = {}, tokens = {}, expectedEpoch = accountLifecycleEpoch) {
   const refreshToken = String(tokens.refreshToken || payload.refreshToken || "");
+  const managedKey = extractManagedRelayKey(payload);
+  // Encrypt before changing the session. Recheck identity after the async native
+  // boundary so logout/account-switch cannot be undone by a late completion.
+  const encryptedRefresh = refreshToken ? await encryptSecret(refreshToken) : "";
+  const encryptedManaged = managedKey ? await encryptSecret(managedKey) : "";
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const state = readAccountState();
+  const previousUserId = String(state.user?.id || "");
+  const incomingUserId = String(payload.user?.id || "");
+  const identityChanged = Boolean(previousUserId && incomingUserId && previousUserId !== incomingUserId);
   accessToken = String(tokens.accessToken || payload.accessToken || accessToken || "");
   const session = refreshToken ? {
-    refreshTokenEncrypted: encryptSecret(refreshToken),
+    refreshTokenEncrypted: encryptedRefresh,
     issuedAt: Date.now(),
   } : state.session;
-  return writeAccountState({
+  const next = writeAccountState({
     onboardingComplete: true,
     localMode: false,
     user: payload.user || state.user || null,
-    subscription: payload.subscription || state.subscription || null,
-    entitlements: Array.isArray(payload.entitlements) ? payload.entitlements : state.entitlements || [],
-    wallet: payload.wallet || state.wallet || null,
-    device: payload.device || state.device || null,
+    subscription: payload.subscription || (identityChanged ? null : state.subscription) || null,
+    entitlements: Array.isArray(payload.entitlements) ? payload.entitlements : identityChanged ? [] : state.entitlements || [],
+    wallet: normalizeWallet(payload.wallet) || (identityChanged ? null : state.wallet) || null,
+    relay: normalizeRelayMetadata(payload.relay) || (identityChanged ? null : state.relay) || null,
+    featureFlags: normalizeAccountFeatureFlags(
+      payload.featureFlags || payload.feature_flags || payload.features || (identityChanged ? null : state.featureFlags),
+      payload.relay || (identityChanged ? null : state.relay),
+      payload.wallet || (identityChanged ? null : state.wallet),
+    ),
+    device: payload.device || (identityChanged ? null : state.device) || null,
     session,
+    enterprise: identityChanged ? null : state.enterprise,
+    relayManagedKeyEncrypted: identityChanged ? "" : state.relayManagedKeyEncrypted,
     lastVerifiedAt: Date.now(),
   });
+  if (identityChanged) {
+    clearEnterpriseSnapshotCache();
+    accountOrganizationsCache = [];
+  }
+  if (managedKey) return writeAccountState({ relayManagedKeyEncrypted: encryptedManaged });
+  return next;
 }
 
-async function performRefreshAccountSession() {
+async function performRefreshAccountSession(expectedEpoch = accountLifecycleEpoch) {
   const baseUrl = accountApiUrl();
   const state = readAccountState();
-  const refreshToken = decryptSecret(state.session?.refreshTokenEncrypted);
+  const encryptedRefreshToken = String(state.session?.refreshTokenEncrypted || "");
+  const refreshToken = await decryptSecret(state.session?.refreshTokenEncrypted);
+  assertCurrentAccountLifecycle(expectedEpoch);
   if (!baseUrl || !refreshToken) return sanitizeAccountState(state);
-  const payload = await requestJson(baseUrl, "/auth/refresh", {
-    method: "POST",
-    body: { refreshToken },
-  });
-  const next = applyAccountPayload(payload);
+  let payload;
+  try {
+    payload = await requestJson(baseUrl, "/auth/refresh", {
+      method: "POST",
+      body: { refreshToken },
+    });
+  } catch (error) {
+    assertCurrentAccountLifecycle(expectedEpoch);
+    throw error;
+  }
+  if (
+    expectedEpoch !== accountLifecycleEpoch ||
+    String(readAccountState().session?.refreshTokenEncrypted || "") !== encryptedRefreshToken
+  ) {
+    return sanitizeAccountState(readAccountState());
+  }
+  const next = await applyAccountPayload(payload, {}, expectedEpoch);
   return sanitizeAccountState(next);
 }
 
 async function refreshAccountSession() {
-  if (!refreshPromise) {
-    refreshPromise = performRefreshAccountSession().finally(() => {
-      refreshPromise = null;
+  const expectedEpoch = accountLifecycleEpoch;
+  if (!refreshPromise || refreshPromiseEpoch !== expectedEpoch) {
+    const pending = performRefreshAccountSession(expectedEpoch).finally(() => {
+      if (refreshPromise === pending) {
+        refreshPromise = null;
+        refreshPromiseEpoch = -1;
+      }
     });
+    refreshPromise = pending;
+    refreshPromiseEpoch = expectedEpoch;
   }
   return refreshPromise;
 }
 
 async function requestWithAccountAuth(baseUrl, pathname, options = {}) {
+  const expectedEpoch = accountLifecycleEpoch;
   if (!accessToken && readAccountState().session?.refreshTokenEncrypted) {
     await refreshAccountSession();
+    assertCurrentAccountLifecycle(expectedEpoch);
   }
   if (!accessToken) throw new AccountRequestError("请先登录StarCanvas账号", { status: 401, code: "AUTH_REQUIRED" });
   try {
-    return await requestJson(baseUrl, pathname, { ...options, token: accessToken });
+    const result = await requestJson(baseUrl, pathname, { ...options, token: accessToken });
+    assertCurrentAccountLifecycle(expectedEpoch);
+    return result;
   } catch (error) {
+    assertCurrentAccountLifecycle(expectedEpoch);
     if (options.retryAfterRefresh === false || String(error?.code || "") !== "ACCESS_TOKEN_EXPIRED") throw error;
     await refreshAccountSession();
-    return requestJson(baseUrl, pathname, { ...options, retryAfterRefresh: false, token: accessToken });
+    assertCurrentAccountLifecycle(expectedEpoch);
+    const result = await requestJson(baseUrl, pathname, { ...options, retryAfterRefresh: false, token: accessToken });
+    assertCurrentAccountLifecycle(expectedEpoch);
+    return result;
+  }
+}
+
+async function boundedCloudJson(response) {
+  const stated = response.headers.get("content-length");
+  if (stated && (!/^\d+$/.test(stated) || Number(stated) > 65536)) {
+    throw new AccountRequestError("云素材服务响应过大", { code: "CLOUD_RESPONSE_INVALID" });
+  }
+  if (!response.body) return {};
+  const reader = response.body.getReader();
+  const pieces = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 65536) throw new AccountRequestError("云素材服务响应过大", { code: "CLOUD_RESPONSE_INVALID" });
+      pieces.push(Buffer.from(part.value));
+    }
+    const value = JSON.parse(Buffer.concat(pieces).toString("utf8") || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid");
+    return value;
+  } catch (error) {
+    if (error instanceof AccountRequestError) throw error;
+    throw new AccountRequestError("云素材服务响应无效", { code: "CLOUD_RESPONSE_INVALID" });
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+// Main-process only: roots and source must be derived from a trusted project
+// selection, never from a renderer-provided arbitrary root. No IPC exposure yet.
+async function uploadCloudProjectAsset({ sourcePath, allowedRoots, stagingRoot, maxBytes,
+  expectedSha256, expectedSize, reservationId = crypto.randomUUID(), timeoutMs = 600000 } = {}) {
+  if (typeof reservationId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reservationId) ||
+      !Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 3600000) {
+    throw new AccountRequestError("云素材参数无效", { code: "CLOUD_UPLOAD_ARGUMENT_INVALID" });
+  }
+  const expectedEpoch = accountLifecycleEpoch;
+  const baseUrl = accountApiUrl();
+  const account = readAccountState();
+  if (!baseUrl || !account.user || (!accessToken && !account.session?.refreshTokenEncrypted)) {
+    throw new AccountRequestError("请先登录StarCanvas账号", { code: "AUTH_REQUIRED", status: 401 });
+  }
+  const controller = new AbortController();
+  activeCloudUploads.add(controller);
+  let timeout = null;
+  try {
+    const outcome = await withPreparedCloudAsset({ sourcePath, allowedRoots, stagingRoot, maxBytes, expectedSha256, expectedSize },
+      async ({ stagedPath, sha256, size }) => {
+        try {
+          assertCurrentAccountLifecycle(expectedEpoch);
+          const reservation = await requestWithAccountAuth(baseUrl, "/cloud-projects/blobs/reserve", {
+            method: "POST", body: { sha256, size, reservationId },
+          });
+          assertCurrentAccountLifecycle(expectedEpoch);
+          if (reservation.status === "ready") return { value: { sha256, size, reservationId, alreadyPresent: true } };
+          if (reservation.status !== "reserved") throw new AccountRequestError("云素材预占响应无效", { code: "CLOUD_RESPONSE_INVALID" });
+          timeout = setTimeout(() => controller.abort(), timeoutMs);
+          const attempt = async () => {
+            assertCurrentAccountLifecycle(expectedEpoch);
+            if (!accessToken) throw new AccountRequestError("请先登录StarCanvas账号", { code: "AUTH_REQUIRED", status: 401 });
+            // Cloudflare Free limits each request body to 100 MB. Segment the
+            // network transfer itself (not just renderer IPC) while retaining
+            // one account-scoped reservation and one verified blob identity.
+            const partBytes = 32 * 1024 * 1024;
+            if (size > partBytes) {
+              let offset = 0;
+              while (offset < size) {
+                assertCurrentAccountLifecycle(expectedEpoch);
+                const count = Math.min(partBytes, size - offset);
+                const stream = fs.createReadStream(stagedPath, { start: offset, end: offset + count - 1 });
+                try {
+                  const response = await fetch(`${baseUrl}/cloud-projects/blobs/${sha256}/parts`, {
+                    method: "PUT", redirect: "error", signal: controller.signal, duplex: "half", body: stream,
+                    headers: { accept: "application/json", authorization: `Bearer ${accessToken}`,
+                      "content-type": "application/octet-stream", "content-length": String(count),
+                      "x-upload-reservation": reservationId, "x-upload-total": String(size),
+                      "x-upload-offset": String(offset) },
+                  });
+                  const payload = await boundedCloudJson(response);
+                  if (!response.ok) {
+                    const code = typeof payload.code === "string" && /^[A-Z0-9_]{1,80}$/.test(payload.code)
+                      ? payload.code : `HTTP_${response.status}`;
+                    throw new AccountRequestError("云素材上传失败", { status: response.status, code });
+                  }
+                  if (!Number.isSafeInteger(payload.offset) || payload.offset <= offset || payload.offset > size ||
+                      !((payload.status === "partial" && payload.offset < size) ||
+                        (payload.status === "ready" && payload.offset === size))) {
+                    throw new AccountRequestError("云素材响应无效", { code: "CLOUD_RESPONSE_INVALID" });
+                  }
+                  assertCurrentAccountLifecycle(expectedEpoch);
+                  offset = payload.offset;
+                  if (payload.status === "ready") return { sha256, size, reservationId, alreadyPresent: payload.replayed === true };
+                } finally { stream.destroy(); }
+              }
+              throw new AccountRequestError("云素材响应无效", { code: "CLOUD_RESPONSE_INVALID" });
+            }
+            const stream = fs.createReadStream(stagedPath);
+            try {
+              const response = await fetch(`${baseUrl}/cloud-projects/blobs/${sha256}`, {
+                method: "PUT", redirect: "error", signal: controller.signal, duplex: "half", body: stream,
+                headers: { accept: "application/json", authorization: `Bearer ${accessToken}`,
+                  "content-type": "application/octet-stream", "content-length": String(size),
+                  "x-upload-reservation": reservationId },
+              });
+              const payload = await boundedCloudJson(response);
+              if (!response.ok) {
+                const code = typeof payload.code === "string" && /^[A-Z0-9_]{1,80}$/.test(payload.code)
+                  ? payload.code : `HTTP_${response.status}`;
+                throw new AccountRequestError("云素材上传失败", { status: response.status, code });
+              }
+              if (payload.status !== "ready") throw new AccountRequestError("云素材响应无效", { code: "CLOUD_RESPONSE_INVALID" });
+              assertCurrentAccountLifecycle(expectedEpoch);
+              return { sha256, size, reservationId, alreadyPresent: payload.replayed === true };
+            } finally { stream.destroy(); }
+          };
+          try { return { value: await attempt() }; }
+          catch (error) {
+            assertCurrentAccountLifecycle(expectedEpoch);
+            if (error?.code !== "ACCESS_TOKEN_EXPIRED") throw error;
+            await refreshAccountSession();
+            assertCurrentAccountLifecycle(expectedEpoch);
+            return { value: await attempt() };
+          }
+        } catch (error) { return { error }; }
+      });
+    if (outcome.error) {
+      assertCurrentAccountLifecycle(expectedEpoch);
+      const code = /^[A-Z0-9_]{1,80}$/.test(String(outcome.error?.code || "")) ? outcome.error.code
+        : controller.signal.aborted ? "CLOUD_UPLOAD_TIMEOUT" : "CLOUD_UPLOAD_FAILED";
+      throw new AccountRequestError("云素材同步失败，请稍后重试", {
+        code, status: Number(outcome.error?.status || 0),
+        network: outcome.error?.network === true || code === "CLOUD_UPLOAD_TIMEOUT",
+      });
+    }
+    assertCurrentAccountLifecycle(expectedEpoch);
+    return outcome.value;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    activeCloudUploads.delete(controller);
+  }
+}
+
+// Main-process only. The callback may inspect the verified temporary file but
+// must recheck the supplied session guard before publishing any local project.
+// The file is removed on completion, failure, timeout or account change.
+async function withDownloadedCloudProjectAsset({ sha256, size, stagingRoot, maxBytes, timeoutMs = 600000 } = {}, consume) {
+  if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256) ||
+      !Number.isSafeInteger(size) || size < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || size > maxBytes ||
+      typeof stagingRoot !== "string" || !path.isAbsolute(stagingRoot) || typeof consume !== "function" ||
+      !Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 3600000) {
+    throw new AccountRequestError("云素材参数无效", { code: "CLOUD_DOWNLOAD_ARGUMENT_INVALID" });
+  }
+  const expectedEpoch = accountLifecycleEpoch;
+  const baseUrl = accountApiUrl();
+  const account = readAccountState();
+  if (!baseUrl || !account.user || (!accessToken && !account.session?.refreshTokenEncrypted)) {
+    throw new AccountRequestError("请先登录StarCanvas账号", { code: "AUTH_REQUIRED", status: 401 });
+  }
+  const controller = new AbortController();
+  activeCloudUploads.add(controller);
+  let timeout, directory, filePath, file, identity, responseAccepted = false;
+  try {
+    const root = await fs.promises.realpath(stagingRoot);
+    const rootStat = await fs.promises.lstat(stagingRoot);
+    if (path.relative(root, path.resolve(stagingRoot)) !== "" || !rootStat.isDirectory() || rootStat.isSymbolicLink() ||
+        (process.platform !== "win32" && (rootStat.uid !== process.getuid() || (rootStat.mode & 0o077) !== 0))) {
+      throw new AccountRequestError("云素材暂存目录不可用", { code: "CLOUD_STAGING_UNSAFE" });
+    }
+    assertCurrentAccountLifecycle(expectedEpoch);
+    if (!accessToken) {
+      await refreshAccountSession();
+      assertCurrentAccountLifecycle(expectedEpoch);
+    }
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const attempt = async () => {
+      assertCurrentAccountLifecycle(expectedEpoch);
+      const response = await fetch(`${baseUrl}/cloud-projects/blobs/${sha256}`, {
+        method: "GET", redirect: "error", signal: controller.signal,
+        headers: { authorization: `Bearer ${accessToken}`, accept: "application/octet-stream" },
+      });
+      if (!response.ok) {
+        const payload = await boundedCloudJson(response);
+        const code = typeof payload.code === "string" && /^[A-Z0-9_]{1,80}$/.test(payload.code)
+          ? payload.code : `HTTP_${response.status}`;
+        throw new AccountRequestError("云素材下载失败", { status: response.status, code });
+      }
+      responseAccepted = true;
+      const length = response.headers.get("content-length");
+      if (!length || !/^\d+$/.test(length) || Number(length) !== size || !response.body) {
+        await response.body?.cancel().catch(() => {});
+        throw new AccountRequestError("云素材大小不匹配", { code: "CLOUD_INTEGRITY_FAILED" });
+      }
+      directory = await fs.promises.mkdtemp(path.join(root, "cloud-download-"));
+      filePath = path.join(directory, "asset");
+      file = await fs.promises.open(filePath, "wx", 0o600);
+      identity = await file.stat({ bigint: true });
+      const hash = crypto.createHash("sha256");
+      const reader = response.body.getReader();
+      let total = 0;
+      try {
+        for (;;) {
+          const part = await reader.read();
+          if (part.done) break;
+          const bytes = Buffer.from(part.value);
+          total += bytes.length;
+          if (total > size) throw new AccountRequestError("云素材大小不匹配", { code: "CLOUD_INTEGRITY_FAILED" });
+          hash.update(bytes);
+          let offset = 0;
+          while (offset < bytes.length) {
+            const result = await file.write(bytes, offset, bytes.length - offset, null);
+            if (!result.bytesWritten) throw new AccountRequestError("云素材暂存失败", { code: "CLOUD_STAGING_FAILED" });
+            offset += result.bytesWritten;
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+      if (total !== size || hash.digest("hex") !== sha256) {
+        throw new AccountRequestError("云素材校验失败", { code: "CLOUD_INTEGRITY_FAILED" });
+      }
+      await file.sync(); await file.close(); file = null;
+      clearTimeout(timeout); timeout = null;
+      assertCurrentAccountLifecycle(expectedEpoch);
+      const value = await consume({ stagedPath: filePath, sha256, size, assertSessionActive: () => assertCurrentAccountLifecycle(expectedEpoch) });
+      assertCurrentAccountLifecycle(expectedEpoch);
+      return value;
+    };
+    try { return await attempt(); }
+    catch (error) {
+      assertCurrentAccountLifecycle(expectedEpoch);
+      if (responseAccepted || error?.code !== "ACCESS_TOKEN_EXPIRED") throw error;
+      await refreshAccountSession();
+      assertCurrentAccountLifecycle(expectedEpoch);
+      return await attempt();
+    }
+  } catch (error) {
+    assertCurrentAccountLifecycle(expectedEpoch);
+    if (error instanceof AccountRequestError) throw error;
+    if (typeof error?.code === "string" && /^CLOUD_[A-Z0-9_]{1,74}$/.test(error.code)) {
+      throw new AccountRequestError("云素材下载未完成", { code: error.code });
+    }
+    throw new AccountRequestError("云素材下载失败，请稍后重试", {
+      code: controller.signal.aborted ? "CLOUD_DOWNLOAD_TIMEOUT" : "CLOUD_DOWNLOAD_FAILED",
+      network: controller.signal.aborted,
+    });
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    activeCloudUploads.delete(controller);
+    if (file) await file.close().catch(() => { throw new AccountRequestError("云素材暂存清理失败", { code: "CLOUD_CLEANUP_UNSAFE" }); });
+    if (filePath && identity) {
+      try {
+        const current = await fs.promises.lstat(filePath, { bigint: true });
+        if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+          throw new AccountRequestError("云素材暂存清理失败", { code: "CLOUD_CLEANUP_UNSAFE" });
+        }
+        await fs.promises.unlink(filePath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw new AccountRequestError("云素材暂存清理失败", { code: "CLOUD_CLEANUP_UNSAFE" });
+      }
+    }
+    if (directory) await fs.promises.rmdir(directory).catch(() => { throw new AccountRequestError("云素材暂存清理失败", { code: "CLOUD_CLEANUP_UNSAFE" }); });
   }
 }
 
@@ -412,12 +785,14 @@ function normalizeAccountOrganization(item = {}) {
 }
 
 async function refreshAccountOrganizations(options = {}) {
+  const expectedEpoch = accountLifecycleEpoch;
   if (!accessToken && !readAccountState().session?.refreshTokenEncrypted) {
     accountOrganizationsCache = [];
     return accountOrganizationsCache;
   }
   try {
     const response = await requestWithAccountAuth(accountApiUrl(), "/me/organizations");
+    assertCurrentAccountLifecycle(expectedEpoch);
     accountOrganizationsCache = (Array.isArray(response.items) ? response.items : [])
       .map(normalizeAccountOrganization)
       .filter((item) => item.id);
@@ -430,9 +805,19 @@ async function refreshAccountOrganizations(options = {}) {
 async function getCurrentAccount() {
   const baseUrl = accountApiUrl();
   if (!baseUrl || (!accessToken && !readAccountState().session?.refreshTokenEncrypted)) return sanitizeAccountState();
+  const expectedEpoch = accountLifecycleEpoch;
   try {
     const payload = await requestWithAccountAuth(baseUrl, "/me");
-    applyAccountPayload(payload);
+    assertCurrentAccountLifecycle(expectedEpoch);
+    await applyAccountPayload(payload, {}, expectedEpoch);
+    const current = readAccountState();
+    const flags = normalizeAccountFeatureFlags(current.featureFlags, current.relay, current.wallet);
+    if (managedRelayBootstrapEligible(current.relay) && flags.relayManagedConfig === true) {
+      try { await getRelayAccount(); } catch (error) {
+        if (isSessionInvalidError(error)) throw error;
+        scheduleManagedRelayBootstrap();
+      }
+    }
     await refreshAccountOrganizations();
     return sanitizeAccountState(reconcileLocalGatewayHostState());
   } catch (error) {
@@ -441,7 +826,503 @@ async function getCurrentAccount() {
   }
 }
 
+function normalizeRelayMetadata(value) {
+  const source = value?.relay && typeof value.relay === "object" ? value.relay :
+    value?.account && typeof value.account === "object" ? value.account : value;
+  if (!source || typeof source !== "object") return null;
+  return {
+    status: String(source.status || "inactive"),
+    managed: source.managed === true,
+    keyMasked: String(source.keyMasked || source.key_masked || ""),
+    keyVersion: String(source.keyVersion || source.key_version || ""),
+  };
+}
+
+// Key reveal/rotation responses may intentionally contain only key metadata.
+// Do not turn omitted account fields into inactive/ unmanaged state: doing so
+// disables the next key action immediately after a successful reveal.
+function mergeRelayMetadata(current, value) {
+  const source = value?.relay && typeof value.relay === "object" ? value.relay :
+    value?.account && typeof value.account === "object" ? value.account : value;
+  if (!source || typeof source !== "object") return current || null;
+  const has = (name, snake) => Object.prototype.hasOwnProperty.call(source, name) || Object.prototype.hasOwnProperty.call(source, snake);
+  const next = { ...(current || {}) };
+  if (has("status", "status")) next.status = String(source.status || "inactive");
+  if (has("managed", "managed")) next.managed = source.managed === true;
+  if (has("keyMasked", "key_masked")) next.keyMasked = String(source.keyMasked ?? source.key_masked ?? "");
+  if (has("keyVersion", "key_version")) next.keyVersion = String(source.keyVersion ?? source.key_version ?? "");
+  return next;
+}
+
+function normalizeWallet(value) {
+  const source = value?.wallet && typeof value.wallet === "object" ? value.wallet : value;
+  if (!source || typeof source !== "object") return null;
+  return {
+    enabled: source.enabled !== false,
+    redeemEnabled: source.redeemEnabled ?? source.redeem_enabled,
+    currency: String(source.currency || "CNY"),
+    cashAmount: Number(source.cashAmount ?? source.cash_amount ?? 0),
+    promoAmount: Number(source.promoAmount ?? source.promo_amount ?? 0),
+    reservedAmount: Number(source.reservedAmount ?? source.reserved_amount ?? 0),
+    availableAmount: Number(source.availableAmount ?? source.available_amount ?? 0),
+    promoExpiresAt: source.promoExpiresAt || source.promo_expires_at || source.trialExpiresAt || source.trial_expires_at || null,
+  };
+}
+
+function normalizeAccountFeatureFlags(value = {}, relayValue = {}, walletValue = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const relay = normalizeRelayMetadata(relayValue);
+  const wallet = normalizeWallet(walletValue);
+  const booleanValue = (camel, snake, fallback) =>
+    typeof source[camel] === "boolean" ? source[camel] :
+      typeof source[snake] === "boolean" ? source[snake] : fallback;
+  const relayEnabledFallback = relay?.managed === true && relay?.status !== "disabled";
+  const walletEnabledFallback = wallet ? wallet.enabled !== false : false;
+  const publicCapabilitiesCache = publicCapabilitiesCacheByBaseUrl.get(accountApiUrl()) || null;
+  const publicCapability = (name, fallback = false) =>
+    typeof publicCapabilitiesCache?.[name] === "boolean" ? publicCapabilitiesCache[name] : fallback;
+  return {
+    passwordAuth: booleanValue("passwordAuth", "password_auth", publicCapability("passwordAuth", false)),
+    passwordRegistration: booleanValue("passwordRegistration", "password_registration", publicCapability("passwordRegistration", false)),
+    passwordReset: booleanValue("passwordReset", "password_reset", publicCapability("passwordReset", false)),
+    relayLegacyLink: booleanValue("relayLegacyLink", "relay_legacy_link", publicCapability("relayLegacyLink", false)),
+    relayAutoProvision: booleanValue("relayAutoProvision", "relay_auto_provision", relayEnabledFallback),
+    relayManagedConfig: booleanValue("relayManagedConfig", "relay_managed_config", publicCapability("relayManagedConfig", relayEnabledFallback)),
+    relayWalletUi: booleanValue("relayWalletUi", "relay_wallet_ui", publicCapability("relayWalletUi", walletEnabledFallback)),
+    relayRedeem: booleanValue(
+      "relayRedeem",
+      "relay_redeem",
+      publicCapability("relayRedeem", typeof wallet?.redeemEnabled === "boolean" ? wallet.redeemEnabled : walletEnabledFallback),
+    ),
+  };
+}
+
+function normalizePublicCapabilities(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const names = [
+    "passwordAuth",
+    "passwordRegistration",
+    "passwordReset",
+    "relayManagedConfig",
+    "relayWalletUi",
+    "relayRedeem",
+    "relayAutoProvision",
+    "relayLegacyLink",
+  ];
+  return Object.fromEntries(names.map((name) => [name, source[name] === true]));
+}
+
+async function refreshPublicCapabilities() {
+  const baseUrl = accountApiUrl();
+  if (!baseUrl) return normalizePublicCapabilities();
+  if (publicCapabilitiesCacheByBaseUrl.has(baseUrl)) return publicCapabilitiesCacheByBaseUrl.get(baseUrl);
+  if (publicCapabilitiesPromiseByBaseUrl.has(baseUrl)) return publicCapabilitiesPromiseByBaseUrl.get(baseUrl);
+  const request = (async () => {
+    for (let attempt = 1; attempt <= PUBLIC_CAPABILITIES_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const capabilities = normalizePublicCapabilities(
+          await requestJson(baseUrl, "/public/capabilities", { timeoutMs: 2000 }),
+        );
+        publicCapabilitiesCacheByBaseUrl.set(baseUrl, capabilities);
+        return capabilities;
+      } catch (error) {
+        if (attempt >= PUBLIC_CAPABILITIES_MAX_ATTEMPTS) break;
+      }
+    }
+    // Fail closed without caching the failure. A later account open/bootstrap
+    // may recover, while explicit false values from a successful response stay cached.
+    return normalizePublicCapabilities();
+  })().finally(() => {
+    publicCapabilitiesPromiseByBaseUrl.delete(baseUrl);
+  });
+  publicCapabilitiesPromiseByBaseUrl.set(baseUrl, request);
+  return request;
+}
+
+function requireAccountFeature(name, code) {
+  const state = readAccountState();
+  const flags = normalizeAccountFeatureFlags(state.featureFlags, state.relay, state.wallet);
+  if (flags[name] !== true) {
+    throw new AccountRequestError("该账号功能当前未开放", { status: 503, code });
+  }
+}
+
+function managedRelayBootstrapEligible(relay = {}) {
+  return relay?.managed === true && ["active", "pending", "retrying"].includes(String(relay?.status || ""));
+}
+
+function extractManagedRelayKey(payload = {}) {
+  const source = payload?.relay && typeof payload.relay === "object" ? payload.relay : payload;
+  return String(
+    payload?.managedKey || payload?.managed_key || payload?.accessKey || payload?.access_key ||
+    source?.managedKey || source?.managed_key || source?.accessKey || source?.access_key ||
+    source?.key || source?.apiKey || source?.api_key || source?.relayKey || ""
+  ).trim();
+}
+
+async function persistRelayResponse(payload = {}, { storeKey = false } = {}, expectedEpoch = accountLifecycleEpoch) {
+  const fullKey = extractManagedRelayKey(payload);
+  const encrypted = storeKey && fullKey ? await encryptSecret(fullKey) : "";
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const state = readAccountState();
+  const relay = mergeRelayMetadata(state.relay, payload) || normalizeRelayMetadata(payload) || null;
+  const patch = { relay };
+  if (storeKey && fullKey) patch.relayManagedKeyEncrypted = encrypted;
+  if (!relay || relay.managed !== true || relay.status !== "active") patch.relayManagedKeyEncrypted = "";
+  const next = writeAccountState(patch);
+  return { next, fullKey };
+}
+
+function requireShortCode(value) {
+  const code = String(value || "").trim();
+  if (!/^[A-Za-z0-9-]{4,12}$/.test(code)) {
+    throw new AccountRequestError("请输入有效验证码", { status: 400, code: "INVALID_VERIFICATION_CODE" });
+  }
+  return code;
+}
+
+function requireIdempotencyKey(value) {
+  const key = String(value || "").trim();
+  if (key.length < 8 || key.length > 120) {
+    throw new AccountRequestError("请重新发起该操作", { status: 400, code: "INVALID_IDEMPOTENCY_KEY" });
+  }
+  return key;
+}
+
+function requireRelayLinkIdempotencyKey(value) {
+  const key = String(value || "").trim();
+  if (!/^[A-Za-z0-9._~-]{16,160}$/.test(key)) {
+    throw new AccountRequestError("请重新发起账号绑定", { status: 400, code: "INVALID_IDEMPOTENCY_KEY" });
+  }
+  return key;
+}
+
+function requireLegacyCredential(value, label) {
+  const text = String(value || "");
+  if (!text || text.length > 320 || /[\u0000-\u001f\u007f]/.test(text)) {
+    throw new AccountRequestError(`旧极鑫${label}无效`, { status: 400, code: "INVALID_REQUEST" });
+  }
+  return text;
+}
+
+function buildAccountListPath(pathname, filters = {}, allowedFilters = []) {
+  const query = new URLSearchParams();
+  const cursor = String(filters.cursor || "").trim();
+  if (cursor) query.set("cursor", cursor.slice(0, 1000));
+  query.set("limit", String(Math.max(1, Math.min(100, Math.floor(Number(filters.limit || 30))))));
+  allowedFilters.forEach((key) => {
+    const value = String(filters[key] || "").trim();
+    if (value) query.set(key, value.slice(0, 160));
+  });
+  return `${pathname}?${query.toString()}`;
+}
+
+async function getRelayAccount() {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const payload = await requestWithAccountAuth(accountApiUrl(), "/relay/account", {
+    headers: managedRelayCredentialHeaders(),
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const { next: relayState } = await persistRelayResponse(payload, { storeKey: true }, expectedEpoch);
+  const next = writeAccountState({
+    featureFlags: normalizeAccountFeatureFlags(
+      payload.featureFlags || payload.feature_flags || payload.features || relayState.featureFlags,
+      relayState.relay,
+      relayState.wallet,
+    ),
+  });
+  if (managedRelayBootstrapTimer) clearTimeout(managedRelayBootstrapTimer);
+  managedRelayBootstrapTimer = null;
+  // A successful HTTP response can still mean the asynchronous account is
+  // pending. Continue at a bounded rate until activation, not merely HTTP 200.
+  if (["pending", "retrying"].includes(String(next.relay?.status || "")) && next.featureFlags?.relayManagedConfig === true) {
+    scheduleManagedRelayBootstrap();
+  } else {
+    managedRelayBootstrapAttempt = 0;
+  }
+  return { ok: true, relay: sanitizeAccountState(next).relay };
+}
+
+function scheduleManagedRelayBootstrap() {
+  if (managedRelayBootstrapTimer) return;
+  const delay = Math.min(30_000, 1_000 * (2 ** managedRelayBootstrapAttempt));
+  const expectedEpoch = accountLifecycleEpoch;
+  managedRelayBootstrapAttempt = Math.min(managedRelayBootstrapAttempt + 1, 5);
+  managedRelayBootstrapTimer = setTimeout(async () => {
+    managedRelayBootstrapTimer = null;
+    if (expectedEpoch !== accountLifecycleEpoch) return;
+    const state = readAccountState();
+    const flags = normalizeAccountFeatureFlags(state.featureFlags, state.relay, state.wallet);
+    if (!state.user || !state.session?.refreshTokenEncrypted || !managedRelayBootstrapEligible(state.relay) || flags.relayManagedConfig !== true) {
+      managedRelayBootstrapAttempt = 0;
+      return;
+    }
+    try {
+      await getRelayAccount();
+    } catch (error) {
+      if (expectedEpoch === accountLifecycleEpoch && !isSessionInvalidError(error)) scheduleManagedRelayBootstrap();
+    }
+  }, delay);
+  managedRelayBootstrapTimer.unref?.();
+}
+
+function managedRelayCredentialHeaders() {
+  const deviceId = String(readAccountState().device?.id || "").trim();
+  if (!deviceId) {
+    throw new AccountRequestError("当前设备会话无效，请重新登录", {
+      status: 401,
+      code: "ACCOUNT_DEVICE_REQUIRED",
+    });
+  }
+  return {
+    "x-starcanvas-credential-purpose": "managed-config",
+    "x-starcanvas-device-id": deviceId,
+  };
+}
+
+async function getWallet() {
+  requireAccountFeature("relayWalletUi", "RELAY_WALLET_UI_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const payload = await requestWithAccountAuth(accountApiUrl(), "/wallet");
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const wallet = normalizeWallet(payload);
+  const next = writeAccountState({
+    wallet,
+    featureFlags: normalizeAccountFeatureFlags(payload.featureFlags || payload.feature_flags || readAccountState().featureFlags, readAccountState().relay, wallet),
+  });
+  return { ok: true, wallet: sanitizeAccountState(next).wallet };
+}
+
+async function getWalletTransactions(filters = {}) {
+  requireAccountFeature("relayWalletUi", "RELAY_WALLET_UI_DISABLED");
+  return {
+    ok: true,
+    ...(await requestWithAccountAuth(accountApiUrl(), buildAccountListPath("/wallet/transactions", filters, ["from", "to"]))),
+  };
+}
+
+async function getRelayUsageRecords(filters = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  return {
+    ok: true,
+    ...(await requestWithAccountAuth(accountApiUrl(), buildAccountListPath("/relay/usage-records", filters, ["model", "status", "from", "to"]))),
+  };
+}
+
+async function getRechargeStore() {
+  requireAccountFeature("relayRedeem", "RELAY_REDEEM_DISABLED");
+  const payload = await requestWithAccountAuth(accountApiUrl(), "/commerce/recharge-store");
+  const rawUrl = String(payload.url || payload.storeUrl || payload.store_url || "").trim();
+  let url = "";
+  if (!rawUrl) return { ok: true, available: false, url: "" };
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new AccountRequestError("充值商店地址不可用", { code: "RECHARGE_STORE_URL_INVALID" }); }
+  if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) throw new AccountRequestError("充值商店地址不可用", { code: "RECHARGE_STORE_URL_INVALID" });
+  url = parsed.toString();
+  return { ok: true, available: true, url };
+}
+
+async function redeemWalletCode(payload = {}) {
+  requireAccountFeature("relayRedeem", "RELAY_REDEEM_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const code = String(payload.code || "").trim();
+  if (!code || code.length > 160) throw new AccountRequestError("请输入有效兑换码", { status: 400, code: "INVALID_REDEEM_CODE" });
+  const idempotencyKey = requireIdempotencyKey(payload.idempotencyKey);
+  const result = await requestWithAccountAuth(accountApiUrl(), "/wallet/redeem", {
+    method: "POST",
+    headers: { "idempotency-key": idempotencyKey },
+    body: { code },
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  if (result.wallet) writeAccountState({ wallet: normalizeWallet(result.wallet) });
+  return { ok: true, ...result };
+}
+
+async function sendRelayKeyCode(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const requestedPurpose = String(payload.purpose || "relay_key_reveal");
+  const purpose = ({ reveal: "relay_key_reveal", regenerate: "relay_key_rotate" })[requestedPurpose] || requestedPurpose;
+  if (!["relay_key_reveal", "relay_key_rotate"].includes(purpose)) {
+    throw new AccountRequestError("不支持的验证用途", { status: 400, code: "INVALID_RELAY_KEY_PURPOSE" });
+  }
+  return { ok: true, ...(await requestWithAccountAuth(accountApiUrl(), "/relay/key/send-code", {
+    method: "POST",
+    body: { purpose },
+  })) };
+}
+
+async function revealRelayKey(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const result = await requestWithAccountAuth(accountApiUrl(), "/relay/key/reveal", {
+    method: "POST",
+    body: { code: requireShortCode(payload.code) },
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const { next, fullKey } = await persistRelayResponse(result, { storeKey: true }, expectedEpoch);
+  if (!fullKey) throw new AccountRequestError("服务未返回可用密钥", { code: "RELAY_KEY_MISSING" });
+  return { ok: true, key: fullKey, relay: sanitizeAccountState(next).relay };
+}
+
+async function regenerateRelayKey(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const idempotencyKey = requireIdempotencyKey(payload.idempotencyKey);
+  const result = await requestWithAccountAuth(accountApiUrl(), "/relay/key/regenerate", {
+    method: "POST",
+    headers: { "idempotency-key": idempotencyKey },
+    body: {
+      code: requireShortCode(payload.code),
+    },
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const { next, fullKey } = await persistRelayResponse(result, { storeKey: true }, expectedEpoch);
+  if (!fullKey) throw new AccountRequestError("服务未返回新密钥", { code: "RELAY_KEY_MISSING" });
+  return { ok: true, key: fullKey, relay: sanitizeAccountState(next).relay };
+}
+
+async function sendRelayLinkCode(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const identifier = normalizeAccountEmail(readAccountState().user?.email);
+  return { ok: true, ...(await requestWithAccountAuth(accountApiUrl(), "/relay/link-existing/send-code", {
+    method: "POST",
+    body: { identifier },
+  })) };
+}
+
+async function verifyLegacyRelayAccount(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const result = await requestWithAccountAuth(accountApiUrl(), "/relay/link-existing/verify-legacy", {
+    method: "POST",
+    body: { username: requireLegacyCredential(payload.username, "账号"), password: requireLegacyCredential(payload.password, "密码") },
+  });
+  const status = String(result.status || "");
+  const challenge = String(result.challenge || "");
+  if (!["verified", "mfa_required"].includes(status) || !challenge || challenge.length > 1024) {
+    throw new AccountRequestError("旧账号验证暂不可用", { status: 503, code: "LEGACY_AUTH_UNAVAILABLE" });
+  }
+  return { ok: true, status, challenge, expiresIn: Number(result.expiresIn || 0) };
+}
+
+async function verifyLegacyRelayMfa(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const result = await requestWithAccountAuth(accountApiUrl(), "/relay/link-existing/verify-mfa", {
+    method: "POST",
+    body: { challenge: requireLegacyCredential(payload.challenge, "验证会话"), code: requireShortCode(payload.code) },
+  });
+  const status = String(result.status || "");
+  const challenge = String(result.challenge || "");
+  if (status !== "verified" || !challenge || challenge.length > 1024) {
+    throw new AccountRequestError("旧账号验证暂不可用", { status: 503, code: "LEGACY_AUTH_UNAVAILABLE" });
+  }
+  return { ok: true, status, challenge, expiresIn: Number(result.expiresIn || 0) };
+}
+
+async function confirmRelayLink(payload = {}) {
+  requireAccountFeature("relayManagedConfig", "RELAY_MANAGED_CONFIG_DISABLED");
+  const expectedEpoch = accountLifecycleEpoch;
+  const identifier = normalizeAccountEmail(readAccountState().user?.email);
+  const idempotencyKey = requireRelayLinkIdempotencyKey(payload.idempotencyKey);
+  const result = await requestWithAccountAuth(accountApiUrl(), "/relay/link-existing/confirm", {
+    method: "POST",
+    headers: { "idempotency-key": idempotencyKey },
+    body: { identifier, code: requireShortCode(payload.code), challenge: requireLegacyCredential(payload.challenge, "验证会话") },
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const linkedRelay = normalizeRelayMetadata(result);
+  if (result.status === "review" || result.code === "LINK_REVIEW_REQUIRED" || linkedRelay?.status === "review") {
+    // Review is not a completed migration. Preserve the existing key and wallet.
+    return { ok: true, status: "review", code: "LINK_REVIEW_REQUIRED" };
+  }
+  if (String(linkedRelay?.status || "") === "active") {
+    return getRelayAccount();
+  }
+  const state = readAccountState();
+  const next = writeAccountState({
+    relay: {
+      ...(state.relay || {}),
+      status: String(linkedRelay?.status || state.relay?.status || "review"),
+    },
+  });
+  return { ok: true, relay: sanitizeAccountState(next).relay };
+}
+
+function isManagedRelayTarget(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    // The managed credential is scoped to the exact relay origin. URL.origin
+    // intentionally omits userinfo, so reject credentials explicitly too.
+    return parsed.protocol === "https:"
+      && parsed.hostname.toLowerCase() === WANJUAN_MANAGED_RELAY_HOST
+      && !parsed.username
+      && !parsed.password
+      && !parsed.port
+      && parsed.origin === `https://${WANJUAN_MANAGED_RELAY_HOST}`;
+  } catch {
+    return false;
+  }
+}
+
+async function managedRelayKey() {
+  const expectedEpoch = accountLifecycleEpoch;
+  const state = readAccountState();
+  if (state.relay?.status !== "active" || state.relay?.managed !== true) return "";
+  const key = await decryptSecret(state.relayManagedKeyEncrypted);
+  assertCurrentAccountLifecycle(expectedEpoch);
+  if (readAccountState().relayManagedKeyEncrypted !== state.relayManagedKeyEncrypted) {
+    throw new AccountRequestError("受管极鑫密钥已变更，请重试", { status: 409, code: "MANAGED_RELAY_KEY_CHANGED" });
+  }
+  return key;
+}
+
+async function prepareManagedRelayRequest(rawUrl, headers = {}) {
+  if (!isManagedRelayTarget(rawUrl)) return { headers, managed: false };
+  const nextHeaders = { ...(headers && typeof headers === "object" ? headers : {}) };
+  const credentialKeys = Object.keys(nextHeaders).filter((key) => ["authorization", "x-api-key", "api-key"].includes(key.toLowerCase()));
+  const usesPlaceholder = credentialKeys.some((key) => String(nextHeaders[key] || "").includes(WANJUAN_MANAGED_RELAY_PLACEHOLDER));
+  const hasExplicitCredential = credentialKeys.some((key) => {
+    const value = String(nextHeaders[key] || "").trim();
+    return value && !value.includes(WANJUAN_MANAGED_RELAY_PLACEHOLDER);
+  });
+  if (hasExplicitCredential) return { headers: nextHeaders, managed: false };
+  const key = await managedRelayKey();
+  if (!key) {
+    if (usesPlaceholder) throw new AccountRequestError("受管极鑫密钥暂不可用，请前往“我的账号”重新验证", { status: 401, code: "MANAGED_RELAY_KEY_UNAVAILABLE" });
+    return { headers: nextHeaders, managed: false };
+  }
+  credentialKeys.forEach((credentialKey) => delete nextHeaders[credentialKey]);
+  nextHeaders.Authorization = `Bearer ${key}`;
+  return { headers: nextHeaders, managed: true };
+}
+
+async function refreshManagedRelayCredential() {
+  const expectedEpoch = accountLifecycleEpoch;
+  const previousVersion = String(readAccountState().relay?.keyVersion || "");
+  const payload = await requestWithAccountAuth(accountApiUrl(), "/relay/account", {
+    headers: managedRelayCredentialHeaders(),
+  });
+  assertCurrentAccountLifecycle(expectedEpoch);
+  const { next } = await persistRelayResponse(payload, { storeKey: true }, expectedEpoch);
+  const nextVersion = String(next.relay?.keyVersion || "");
+  if (previousVersion && nextVersion && previousVersion !== nextVersion && !extractManagedRelayKey(payload)) {
+    writeAccountState({ relayManagedKeyEncrypted: "" });
+    throw new AccountRequestError("受管极鑫密钥已变更，请重新验证后继续", { status: 401, code: "MANAGED_RELAY_KEY_CHANGED" });
+  }
+  return managedRelayKey();
+}
+
+async function requestWithManagedRelayRetry(rawUrl, rawHeaders, performRequest) {
+  let request = await prepareManagedRelayRequest(rawUrl, rawHeaders);
+  let response = await performRequest(request.headers);
+  if (!request.managed || Number(response?.status || 0) !== 401) return response;
+  await refreshManagedRelayCredential();
+  request = await prepareManagedRelayRequest(rawUrl, rawHeaders);
+  return performRequest(request.headers);
+}
+
 async function bootstrapAccount() {
+  await refreshPublicCapabilities();
   const state = readAccountState();
   if (!state.session?.refreshTokenEncrypted || !accountApiUrl()) return sanitizeAccountState(state);
   try {
@@ -463,6 +1344,14 @@ async function bootstrapAccount() {
     return sanitizeAccountState();
   } catch (error) {
     if (isSessionInvalidError(error)) return clearInvalidAccountSession(error);
+    if (error?.code === "SECURE_STORAGE_RELOGIN_REQUIRED") {
+      // Leave the previous encrypted session and local projects untouched.
+      return sanitizeAccountState(readAccountState(), {
+        requiresLogin: true,
+        error: error.message,
+        errorCode: error.code,
+      });
+    }
     if (isOfflineEligibleError(error)) {
       return sanitizeAccountState(readAccountState(), {
         offline: true,
@@ -485,29 +1374,70 @@ function normalizeAccountEmail(value) {
 
 async function sendAccountCode(payload = {}) {
   const identifier = normalizeAccountEmail(payload.identifier);
+  const purpose = String(payload.purpose || "login").trim();
+  if (!["login", "register", "reset_password"].includes(purpose)) {
+    throw new AccountRequestError("不支持的验证码用途", { status: 400, code: "INVALID_VERIFICATION_PURPOSE" });
+  }
   return requestJson(accountApiUrl(), "/auth/send-code", {
     method: "POST",
-    body: { identifier, purpose: payload.purpose || "login" },
+    body: { identifier, purpose },
   });
 }
 
 async function loginAccount(payload = {}) {
   const identifier = normalizeAccountEmail(payload.identifier);
   const device = readOrCreateAccountDevice();
-  const result = await requestJson(accountApiUrl(), payload.register ? "/auth/register" : "/auth/login", {
+  const usesPassword = payload.register === true || Object.hasOwn(payload, "password");
+  const password = usesPassword ? validateAccountPassword(payload.password) : "";
+  const endpoint = payload.register ? "/auth/password/register" : usesPassword ? "/auth/password/login" : "/auth/login";
+  const loginEpoch = advanceAccountLifecycle();
+  advanceEnterpriseLifecycle();
+  const result = await requestJson(accountApiUrl(), endpoint, {
     method: "POST",
     body: {
       identifier,
-      code: String(payload.code || "").trim(),
-      inviteCode: String(payload.inviteCode || "").trim(),
+      ...(payload.register || !usesPassword ? { code: String(payload.code || "").trim() } : {}),
+      ...(usesPassword ? { password } : {}),
       deviceName: device.deviceName,
       deviceFingerprint: device.installationId,
       platform: device.platform,
     },
   });
-  applyAccountPayload(result);
+  if (loginEpoch !== accountLifecycleEpoch) return sanitizeAccountState(readAccountState());
+  await applyAccountPayload(result, {}, loginEpoch);
+  const current = readAccountState();
+  const flags = normalizeAccountFeatureFlags(current.featureFlags, current.relay, current.wallet);
+  if (managedRelayBootstrapEligible(current.relay) && flags.relayManagedConfig === true) {
+    try { await getRelayAccount(); } catch (error) {
+      if (isSessionInvalidError(error)) throw error;
+      scheduleManagedRelayBootstrap();
+    }
+  }
   await refreshAccountOrganizations();
   return sanitizeAccountState(reconcileLocalGatewayHostState());
+}
+
+function validateAccountPassword(value) {
+  if (
+    typeof value !== "string" ||
+    [...value].length < 12 ||
+    [...value].length > 200 ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new AccountRequestError("密码长度须为 12–200 个字符", { status: 422, code: "INVALID_REQUEST" });
+  }
+  return value;
+}
+
+async function resetAccountPassword(payload = {}) {
+  const result = await requestJson(accountApiUrl(), "/auth/password/reset/confirm", {
+    method: "POST",
+    body: { identifier: normalizeAccountEmail(payload.identifier), code: requireShortCode(payload.code), newPassword: validateAccountPassword(payload.newPassword) },
+  });
+  if (result.ok === true && normalizeAccountEmail(payload.identifier) === String(readAccountState().user?.email || "").toLowerCase()) {
+    clearInvalidAccountSession(new AccountRequestError("密码已重置，请重新登录", { code: "SESSION_REVOKED", status: 401 }));
+  }
+  return { ok: result.ok === true };
 }
 
 function continueWithLocalMode() {
@@ -517,12 +1447,38 @@ function continueWithLocalMode() {
 async function logoutAccount() {
   const baseUrl = accountApiUrl();
   const state = readAccountState();
-  const refreshToken = decryptSecret(state.session?.refreshTokenEncrypted);
-  if (baseUrl && (accessToken || refreshToken)) {
+  const encryptedRefresh = state.session?.refreshTokenEncrypted;
+  const logoutAccessToken = accessToken;
+  advanceAccountLifecycle();
+  advanceEnterpriseLifecycle();
+  accessToken = "";
+  accountOrganizationsCache = [];
+  clearEnterpriseSnapshotCache();
+  if (managedRelayBootstrapTimer) clearTimeout(managedRelayBootstrapTimer);
+  managedRelayBootstrapTimer = null;
+  managedRelayBootstrapAttempt = 0;
+  const next = writeAccountState({
+    localMode: true,
+    user: null,
+    subscription: null,
+    entitlements: [],
+    wallet: null,
+    relay: null,
+    featureFlags: null,
+    relayManagedKeyEncrypted: "",
+    device: null,
+    session: null,
+    enterprise: null,
+    lastVerifiedAt: 0,
+  });
+  // Local logout is immediate even if the OS store needs user authorization.
+  let refreshToken = "";
+  try { refreshToken = await decryptSecret(encryptedRefresh); } catch {}
+  if (baseUrl && (logoutAccessToken || refreshToken)) {
     try {
       await requestJson(baseUrl, "/auth/logout", {
         method: "POST",
-        token: accessToken,
+        token: logoutAccessToken,
         body: refreshToken ? { refreshToken } : {},
       });
     } catch {}
@@ -530,21 +1486,7 @@ async function logoutAccount() {
   try {
     await stopEnterpriseGateway({ disableAutoStart: true });
   } catch {}
-  clearEnterpriseSnapshotCache();
-  accessToken = "";
-  accountOrganizationsCache = [];
-  const next = writeAccountState({
-    localMode: true,
-    user: null,
-    subscription: null,
-    entitlements: [],
-    wallet: null,
-    device: null,
-    session: null,
-    enterprise: null,
-    lastVerifiedAt: 0,
-  });
-  return sanitizeAccountState(next);
+  return sanitizeAccountState(readAccountState().user ? readAccountState() : next);
 }
 
 async function activateEnterpriseGatewayLocally({ organization, registrationToken, payload = {}, replaced = false }) {
@@ -829,7 +1771,7 @@ async function stopCreatedEnterpriseGateway() {
   return sanitizeAccountState();
 }
 
-async function establishEnterpriseWorkspace(payload = {}) {
+async function establishEnterpriseWorkspace(payload = {}, expectedEpoch = enterpriseLifecycleEpoch) {
   const gatewayUrl = String(payload.gatewayUrl || "").trim();
   const gateway = payload.gateway || {};
   const organization = payload.organization || {};
@@ -845,6 +1787,12 @@ async function establishEnterpriseWorkspace(payload = {}) {
       appVersion: app.getVersion(),
     },
   });
+  if (expectedEpoch !== enterpriseLifecycleEpoch) {
+    throw new AccountRequestError("企业连接已变更，已忽略过期响应", {
+      status: 409,
+      code: "ENTERPRISE_SESSION_CHANGED",
+    });
+  }
   const session = sessionResponse.value || {};
   const workspaceToken = String(session.workspaceToken || "");
   if (!workspaceToken || !organization.id || !gateway.id) {
@@ -854,9 +1802,21 @@ async function establishEnterpriseWorkspace(payload = {}) {
     token: workspaceToken,
     certificateFingerprint,
   });
+  if (expectedEpoch !== enterpriseLifecycleEpoch) {
+    throw new AccountRequestError("企业连接已变更，已忽略过期响应", {
+      status: 409,
+      code: "ENTERPRISE_SESSION_CHANGED",
+    });
+  }
   const snapshot = snapshotResponse.value;
   if (!snapshot?.schemaVersion || !snapshot?.modules?.settings?.chromeStorage) {
     throw new AccountRequestError("企业配置快照格式不正确", { code: "ENTERPRISE_CONFIG_INVALID" });
+  }
+  const encryptedWorkspaceToken = await encryptSecret(workspaceToken);
+  if (expectedEpoch !== enterpriseLifecycleEpoch) {
+    throw new AccountRequestError("企业连接已变更，已忽略过期响应", {
+      status: 409, code: "ENTERPRISE_SESSION_CHANGED",
+    });
   }
   writeEnterpriseSnapshotCache({
     organizationId: String(organization.id),
@@ -873,7 +1833,7 @@ async function establishEnterpriseWorkspace(payload = {}) {
       gatewayId: String(gateway.id),
       gatewayUrl,
       certificateFingerprint,
-      workspaceTokenEncrypted: encryptSecret(workspaceToken),
+      workspaceTokenEncrypted: encryptedWorkspaceToken,
       connectedAt: Date.now(),
       lastVerifiedAt: Date.now(),
       expiresAt: Date.now() + Math.max(60, Number(session.expiresIn || 28800)) * 1000,
@@ -886,6 +1846,7 @@ async function establishEnterpriseWorkspace(payload = {}) {
 
 async function connectEnterpriseWorkspace(payload = {}) {
   const deviceId = String(payload.deviceId || readAccountState().device?.id || "");
+  const expectedEpoch = advanceEnterpriseLifecycle();
   try {
     const joined = await requestWithAccountAuth(accountApiUrl(), "/organizations/join", {
       method: "POST",
@@ -898,7 +1859,7 @@ async function connectEnterpriseWorkspace(payload = {}) {
       ...joined,
       gatewayUrl: payload.gatewayUrl,
       deviceId,
-    });
+    }, expectedEpoch);
   } catch (error) {
     if (isSessionInvalidError(error)) return clearInvalidAccountSession(error);
     throw error;
@@ -911,19 +1872,27 @@ async function reconnectEnterpriseWorkspace() {
   if (enterprise?.mode !== "member" || !enterprise.organization?.id || !enterprise.gatewayUrl) {
     return sanitizeAccountState(state);
   }
+  const expectedEpoch = enterpriseLifecycleEpoch;
+  const expectedScope = enterpriseScopeKey(enterprise);
   const deviceId = String(state.device?.id || "");
   const grant = await requestWithAccountAuth(
     accountApiUrl(),
     `/organizations/${encodeURIComponent(enterprise.organization.id)}/gateway-grant`,
     { method: "POST", body: { deviceId } },
   );
+  if (
+    expectedEpoch !== enterpriseLifecycleEpoch ||
+    enterpriseScopeKey(readAccountState().enterprise) !== expectedScope
+  ) {
+    return sanitizeAccountState(readAccountState());
+  }
   return establishEnterpriseWorkspace({
     organization: enterprise.organization,
     gateway: grant.gateway,
     signedGatewayGrant: grant.signedGatewayGrant,
     gatewayUrl: enterprise.gatewayUrl,
     deviceId,
-  });
+  }, expectedEpoch);
 }
 
 async function refreshEnterpriseWorkspaceConfig() {
@@ -932,7 +1901,10 @@ async function refreshEnterpriseWorkspaceConfig() {
   if (enterprise?.mode !== "member" || !enterprise.gatewayUrl || !enterprise.certificateFingerprint) {
     return sanitizeAccountState(state);
   }
-  const workspaceToken = decryptSecret(enterprise.workspaceTokenEncrypted);
+  const expectedEpoch = enterpriseLifecycleEpoch;
+  const expectedScope = enterpriseScopeKey(enterprise);
+  const workspaceToken = await decryptSecret(enterprise.workspaceTokenEncrypted);
+  assertCurrentEnterpriseSecret(enterprise, expectedEpoch);
   if (!workspaceToken || Number(enterprise.expiresAt || 0) <= Date.now()) return reconnectEnterpriseWorkspace();
   try {
     const response = await requestPinnedJson(enterprise.gatewayUrl, "/workspace/config-snapshot", {
@@ -941,6 +1913,12 @@ async function refreshEnterpriseWorkspaceConfig() {
       headers: enterprise.configHash ? { "if-none-match": `"${String(enterprise.configHash).replace(/^sha256:/, "")}"` } : {},
     });
     const snapshot = response.value;
+    if (
+      expectedEpoch !== enterpriseLifecycleEpoch ||
+      enterpriseScopeKey(readAccountState().enterprise) !== expectedScope
+    ) {
+      return sanitizeAccountState(readAccountState());
+    }
     if (snapshot?.modules?.settings?.chromeStorage) {
       writeEnterpriseSnapshotCache({
         organizationId: String(enterprise.organization?.id || ""),
@@ -961,6 +1939,12 @@ async function refreshEnterpriseWorkspaceConfig() {
     }
     return sanitizeAccountState();
   } catch (error) {
+    if (
+      expectedEpoch !== enterpriseLifecycleEpoch ||
+      enterpriseScopeKey(readAccountState().enterprise) !== expectedScope
+    ) {
+      return sanitizeAccountState(readAccountState());
+    }
     if (error?.status === 304) return sanitizeAccountState();
     if (error?.code === "WORKSPACE_SESSION_EXPIRED") return reconnectEnterpriseWorkspace();
     throw error;
@@ -969,6 +1953,9 @@ async function refreshEnterpriseWorkspaceConfig() {
 
 async function disconnectEnterpriseWorkspace() {
   const enterprise = readAccountState().enterprise;
+  advanceEnterpriseLifecycle();
+  clearEnterpriseSnapshotCache();
+  writeAccountState({ enterprise: null });
   if (enterprise?.mode === "host") {
     try {
       await stopEnterpriseGateway({ disableAutoStart: true });
@@ -977,13 +1964,12 @@ async function disconnectEnterpriseWorkspace() {
     try {
       await requestPinnedJson(enterprise.gatewayUrl, "/workspace/logout", {
         method: "POST",
-        token: decryptSecret(enterprise.workspaceTokenEncrypted),
+        token: await decryptSecret(enterprise.workspaceTokenEncrypted),
         certificateFingerprint: enterprise.certificateFingerprint,
       });
     } catch {}
   }
-  clearEnterpriseSnapshotCache();
-  return sanitizeAccountState(writeAccountState({ enterprise: null }));
+  return sanitizeAccountState(readAccountState());
 }
 
 function resetAccountOnboarding() {
@@ -1087,13 +2073,15 @@ function verifiedEnterpriseHostSession() {
   };
 }
 
-function enterpriseMemberTeamContext() {
+async function enterpriseMemberTeamContext() {
+  const expectedEpoch = enterpriseLifecycleEpoch;
   const state = readAccountState();
   const enterprise = state.enterprise;
   if (enterprise?.mode !== "member" || !state.user?.id || !enterprise.organization?.id || !enterprise.gatewayId) {
     throw new AccountRequestError("当前未连接企业网关", { code: "ENTERPRISE_TEAM_NOT_CONNECTED", status: 401 });
   }
-  const workspaceToken = decryptSecret(enterprise.workspaceTokenEncrypted);
+  const workspaceToken = await decryptSecret(enterprise.workspaceTokenEncrypted);
+  assertCurrentEnterpriseSecret(enterprise, expectedEpoch);
   if (!workspaceToken || !enterprise.gatewayUrl || !enterprise.certificateFingerprint) {
     throw new AccountRequestError("企业网关会话不可用", { code: "ENTERPRISE_GATEWAY_UNAVAILABLE", status: 401 });
   }
@@ -1153,7 +2141,7 @@ async function invokeEnterpriseTeamTemplates(payload = {}, retryCount = 0) {
         context: { organizationId: session.organizationId, gatewayId: session.gatewayId, role: session.role },
       };
     }
-    const context = enterpriseMemberTeamContext();
+    const context = await enterpriseMemberTeamContext();
     const request = enterpriseTeamHttpRequestOptions(operation, operationPayload, context);
     const response = await requestPinnedJson(context.enterprise.gatewayUrl, request.path, request.options);
     return {
@@ -1238,6 +2226,7 @@ function enterpriseRequestKind(value) {
 }
 
 async function proxyEnterpriseRequest(payload = {}, options = {}, retryCount = 0) {
+  const expectedEpoch = enterpriseLifecycleEpoch;
   const state = readAccountState();
   const enterprise = state.enterprise;
   if (enterprise?.mode !== "member") return { handled: false };
@@ -1249,7 +2238,8 @@ async function proxyEnterpriseRequest(payload = {}, options = {}, retryCount = 0
   const apiConfig = findEnterpriseManagedApiConfig(cache.snapshot, payload.url);
   if (!apiConfig) return { handled: false };
 
-  const workspaceToken = decryptSecret(enterprise.workspaceTokenEncrypted);
+  const workspaceToken = await decryptSecret(enterprise.workspaceTokenEncrypted);
+  assertCurrentEnterpriseSecret(enterprise, expectedEpoch);
   if (!workspaceToken || !enterprise.gatewayUrl || !enterprise.certificateFingerprint) {
     throw new AccountRequestError("企业网关会话不可用，已阻止回退到个人配置", { code: "ENTERPRISE_GATEWAY_UNAVAILABLE" });
   }
@@ -1291,6 +2281,7 @@ async function proxyEnterpriseRequest(payload = {}, options = {}, retryCount = 0
 }
 
 async function proxyEnterpriseUpload(channel, payload = {}, options = {}, retryCount = 0) {
+  const expectedEpoch = enterpriseLifecycleEpoch;
   const state = readAccountState();
   const enterprise = state.enterprise;
   if (enterprise?.mode !== "member") return { handled: false };
@@ -1298,7 +2289,8 @@ async function proxyEnterpriseUpload(channel, payload = {}, options = {}, retryC
   if (!cache?.snapshot?.modules?.settings?.chromeStorage) {
     throw new AccountRequestError("企业配置快照不可用，已阻止回退到个人上传配置", { code: "ENTERPRISE_CONFIG_UNAVAILABLE" });
   }
-  const workspaceToken = decryptSecret(enterprise.workspaceTokenEncrypted);
+  const workspaceToken = await decryptSecret(enterprise.workspaceTokenEncrypted);
+  assertCurrentEnterpriseSecret(enterprise, expectedEpoch);
   if (!workspaceToken || !enterprise.gatewayUrl || !enterprise.certificateFingerprint) {
     throw new AccountRequestError("企业网关会话不可用，已阻止回退到个人上传配置", { code: "ENTERPRISE_GATEWAY_UNAVAILABLE" });
   }
@@ -1335,6 +2327,7 @@ async function proxyEnterpriseUpload(channel, payload = {}, options = {}, retryC
 }
 
 module.exports = {
+  resetAccountPassword,
   AccountRequestError,
   WANJUAN_ACCOUNT_DEFAULT_API_URL,
   accountApiUrl,
@@ -1343,14 +2336,22 @@ module.exports = {
   continueWithLocalMode,
   createEnterpriseGateway,
   disconnectEnterpriseWorkspace,
+  confirmRelayLink,
   getCurrentAccount,
   getEnterpriseManagement,
   getEnterpriseStorageOverlay,
+  getRechargeStore,
+  getRelayAccount,
+  getRelayUsageRecords,
+  getWallet,
+  getWalletTransactions,
   invokeEnterpriseTeamTemplates,
   loginAccount,
   logoutAccount,
   normalizeBaseUrl,
   normalizeAccountEmail,
+  normalizeAccountFeatureFlags,
+  prepareManagedRelayRequest,
   publishEnterpriseGatewayConfig,
   proxyEnterpriseRequest,
   proxyEnterpriseUpload,
@@ -1358,15 +2359,28 @@ module.exports = {
   refreshEnterpriseWorkspaceConfig,
   readAccountState,
   refreshAccountSession,
+  refreshPublicCapabilities,
+  refreshManagedRelayCredential,
+  requestWithManagedRelayRetry,
+  redeemWalletCode,
+  regenerateRelayKey,
+  revealRelayKey,
   requestWithAccountAuth,
+  createAccountOperationGuard,
+  uploadCloudProjectAsset,
+  withDownloadedCloudProjectAsset,
   resetAccountOnboarding,
   removeEnterpriseMember,
   sanitizeAccountState,
   sendAccountCode,
+  sendRelayKeyCode,
+  sendRelayLinkCode,
   startCreatedEnterpriseGateway,
   stopCreatedEnterpriseGateway,
   takeOverEnterpriseGateway,
   updateEnterpriseMember,
   updateEnterpriseMemberQuota,
   updateEnterpriseQuotaDefault,
+  verifyLegacyRelayAccount,
+  verifyLegacyRelayMfa,
 };

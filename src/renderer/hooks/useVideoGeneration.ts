@@ -3,11 +3,14 @@
  * 视频生成（generateVideo）。自 bundle(WanJuanAppCanvas) 抽出的自定义 hook，逻辑逐字搬运、行为不变。
  */
 import { useCallback } from "react";
+import { validateJixinH3Input } from "../lib/jixin-h3";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, SetAny, SetState, Toast, WjEdge, WjNode } from "../lib/app-types";
-import { buildApiUrl, extractVideoTaskErrorHelper, resolveModelApiBindingIdHelper, resolveModelProtocolBindingHelper } from "../lib/model-binding";
+import { buildApiUrl, extractVideoTaskErrorHelper } from "../lib/model-binding";
+import { resolveMediaModelContract } from "../lib/media-model-contract";
 import { mediaUrlToDataUrl, wanjuanCollectNodeReferenceMedia, wanjuanNormalizeReferenceMediaUrl } from "../lib/reference-media";
 import { WANJUAN_TIANJI_PORTRAIT_SYNC_ERROR, wanjuanHasTianjiPortraitClaim, wanjuanRecoverTianjiPortraitNodeData, wanjuanResolveTianjiGenerationCanvasSnapshot } from "../lib/tianji-portrait";
 import { wanjuanCollectTianjiManualPortraitInputs, wanjuanFilterTianjiPortraitPreviews } from "../lib/tianji-manual-reference";
+import { wanjuanAppendConnectedImageReferences } from "../lib/generation-reference";
 import { normalizeVideoAspectRatioValue, normalizeVideoSizeValue } from "../lib/video-aspect-ratio";
 import { safeStringifyRequestForLog, serializeErrorPreview } from "../lib/log-utils";
 import { wanjuanClearProjectAssetBindingsFromData, wanjuanResourceKind } from "../lib/resource";
@@ -140,28 +143,15 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 	            seedanceOfficialModel && (modelName = normalizeVideoModelName(seedanceOfficialModel));
 	          }
 	          let
-	            isVideoApiBoundSourceNode =
-	            seedanceSourceNode?.type === `seedanceNode` ||
-	            seedanceSourceNode?.type === `tongyiWanxiangNode`,
-            selectedVideoApiConfigId =
-            apiBindingId ||
-            resolveModelApiBindingIdHelper(
-              videoModelApiBindings,
-              modelName,
-              isVideoApiBoundSourceNode ?
-              seedanceSourceNode?.data?.selectedApiConfigId ||
-              seedanceSourceNode?.data?.apiConfigId ||
-              undefined :
-              undefined,
-            ) ||
-            (isVideoApiBoundSourceNode ?
-              seedanceSourceNode?.data?.selectedApiConfigId ||
-              seedanceSourceNode?.data?.apiConfigId ||
-              undefined :
-              undefined),
-            explicitVideoConfig = selectedVideoApiConfigId ?
-            apiConfigs.find((apiConfig) => apiConfig.id === selectedVideoApiConfigId) :
-            null,
+            videoModelContract = resolveMediaModelContract({
+              category: `video`, model: modelName, apiConfigs,
+              apiBindings: videoModelApiBindings,
+              protocolBindings: seedanceSourceNode?.data?.videoModelProtocolBindings,
+              fallbackProtocolBindings: videoModelProtocolBindings,
+              registry: modelProtocolRegistry, apiBindingId,
+              selectedApiConfigId: seedanceSourceNode?.data?.selectedApiConfigId || seedanceSourceNode?.data?.apiConfigId,
+            }),
+            explicitVideoConfig = videoModelContract.apiConfig,
             videoConfig = explicitVideoConfig,
             videoBaseUrl = normalizeApiBase(videoConfig?.url || videoApiUrl || ``),
             apiOrigin = (() => {
@@ -215,10 +205,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 		            seedanceSourceNode?.type === `seedanceNode` ||
 		            /^(?:doubao-)?seedance(?:-2(?:\.|-)?0|-2-0)/i.test(modelName),
 		            selectedVideoProtocolName =
-		            resolveModelProtocolBindingHelper(seedanceSourceNode?.data?.videoModelProtocolBindings, modelName) ||
-		            resolveModelProtocolBindingHelper(videoModelProtocolBindings, modelName),
+		            videoModelContract.protocolName,
 		            modelProtocolDefinition =
-		            modelProtocolRegistry?.[selectedVideoProtocolName],
+		            videoModelContract.protocol,
             parseVideoModelRequestProfiles = (value) => {
               if (!value) return {};
               if (typeof value == `object`) return value;
@@ -314,6 +303,18 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             return;
           }
           let videoTaskPromptForDiagnostics = prompt;
+          if (videoModelContract.protocolConfigMissing || videoModelContract.protocolCategoryMismatch) {
+            showToast(videoModelContract.protocolCategoryMismatch ?
+              `当前 API 渠道绑定的视频协议类别不匹配，请在模型设置中检查` :
+              `当前 API 渠道绑定的视频协议不存在，请在模型设置中重新选择`);
+            videoRunTokens.delete(nodeId);
+            return;
+          }
+          if (videoModelRequestProfile?.blockedReason) {
+            showToast(videoModelRequestProfile.blockedReason);
+            videoRunTokens.delete(nodeId);
+            return;
+          }
           (setNodes((nodes2) =>
               nodes2.map((node) =>
                 node.id === nodeId ?
@@ -457,6 +458,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             }
             incomingEdges.forEach((edge) => {
               let sourceNode = nodes2.find((node) => node.id === edge.source);
+	              let sourceReferenceMedia = sourceNode ?
+	                wanjuanCollectNodeReferenceMedia(sourceNode, edge.sourceHandle) :
+	                { images: [], videos: [] };
               let sourceTianjiBindingStatus = String(sourceNode?.data?.tianjiPortraitBindingStatus || ``).trim().toLowerCase(),
                 sourceTianjiPortraitAssetId = String(sourceNode?.data?.tianjiPortraitAssetId || ``).trim(),
                 sourceHasTianjiPortraitClaim = Boolean(sourceNode?.data?.tianjiPortraitAssetId || sourceNode?.data?.isTianjiPortrait),
@@ -488,11 +492,11 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 });
                 return;
               }
-              if (sourceNode) {
-                let {
-                  images: images,
-                  videos: videos
-                } = wanjuanCollectNodeReferenceMedia(sourceNode, edge.sourceHandle);
+	              if (sourceNode) {
+	                let {
+	                  images: images,
+	                  videos: videos
+	                } = sourceReferenceMedia;
                 ![`imageNode`, `promptNode`, `gridMergeNode`].includes(sourceNode.type) &&
                   (images || []).forEach((image) => addVideoReferenceImage(image, { sourceNodeId: sourceNode.id }));
                 (videos || []).forEach(addVideoReferenceVideo);
@@ -502,9 +506,10 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 (sourceNode.type === `imageNode` ||
                   sourceNode.type === `promptNode` ||
                   sourceNode.type === `gridMergeNode`) &&
-                (sourceNode.data.imageUrl || sourceNode.data.seedanceAssetId)
+                (sourceReferenceMedia.images.length > 0 || sourceNode.data.seedanceAssetId)
               ) {
-                let imageUrl = sourceNode.data.imageUrl || ``,
+	                let imageUrl = sourceNode.data.imageUrl || ``,
+	                  sourceReferenceImages = sourceReferenceMedia.images || [],
                   arkReferenceMeta = {
                     arkTrustedAssetId: sourceNode.data.arkTrustedAssetId,
                     arkTrustedAssetGroupId: sourceNode.data.arkTrustedAssetGroupId,
@@ -535,17 +540,12 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     isTianjiPortrait: true,
                     sourceOrigin: sourceNode.data.sourceOrigin || `tianji-portrait`,
                   }) :
-                  imageUrl.startsWith(`data:image/`) ||
-                  /\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(imageUrl) ?
-                  addVideoReferenceImage(imageUrl, {
-                    ...arkReferenceMeta,
-                    seedanceAssetId: sourceNode.data.seedanceAssetId,
-                    virtualPortraitId: sourceNode.data.virtualPortraitId,
-                    isSeedanceVirtualPortrait: sourceNode.data.isSeedanceVirtualPortrait,
-                  }) :
-                  (imageUrl.startsWith(`data:video/`) ||
-                    /\.(mp4|webm|mov|ogg)($|\?)/i.test(imageUrl)) &&
-                  addVideoReferenceVideo(imageUrl);
+	                  wanjuanAppendConnectedImageReferences(sourceReferenceImages, addVideoReferenceImage, {
+	                    ...arkReferenceMeta,
+	                    seedanceAssetId: sourceNode.data.seedanceAssetId,
+	                    virtualPortraitId: sourceNode.data.virtualPortraitId,
+	                    isSeedanceVirtualPortrait: sourceNode.data.isSeedanceVirtualPortrait,
+	                  });
               } else if (
                 sourceNode &&
 	                (sourceNode.type === `videoNode` || sourceNode.type === `videoExtractNode` || sourceNode.type === `videoFaceBlurNode`) &&
@@ -607,6 +607,10 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 	                  wanjuanResourceKind(resource) === `audio` &&
 	                  seedanceAudioRefs.push(resource.url || resource.localPath || resource.path);
               });
+              if (videoModelRequestProfile?.mediaConditioningSupported === false &&
+                  (imageReferences.length || videoReferences.length || seedanceAudioRefs.length)) {
+                throw Error(videoModelRequestProfile.mediaBlockedReason || `当前协议不支持参考素材`);
+              }
 	            // Take the snapshots only after connected/context resources have all been collected.
 	            // Otherwise resources added from the context picker are omitted from Tianji payloads.
 	            let filteredTianjiImageReferences = wanjuanFilterTianjiPortraitPreviews(
@@ -2501,6 +2505,15 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 	                value;
 	            };
 	            durationValue = normalizeGrokVideoDuration(modelName, durationValue);
+            validateJixinH3Input(selectedVideoProtocolName, {
+              prompt: prompt2,
+              duration: durationValue,
+              resolution: getVideoResolutionAdapterValue(videoSizeValue),
+              ratio: getVideoAspectRatioAdapterValue(),
+              imageCount: imageReferences.length,
+              videoCount: videoReferences.length,
+              audioCount: seedanceAudioRefs.length,
+            });
 	            if (requestType === `json-video` || requestType === `openai-video`) {
               let isVeoModel = /^veo/i.test(modelName) && !isLconaiVideoApi,
                 jsonBody = {
@@ -2644,16 +2657,17 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 );
               }
               console.info(
-                `Video API submit response: ${JSON.stringify({
+                `Video API submit response: ${safeStringifyRequestForLog({
 		                modelName: modelName,
 		                submitUrl: submitUrl,
 		                response: submitResult,
 		              })}`,
               );
               if (submitResult.error) throw Error(submitResult.error.message || `提交任务失败`);
-              let taskId = submitResult.id || submitResult.task_id || submitResult.taskId || submitResult.data?.id || submitResult.data?.task_id;
-              if (!taskId) throw Error(`提交成功但未返回任务 ID`);
-              (updateTaskList &&
+	              let taskId = submitResult.id || submitResult.task_id || submitResult.taskId || submitResult.data?.id || submitResult.data?.task_id;
+	              if (!taskId) throw Error(`提交成功但未返回任务 ID`);
+	              createdVideoTaskId = String(taskId);
+	              (updateTaskList &&
                 updateTaskList((tasks) => [
                   ...tasks,
                   {
@@ -2664,6 +2678,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     apiConfigId: videoConfig?.id,
                     modelName: modelName,
 	                    requestProfile: {
+	                      protocolName: selectedVideoProtocolName,
 	                      requestType: requestType,
 	                      submitPath: submitPath,
 	                      submitUrl: submitUrl,
@@ -2713,6 +2728,17 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
               let done = false,
                 pollCount = 0,
                 errorCount = 0,
+                responseMapping = effectiveVideoRequestProfile?.responseMapping && typeof effectiveVideoRequestProfile.responseMapping == `object` ? effectiveVideoRequestProfile.responseMapping : {},
+                completedStatuses = new Set(
+                  [...(Array.isArray(responseMapping.completedValues) ? responseMapping.completedValues : []), `success`, `succeeded`, `completed`]
+                    .map((value) => String(value || ``).trim().toLowerCase())
+                    .filter(Boolean),
+                ),
+                failedStatuses = new Set(
+                  [...(Array.isArray(responseMapping.failedValues) ? responseMapping.failedValues : []), `failed`, `failure`, `error`, `fail`, `cancelled`, `canceled`, `expired`]
+                    .map((value) => String(value || ``).trim().toLowerCase())
+                    .filter(Boolean),
+                ),
                 videoPollingTimeoutMs = Math.max(5e3, (Number(timeoutSeconds) || 600) * 1e3),
                 videoPollingStartedAt = Date.now(),
                 maxPolls = Math.max(1, Math.ceil(videoPollingTimeoutMs / Math.max(Number(pollIntervalMs) || 3e3, 500))),
@@ -2757,7 +2783,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     });
                   if (!response.ok) throw Error(`Polling failed: ${response.status}`);
                   let data = await response.json(),
-                    status = String(data.status || data.base_resp?.status_msg || ``)
+                    status = String(data.status || data.data?.status || data.state || data.base_resp?.status_msg || ``)
                     .trim()
                     .toLowerCase(),
                     fileId =
@@ -2769,8 +2795,10 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     directVideoUrl =
                     data.video_url ||
                     data.videoUrl ||
+                    data.url ||
                     data.data?.video_url ||
                     data.data?.videoUrl ||
+                    data.data?.url ||
                     data.output?.video_url ||
                     data.output?.videoUrl ||
                     data.result?.video_url ||
@@ -2778,22 +2806,24 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     data.video?.url ||
                     data.artifact?.video?.url ||
                     data.artifact?.video_raw?.url;
+                  if (failedStatuses.has(status)) {
+                    throw Error(`[VIDEO_TASK_FAILED]${extractVideoTaskErrorHelper(data)}`);
+                  }
                   if (
                     ((errorCount = 0),
-                      [`success`, `succeeded`, `completed`].includes(status) ||
+                      completedStatuses.has(status) ||
                       fileId ||
                       directVideoUrl)
                   ) {
                     done = true;
                     console.info(
-                      `Video API poll completed: ${JSON.stringify({
+                      `Video API poll completed: ${safeStringifyRequestForLog({
 			                      modelName: modelName,
 			                      taskId: taskId,
 			                      pollUrl: pollUrl,
-			                      status: height,
-			                      fileId: aspectRatio2 || ``,
-			                      directVideoUrl: directVideoUrl || ``,
-			                      response: width,
+			                      status: status,
+			                      hasFileId: Boolean(fileId),
+			                      hasDirectVideoUrl: Boolean(directVideoUrl),
 			                    })}`,
                     );
                     let {
@@ -2806,7 +2836,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         videoUrl: String(directVideoUrl).replace(/[`\s]/g, ``),
                         thumbnailUrl: ``
                       } :
-                      await fetchVideoByFileId(aspectRatio2);
+                      await fetchVideoByFileId(fileId);
                     if (!videoUrl) throw Error(`任务已完成，但未返回视频地址`);
                     updateTaskList &&
                       updateTaskList((nodes3) =>
@@ -2882,8 +2912,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       addGeneratedAsset && videoUrl && addGeneratedAsset(videoUrl, `video`, `generated`),
                       showToast(`视频生成成功！`));
                     break;
-                  } else if ([`failed`, `error`, `fail`].includes(status)) {
-                    throw Error(extractVideoTaskErrorHelper(data));
+                  } else if (failedStatuses.has(status)) {
+                    throw Error(`[VIDEO_TASK_FAILED]${extractVideoTaskErrorHelper(data)}`);
                   } else {
                     let progress =
                       data.progress !== undefined && data.progress !== null ?
@@ -2914,6 +2944,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       ));
                   }
                 } catch (error) {
+                  if (done || abortController.signal.aborted || error?.message?.startsWith(`[VIDEO_TASK_FAILED]`))
+                    throw Error(String(error?.message || error).replace(`[VIDEO_TASK_FAILED]`, ``));
                   (console.warn(`Polling error:`, error),
                     errorCount++,
                     errorCount === 5 && showToast(`视频状态查询暂时失败，仍会继续重试...`));

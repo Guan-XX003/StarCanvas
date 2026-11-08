@@ -11,6 +11,7 @@ import { wanjuanBuildTianjiTaskQuery, wanjuanGetSyncedTianjiSeedanceConfig, wanj
 import { wanjuanTaskUsesSeedanceSlot } from "../lib/video-task";
 import { collectTaskCredentialConfigs, resolveTaskApiCredential, resolveTaskPollUrl } from "../lib/global-config";
 import { failGlobalTaskRefresh } from "../lib/global-tasks";
+import { resolveModelApiBindingIdHelper } from "../lib/model-binding";
 declare const chrome: any;
 
 interface UseRefreshGlobalTaskDeps {
@@ -470,8 +471,8 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
 	                      let imageTaskConfig =
 	                          task.apiConfigId ?
 	                          apiConfigs.find((apiConfig) => apiConfig.id === task.apiConfigId) :
-                          task.modelName && imageModelApiBindings?.[task.modelName] ?
-                          apiConfigs.find((apiConfig) => apiConfig.id === imageModelApiBindings[task.modelName]) :
+                          task.modelName ?
+                          apiConfigs.find((apiConfig) => apiConfig.id === resolveModelApiBindingIdHelper(imageModelApiBindings, task.modelName, undefined)) :
                           null,
                         normalizeImageBaseUrl = (url) => String(url || ``).replace(/\s+/g, ``).replace(/\/+$/, ``).toLowerCase(),
                         imageBaseMatchedConfig = task.apiBaseUrl ?
@@ -719,8 +720,8 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                       videoTaskConfig =
                       task.apiConfigId ?
                       apiConfigs.find((apiConfig) => apiConfig.id === task.apiConfigId) :
-                      task.modelName && videoModelApiBindings?.[task.modelName] ?
-                      apiConfigs.find((apiConfig) => apiConfig.id === videoModelApiBindings[task.modelName]) :
+                      task.modelName ?
+                      apiConfigs.find((apiConfig) => apiConfig.id === resolveModelApiBindingIdHelper(videoModelApiBindings, task.modelName, undefined)) :
                       null,
                       normalizeApiBaseUrl = (baseUrl) => String(baseUrl || ``).replace(/\s+/g, ``).replace(/\/+$/, ``).toLowerCase(),
                       apiBaseMatchedConfig = task.apiBaseUrl ?

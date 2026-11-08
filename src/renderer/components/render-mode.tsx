@@ -163,7 +163,7 @@ export const WanJuanRenderShellNode = reactMemo(({
         jsxs(`div`, {
           className: `wanjuan-render-shell-frame`,
           style: {
-            borderColor: selected ? `#3b82f6` : color,
+            borderColor: selected ? `var(--wj-accent)` : color,
             "--wanjuan-shell-color": color
           },
           children: [
@@ -216,7 +216,7 @@ export const WanJuanRenderLiteNode = reactMemo(({
         jsx(WanJuanNodeHandle, { type: `target`, position: Position.Left, variant: `small` }),
         jsxs(`div`, {
           className: `wanjuan-render-lite-frame`,
-          style: { borderColor: selected ? `#3b82f6` : color, "--wanjuan-lite-color": color },
+          style: { borderColor: selected ? `var(--wj-accent)` : color, "--wanjuan-lite-color": color },
           children: [
             jsxs(`div`, {
               className: `wanjuan-render-lite-media ${hasVideo ? `is-video` : hasAudio ? `is-audio` : `is-image`}`,

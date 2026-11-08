@@ -19,10 +19,11 @@ html.theme-dark {
   --wj-accent: #e36b3f;
   --wj-accent-2: #f0a24b;
   --wj-accent-strong: #f07848;
+  --wj-accent-contrast: #181513;
   --wj-action-bg: #d95f34;
   --wj-action-hover-bg: #eb7147;
   --wj-action-border: #d95f34;
-  --wj-action-text: #fffaf5;
+  --wj-action-text: #181513;
   --wj-action-shadow: none;
   --wj-control-bg: #24282d;
   --wj-control-border: #3b4148;
@@ -39,7 +40,7 @@ html.theme-dark {
   --wj-control-primary-bg: #d95f34;
   --wj-control-primary-hover-bg: #eb7147;
   --wj-control-primary-border: #d95f34;
-  --wj-control-primary-text: #fffaf5;
+  --wj-control-primary-text: #181513;
   --wj-control-primary-shadow: none;
   --wj-chrome-bg: #1b1e22;
   --wj-chrome-border: #30353a;
@@ -125,6 +126,71 @@ html.theme-dark {
   --wj-radius-panel: 6px;
   --wj-motion-fast: 120ms;
   --wj-motion-panel: 180ms;
+  --wj-relief-raised: inset 0 1px 0 rgb(255 255 255 / 8%), 0 1px 2px rgb(0 0 0 / 28%);
+  --wj-relief-inset: inset 0 1px 3px rgb(0 0 0 / 32%), 0 1px 0 rgb(255 255 255 / 4%);
+}
+
+/* Obsidian has neutral, deeper surfaces than graphite. */
+html.theme-dark {
+  --wj-bg: #111111;
+  --wj-surface: #191919;
+  --wj-surface-2: #222222;
+  --wj-surface-3: #2e2e2e;
+  --wj-border: #404040;
+  --wj-border-strong: #595959;
+  --wj-control-bg: var(--wj-surface-2);
+  --wj-control-hover-bg: var(--wj-surface-3);
+  --wj-chrome-bg: var(--wj-surface);
+  --wj-panel-bg: var(--wj-surface);
+  --wj-panel-bg-raised: var(--wj-surface-2);
+  --wj-panel-bg-subtle: var(--wj-bg);
+  --wj-panel-section-bg: var(--wj-surface);
+  --wj-panel-section-header-bg: var(--wj-surface-2);
+  --wj-panel-row-bg: var(--wj-surface);
+  --wj-panel-row-hover-bg: var(--wj-surface-3);
+  --wj-field-bg: #141414;
+  --wj-field-border: var(--wj-border);
+  --wj-menu-bg: var(--wj-surface-2);
+  --wj-card-bg: var(--wj-surface);
+  --wj-card-hover-bg: var(--wj-surface-2);
+  --wj-node-surface: var(--wj-surface);
+  --wj-node-surface-raised: var(--wj-surface-2);
+  --wj-node-surface-subtle: var(--wj-bg);
+  --wj-node-border: var(--wj-border);
+  --wj-canvas-control-bg: var(--wj-surface-2);
+}
+
+/* Graphite keeps the tactile neutral surfaces, but restores the original
+ * high-contrast silver highlight instead of inheriting Obsidian's orange. */
+html.theme-graphite {
+  --wj-accent: #d8dde3;
+  --wj-accent-2: #f2f4f6;
+  --wj-accent-strong: #ffffff;
+  --wj-accent-contrast: #151515;
+  --wj-action-bg: #454545;
+  --wj-action-hover-bg: #505050;
+  --wj-action-border: #e4e7eb;
+  --wj-action-text: #ffffff;
+  --wj-control-selected-bg: #d8dde3;
+  --wj-control-selected-hover-bg: #eef0f2;
+  --wj-control-selected-border: #f2f4f6;
+  --wj-control-selected-text: #151515;
+  --wj-control-primary-bg: #454545;
+  --wj-control-primary-hover-bg: #505050;
+  --wj-control-primary-border: #e4e7eb;
+  --wj-control-primary-text: #ffffff;
+  --wj-nav-active-line: #d8dde3;
+  --wj-field-focus-border: #d8dde3;
+  --wj-field-focus-shadow: 0 0 0 2px rgb(216 221 227 / 16%);
+  --wj-card-selected-border: #e4e7eb;
+  --wj-card-selected-rail: #d8dde3;
+  --wj-card-selected-shadow: inset 3px 0 0 #d8dde3;
+  --wj-edge-selected: #d8dde3;
+  --wj-edge-active: #eef0f2;
+  --wj-edge-energy: #f2f4f6;
+  --wj-edge-spark: #ffffff;
+  --wj-loading-node-border: #d8dde3;
+  --wj-loading-node-shadow: 0 0 0 1px #d8dde3;
 }
 
 html.theme-graphite body,
@@ -137,7 +203,7 @@ html.theme-graphite select {
 
 html.theme-graphite .wanjuan-app-top-nav {
   min-height: 58px !important;
-  background: #1b1e22 !important;
+  background: var(--wj-surface) !important;
   background-image: none !important;
   border-bottom: 1px solid #30353a !important;
   box-shadow: none !important;
@@ -167,7 +233,7 @@ html.theme-graphite .wanjuan-app-nav-tab-active::after {
   bottom: 5px;
   left: 24%;
   height: 2px;
-  background: #e36b3f;
+  background: var(--wj-nav-active-line);
   border-radius: 1px;
 }
 
@@ -204,15 +270,15 @@ html.theme-graphite :is(
 }
 
 html.theme-graphite .wanjuan-settings-nav-item-active {
-  background: #2a2e33 !important;
-  border-color: #444a51 !important;
-  color: #f4efe8 !important;
-  box-shadow: inset 3px 0 0 #e36b3f !important;
+  background: var(--wj-control-selected-bg) !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html.theme-graphite .wanjuan-settings-nav-item-active :is(span, svg, .wanjuan-skeuo-icon) {
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
 }
 
 html.theme-graphite :is(input, textarea, select, .wanjuan-settings-control) {
@@ -224,7 +290,7 @@ html.theme-graphite :is(input, textarea, select, .wanjuan-settings-control) {
 }
 
 html.theme-graphite :is(input, textarea, select, button):focus-visible {
-  outline: 2px solid rgba(227, 107, 63, 0.78) !important;
+  outline: 2px solid color-mix(in srgb, var(--wj-accent) 78%, transparent) !important;
   outline-offset: 2px !important;
 }
 
@@ -261,7 +327,7 @@ html.theme-graphite [data-wanjuan-context-menu="true"] :is(
   .wanjuan-context-menu-row,
   .wanjuan-context-menu-item-plain
 ):hover {
-  background: #34393f !important;
+  background: var(--wj-surface-3) !important;
   color: #fffaf5 !important;
 }
 
@@ -269,7 +335,7 @@ html.theme-graphite .wanjuan-canvas-bottom-dock {
   padding: 3px;
   border-color: #3b4148;
   border-radius: 6px;
-  background: #202328;
+  background: var(--wj-surface);
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -283,9 +349,9 @@ html.theme-graphite .wanjuan-canvas-dock-button {
 }
 
 html.theme-graphite .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class] {
-  background: #34393f !important;
-  box-shadow: inset 0 -2px 0 #e36b3f !important;
-  color: #fffaf5 !important;
+  background: var(--wj-control-selected-bg) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
+  color: var(--wj-control-selected-text) !important;
 }
 
 html.theme-graphite .react-flow__controls {
@@ -337,13 +403,13 @@ html.theme-graphite .wanjuan-flow-edge-energy-base {
 
 html.theme-graphite .react-flow__node.selected > :first-child,
 html.theme-graphite .react-flow__node:focus-visible > :first-child {
-  border-color: #e36b3f !important;
-  box-shadow: 0 0 0 1px #e36b3f !important;
+  border-color: var(--wj-loading-node-border) !important;
+  box-shadow: var(--wj-loading-node-shadow) !important;
 }
 
 html.theme-graphite .wanjuan-loading-node-frame {
-  border-color: #e36b3f !important;
-  box-shadow: 0 0 0 1px #e36b3f !important;
+  border-color: var(--wj-loading-node-border) !important;
+  box-shadow: var(--wj-loading-node-shadow) !important;
 }
 
 html.theme-graphite .react-flow__handle {
@@ -355,7 +421,7 @@ html.theme-graphite .react-flow__handle {
 
 html.theme-graphite .react-flow__handle:hover {
   transform: scale(1.18);
-  background: #e36b3f !important;
+  background: var(--wj-accent) !important;
 }
 
 html.theme-graphite :is(.animate-pulse, .animate-spin) {
@@ -377,7 +443,7 @@ html.theme-graphite :is(.animate-pulse, .animate-spin) {
  * with Graphite without changing the user's stored theme choice. */
 html.theme-dark .wanjuan-app-top-nav {
   min-height: 58px !important;
-  background: #1b1e22 !important;
+  background: var(--wj-surface) !important;
   background-image: none !important;
   border-bottom: 1px solid #30353a !important;
   box-shadow: none !important;
@@ -449,15 +515,15 @@ html.theme-dark :is(
 }
 
 html.theme-dark .wanjuan-settings-nav-item-active {
-  background: #2a2e33 !important;
-  border-color: #444a51 !important;
-  color: #f4efe8 !important;
-  box-shadow: inset 3px 0 0 #e36b3f !important;
+  background: var(--wj-control-selected-bg) !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html.theme-dark .wanjuan-settings-nav-item-active :is(span, svg, .wanjuan-skeuo-icon) {
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
 }
 
 html.theme-dark :is(input, textarea, select, button):focus-visible {
@@ -498,7 +564,7 @@ html.theme-dark [data-wanjuan-context-menu="true"] :is(
   .wanjuan-context-menu-row,
   .wanjuan-context-menu-item-plain
 ):hover {
-  background: #34393f !important;
+  background: var(--wj-surface-3) !important;
   color: #fffaf5 !important;
 }
 
@@ -506,7 +572,7 @@ html.theme-dark .wanjuan-canvas-bottom-dock {
   padding: 3px;
   border-color: #3b4148;
   border-radius: 6px;
-  background: #202328;
+  background: var(--wj-surface);
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -518,9 +584,9 @@ html.theme-dark .wanjuan-canvas-dock-button {
 }
 
 html.theme-dark .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class] {
-  background: #34393f !important;
-  box-shadow: inset 0 -2px 0 #e36b3f !important;
-  color: #fffaf5 !important;
+  background: var(--wj-control-selected-bg) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
+  color: var(--wj-control-selected-text) !important;
 }
 
 html.theme-dark .react-flow__controls {
@@ -602,13 +668,13 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-s
 html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:hover[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:focus-visible[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active:active[class][class] {
-  background: #2a2e33 !important;
-  background-color: #2a2e33 !important;
+  background: var(--wj-control-selected-bg) !important;
+  background-color: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: #444a51 !important;
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
-  box-shadow: inset 3px 0 0 #e36b3f !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-settings-nav-item.wanjuan-settings-nav-item-active::before {
@@ -618,7 +684,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-settings-sidebar button.wanjuan-s
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-title {
   border-radius: 6px !important;
-  background: #202328 !important;
+  background: var(--wj-surface) !important;
   border-color: #3b4148 !important;
   box-shadow: none !important;
 }
@@ -626,7 +692,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-title {
 html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-action {
   min-width: 116px !important;
   border-radius: 4px !important;
-  background: #1d2024 !important;
+  background: var(--wj-surface) !important;
   border-color: #3b4148 !important;
   color: #aaa8a2 !important;
   box-shadow: none !important;
@@ -636,7 +702,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-action {
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-empty-canvas-action:hover {
-  background: #292e34 !important;
+  background: var(--wj-surface-3) !important;
   border-color: #68717a !important;
   color: #fffaf5 !important;
   transform: none !important;
@@ -647,7 +713,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button {
   height: 32px;
   border: 1px solid #3b4148 !important;
   border-radius: 4px !important;
-  background: #202328 !important;
+  background: var(--wj-surface) !important;
   color: #aaa8a2 !important;
   box-shadow: none !important;
   filter: none !important;
@@ -657,7 +723,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button {
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button:hover {
-  background: #30353b !important;
+  background: var(--wj-surface-3) !important;
   border-color: #59616a !important;
   color: #fffaf5 !important;
   box-shadow: none !important;
@@ -666,10 +732,10 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-button:hover 
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-button.is-unseen {
-  border-color: #8e513c !important;
-  background: #27292c !important;
-  color: #e78a67 !important;
-  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  border-color: color-mix(in srgb, var(--wj-accent) 46%, var(--wj-border)) !important;
+  background: color-mix(in srgb, var(--wj-accent) 8%, var(--wj-surface)) !important;
+  color: var(--wj-accent) !important;
+  box-shadow: inset 0 -2px 0 var(--wj-accent) !important;
   filter: none !important;
   animation: none !important;
 }
@@ -688,9 +754,9 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-anchor {
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-coachmark {
-  border: 1px solid #76503f !important;
+  border: 1px solid color-mix(in srgb, var(--wj-accent) 42%, var(--wj-border)) !important;
   border-radius: 4px !important;
-  background: #23272c !important;
+  background: var(--wj-surface-2) !important;
   color: #eeeae3 !important;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32) !important;
   filter: none !important;
@@ -700,13 +766,13 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-coachmark {
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-coachmark::before {
-  background: #23272c !important;
+  background: var(--wj-surface-2) !important;
   box-shadow: none !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-topbar-notification-dot,
 html:is(.theme-dark, .theme-graphite) .wanjuan-beginner-guide-dot {
-  background: #e36b3f !important;
+  background: var(--wj-accent) !important;
   box-shadow: none !important;
 }
 
@@ -722,7 +788,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-dock-tool-items .wanjuan-c
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar {
   min-height: 56px !important;
-  background: #1b1e22 !important;
+  background: var(--wj-surface) !important;
   border-bottom-color: #30353a !important;
 }
 
@@ -736,7 +802,7 @@ html:is(.theme-dark, .theme-graphite) :is(
   padding: 3px !important;
   border: 1px solid #3b4148 !important;
   border-radius: 5px !important;
-  background: #202328 !important;
+  background: var(--wj-surface) !important;
   box-shadow: none !important;
 }
 
@@ -748,13 +814,13 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-r
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active:hover[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-toolbar button.wanjuan-resource-filter-button.wanjuan-resource-filter-button-active:focus-visible[class][class] {
-  background: #30353b !important;
-  background-color: #30353b !important;
+  background: var(--wj-control-selected-bg) !important;
+  background-color: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: #4b5159 !important;
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
-  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty,
@@ -764,7 +830,7 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty-filter {
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty > svg,
 html:is(.theme-dark, .theme-graphite) .wanjuan-resource-empty-filter > svg {
-  color: #e0784f !important;
+  color: var(--wj-accent) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-workspace {
@@ -780,12 +846,12 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-ca
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active:hover[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active:focus-visible[class][class] {
-  background: #292e34 !important;
+  background: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: #604638 !important;
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
-  box-shadow: inset 3px 0 0 #e36b3f !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:first-child {
@@ -794,8 +860,8 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-ca
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2),
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page .wanjuan-agent-role-card-active > div:nth-child(2) :is(div, span, svg) {
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page button:not(.wanjuan-agent-role-card) {
@@ -807,15 +873,15 @@ html:is(.theme-dark, .theme-graphite) .wanjuan-agent-page button:not(.wanjuan-ag
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer {
   border-radius: 6px !important;
   border-color: #4b5159 !important;
-  background: #202328 !important;
+  background: var(--wj-surface) !important;
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer:focus-within {
-  border-color: #e36b3f !important;
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38), inset 0 -2px 0 #e36b3f !important;
+  border-color: var(--wj-accent) !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38), inset 0 -2px 0 var(--wj-accent) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-agent-composer textarea {
@@ -836,22 +902,112 @@ html:is(.theme-dark, .theme-graphite) :is(
   .wanjuan-workspace-sections button.is-active,
   .wanjuan-workspace-segment button.is-active
 ):hover[class][class] {
-  background: #30353b !important;
-  background-color: #30353b !important;
+  background: var(--wj-control-selected-bg) !important;
+  background-color: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: #4b5159 !important;
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
-  box-shadow: inset 0 -2px 0 #e36b3f !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
 }
 
 html:is(.theme-dark, .theme-graphite) .wanjuan-workspace-group.is-active[class][class],
 html:is(.theme-dark, .theme-graphite) .wanjuan-workspace-group.is-active:hover[class][class] {
-  background: #292e34 !important;
-  background-color: #292e34 !important;
+  background: var(--wj-control-selected-bg) !important;
+  background-color: var(--wj-control-selected-bg) !important;
   background-image: none !important;
-  border-color: #604638 !important;
-  color: #f4efe8 !important;
-  -webkit-text-fill-color: #f4efe8 !important;
-  box-shadow: inset 3px 0 0 #e36b3f !important;
+  border-color: var(--wj-control-selected-border) !important;
+  color: var(--wj-control-selected-text) !important;
+  -webkit-text-fill-color: var(--wj-control-selected-text) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
+}
+
+/* Tactile refinement: shallow light edges distinguish controls from input wells.
+ * Keep geometry stable while pressing; React Flow owns node/handle transforms. */
+html:is(.theme-dark, .theme-graphite) .wanjuan-app-top-nav {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%), 0 1px 0 #101215 !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock {
+  gap: 4px;
+  padding: 5px;
+  border-color: #454a50;
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 6px 16px rgb(0 0 0 / 28%);
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button[class][class] {
+  width: 52px;
+  min-width: 52px;
+  height: 48px;
+  gap: 5px;
+  border-radius: 5px;
+  border-color: #393e44 var(--wj-surface-3) #15181c !important;
+  background: var(--wj-surface-2) !important;
+  box-shadow: var(--wj-relief-raised) !important;
+  color: #c4c3bf;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button span {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button[class][class]:hover:not(:disabled) {
+  background: var(--wj-surface-3) !important;
+  border-color: #555b62 #42484f #1a1d21 !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button[class][class]:active:not(:disabled),
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class] {
+  background: var(--wj-control-selected-bg) !important;
+  border-color: var(--wj-control-selected-border) !important;
+  box-shadow: var(--wj-control-selected-shadow) !important;
+  color: var(--wj-control-selected-text) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) :is(
+  .wanjuan-settings-button,
+  .wanjuan-node-picker-trigger,
+  .wanjuan-canvas-dock-tool-tab,
+  .react-flow__controls-button
+) {
+  box-shadow: var(--wj-relief-raised) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) :is(
+  .wanjuan-settings-button,
+  .wanjuan-node-picker-trigger,
+  .wanjuan-canvas-dock-tool-tab,
+  .react-flow__controls-button
+):active:not(:disabled) {
+  box-shadow: var(--wj-relief-inset) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) :is(
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  textarea,
+  select
+) {
+  box-shadow: var(--wj-relief-inset) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .react-flow__handle {
+  box-shadow: 0 0 0 1px #757a80, inset 0 1px 1px rgb(255 255 255 / 28%) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-settings-card {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%) !important;
+}
+
+html:is(.theme-dark, .theme-graphite) .wanjuan-canvas-dock-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:is(.theme-dark, .theme-graphite) :is(button, input, textarea, select) {
+    transition: none !important;
+  }
 }

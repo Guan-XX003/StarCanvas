@@ -5,6 +5,7 @@
 import { memo as reactMemo, useEffect, useMemo, useRef, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 import { parseSeedanceList } from "../lib/model-binding";
+import { resolveMediaModelContract } from "../lib/media-model-contract";
 import localforage from "localforage";
 import { NodeResizer, Position, useNodeConnections, useNodesData, useNodesState, useReactFlow } from "@xyflow/react";
 import { ArrowUp, CircleAlert, Crop, Download, PenLine, RefreshCw, ShieldCheck, Square, Type, Upload, ZoomIn } from "lucide-react";
@@ -76,6 +77,15 @@ export const WanJuanPromptNode = reactMemo(({
         imageResolution && wanjuanImageCompatResolutionOptions.includes(imageResolution) ?
         imageResolution :
         wanjuanImageCompatResolutionOptions[0] || `2560x1440`;
+    const { protocol: selectedImageProtocol } = resolveMediaModelContract({
+      category: `image`, model: selectedModel, apiConfigs: data.apiConfigs,
+      apiBindings: data.imageModelApiBindings, protocolBindings: data.imageModelProtocolBindings,
+      registry: data.modelProtocolRegistry,
+      selectedApiConfigId: data.selectedApiConfigId || data.apiConfigId,
+    });
+    const fixedImageSize = String(selectedImageProtocol?.parameterAdapter?.fixedImageSize || ``);
+    const displayedImageSize = fixedImageSize || imageSize;
+    const displayedImageSizeMode = fixedImageSize ? `quality` : imageSizeMode;
     let applyPreferredImageModel = (favoritesOverride = favoriteModels.favorites) => {
       if (!data.drawingModel) return;
       let currentModel = selectedModel || data.selectedModel || ``;
@@ -282,7 +292,7 @@ export const WanJuanPromptNode = reactMemo(({
       className: `flex flex-col items-center group/node transition-all w-full h-full min-w-[160px] min-h-[160px] ${selected ? `z-50` : `z-10`}`,
       children: [
         jsx(NodeResizer, {
-          color: `#3b82f6`,
+          color: `var(--wj-accent)`,
           isVisible: selected,
           minWidth: 160,
           minHeight: 160,
@@ -678,7 +688,7 @@ export const WanJuanPromptNode = reactMemo(({
 	                          }),
 	                          g &&
 	                          jsxs(`div`, {
-                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[#22272f] border border-[#3a4250] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden nopan`,
+                            className: `wanjuan-mention-picker absolute top-full left-0 mt-1 w-[380px] bg-[var(--wj-menu-bg)] border border-[var(--wj-menu-border)] rounded-lg shadow-2xl z-[100] flex flex-col overflow-hidden nopan`,
                             onWheel: (event) => event.stopPropagation(),
                             onClick: (event) => event.stopPropagation(),
                             children: [
@@ -708,7 +718,7 @@ export const WanJuanPromptNode = reactMemo(({
                                         .map((resource: any) =>
                                           jsxs(
                                             `div`, {
-	                                              className: `aspect-square bg-[#111827] rounded-lg border border-[#333b46] hover:border-blue-500 cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
+	                                              className: `aspect-square bg-[var(--wj-card-bg)] rounded-lg border border-[var(--wj-panel-border-soft)] hover:border-[var(--wj-control-hover-border)] cursor-pointer overflow-hidden relative group wanjuan-mention-picker-item`,
 	                                              onClick: (event) => {
 	                                                let mentionRange = wanjuanMentionRangeFromPicker(event.currentTarget, prompt),
 	                                                  updatedPrompt = wanjuanReplaceMentionToken(prompt, mentionRange);
@@ -756,13 +766,13 @@ export const WanJuanPromptNode = reactMemo(({
                                 return totalPages <= 1 ?
                                   null :
                                   jsxs(`div`, {
-	                                    className: `flex items-center justify-between p-2 border-t border-[#333b46] bg-[#20252c]`,
+	                                    className: `flex items-center justify-between p-2 border-t border-[var(--wj-panel-divider)] bg-[var(--wj-panel-section-header-bg)]`,
                                     children: [
                                       jsx(`button`, {
                                         disabled: page === 1,
                                         onClick: () =>
                                           setPage((prevPage) => Math.max(1, prevPage - 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `上一页`,
                                       }),
                                       jsxs(`span`, {
@@ -773,7 +783,7 @@ export const WanJuanPromptNode = reactMemo(({
                                         disabled: page === totalPages,
                                         onClick: () =>
                                           setPage((prevPage) => Math.min(totalPages, prevPage + 1)),
-	                                        className: `text-[10px] px-2.5 py-1 bg-[#2b313a] rounded-md disabled:opacity-30 text-gray-300 hover:bg-[#343b46]`,
+	                                        className: `text-[10px] px-2.5 py-1 bg-[var(--wj-control-bg)] rounded-md disabled:opacity-30 text-[var(--wj-control-text)] hover:bg-[var(--wj-control-hover-bg)]`,
                                         children: `下一页`,
                                       }),
                                     ],
@@ -807,9 +817,9 @@ export const WanJuanPromptNode = reactMemo(({
                                 className: `w-2.5 h-3 border border-current rounded-[2px]`,
                               }),
 		                              jsxs(`span`, {
-		                                children: imageSizeMode === `resolution` ?
+		                                children: displayedImageSizeMode === `resolution` ?
 		                                  [wanjuanActiveImageResolution] :
-		                                  [aspectRatio, ` · `, imageSize]
+		                                  [aspectRatio, ` · `, displayedImageSize]
 		                              }),
                             ],
                           }),
@@ -823,10 +833,10 @@ export const WanJuanPromptNode = reactMemo(({
 	                                children: [
 	                                  [`quality`, `普通`],
 	                                  [`resolution`, `兼容`],
-	                                ].map(([sizeMode, label]) =>
+	                                ].filter(([sizeMode]) => !fixedImageSize || sizeMode === `quality`).map(([sizeMode, label]) =>
 	                                  jsx(
 	                                    `button`, {
-	                                      className: `flex-1 py-1 text-[11px] rounded transition-colors ${imageSizeMode === sizeMode ? `bg-blue-600 text-white` : `text-gray-400 hover:bg-[#2a2a2a]`}`,
+	                                      className: `flex-1 py-1 text-[11px] rounded transition-colors ${displayedImageSizeMode === sizeMode ? `bg-blue-600 text-white` : `text-gray-400 hover:bg-[#2a2a2a]`}`,
 	                                      onClick: () => {
 	                                        (setImageSizeMode(sizeMode), sizeMode === `resolution` && !imageResolution && setImageResolution(wanjuanActiveImageResolution), updateNodeData(nodeId, {
 	                                          imageSizeMode: sizeMode,
@@ -841,7 +851,7 @@ export const WanJuanPromptNode = reactMemo(({
 	                                  ),
 	                                ),
 	                              }),
-			                              imageSizeMode === `quality` ?
+			                              displayedImageSizeMode === `quality` ?
 			                              jsxs(`div`, {
 		                                children: [
 		                                  jsx(`div`, {
@@ -850,10 +860,10 @@ export const WanJuanPromptNode = reactMemo(({
                                   }),
                                   jsx(`div`, {
                                     className: `flex gap-1.5`,
-                                    children: [`1K`, `2K`, `4K`].map((imageSize2) =>
+                                    children: (fixedImageSize ? [fixedImageSize] : [`1K`, `2K`, `4K`]).map((imageSize2) =>
                                       jsx(
                                         `button`, {
-                                          className: `flex-1 py-1.5 text-[11px] rounded-md border transition-colors wanjuan-node-popover-option ${imageSize === imageSize2 ? `bg-blue-600 border-blue-400 text-white wanjuan-node-popover-option-active` : `bg-[#1a1a1a] border-transparent text-gray-400 hover:bg-[#2a2a2a]`}`,
+                                          className: `flex-1 py-1.5 text-[11px] rounded-md border transition-colors wanjuan-node-popover-option ${displayedImageSize === imageSize2 ? `bg-blue-600 border-blue-400 text-white wanjuan-node-popover-option-active` : `bg-[#1a1a1a] border-transparent text-gray-400 hover:bg-[#2a2a2a]`}`,
                                           onClick: () => {
                                             (setImageSize(imageSize2), updateNodeData(nodeId, {
                                               imageSize: imageSize2

@@ -7,6 +7,8 @@
 //   3) 异步执行 legacy 数据确认 / 存储恢复 / chrome shim 安装
 //   4) 加载 bridge-api（其 exposeGlobal 在此刻对外暴露 wanjuanDesktop / wanjuanProjectSafety）
 //   5) DOMContentLoaded 时安装桌面补丁
+const { installDiagnosticConsole } = require("../shared/diagnostic-policy.cjs");
+installDiagnosticConsole();
 const { ipcRenderer } = require("./runtime.cjs");
 
 // —— 各域模块（require 即完成函数定义；chrome-shim 等无对外副作用）——
@@ -32,8 +34,8 @@ ipcRenderer.invoke("wanjuan:set-performance-settings", getPerformanceSettings())
 installBootStabilityStyle();
 applyInitialThemeClass(resolveBootThemeMode());
 (async () => {
-  await confirmLegacyUserDataChoice();
-  await applyDesktopStorageRecovery();
+  const storageReady = await confirmLegacyUserDataChoice();
+  if (storageReady !== false) await applyDesktopStorageRecovery();
   installChromeShim();
 })().catch((error) => {
   console.warn("desktop bootstrap skipped", error);

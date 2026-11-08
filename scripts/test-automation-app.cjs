@@ -11,7 +11,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const mode = process.argv.includes("--packaged") ? "packaged" : "dev";
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `wanjuan-automation-${mode}-`));
 const userDataPath = path.join(tempRoot, "user-data");
-const infoFile = path.join(userDataPath, "wanjuan-automation.json");
+const infoFile = path.join(userDataPath, "starcanvas-automation.json");
 const staleToken = "stale-test-token-000000000000000000000001";
 const tinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 fs.mkdirSync(userDataPath, { recursive: true });
@@ -32,22 +32,24 @@ let command;
 let appArgs;
 let cliRoot;
 if (mode === "packaged") {
-  if (process.platform !== "darwin") throw new Error("当前打包版冒烟脚本仅在 macOS 运行；Windows 使用 build:win 后检查 resources/wanjuan-cli");
+  if (process.platform !== "darwin") throw new Error("当前打包版冒烟脚本仅在 macOS 运行；Windows 使用 build:win 后检查 resources/starcanvas-cli");
   const appBundle = findPackagedApp();
   if (!appBundle) throw new Error("找不到打包后的StarCanvas.app，请先运行 npm run build");
   command = path.join(appBundle, "Contents", "MacOS", "StarCanvas");
   appArgs = [];
-  cliRoot = path.join(appBundle, "Contents", "Resources", "wanjuan-cli");
+  cliRoot = path.join(appBundle, "Contents", "Resources", "starcanvas-cli");
 } else {
   command = require("electron");
   appArgs = [projectRoot];
   cliRoot = path.join(projectRoot, "bin");
 }
 
-const cliPath = path.join(cliRoot, "wanjuan.mjs");
-const mcpPath = path.join(cliRoot, "wanjuan-mcp.mjs");
+const cliPath = path.join(cliRoot, "starcanvas.mjs");
+const mcpPath = path.join(cliRoot, "starcanvas-mcp.mjs");
 assert.equal(fs.existsSync(cliPath), true, `${mode} CLI 文件应存在`);
 assert.equal(fs.existsSync(mcpPath), true, `${mode} MCP 文件应存在`);
+assert.equal(fs.existsSync(path.join(cliRoot, "wanjuan.mjs")), true, `${mode} 旧 CLI 兼容入口应存在`);
+assert.equal(fs.existsSync(path.join(cliRoot, "wanjuan-mcp.mjs")), true, `${mode} 旧 MCP 兼容入口应存在`);
 
 const child = spawn(command, appArgs, {
   cwd: projectRoot,
@@ -63,7 +65,7 @@ const child = spawn(command, appArgs, {
   },
 });
 
-const cliEnv = { ...process.env, WANJUAN_AUTOMATION_FILE: infoFile };
+const cliEnv = { ...process.env, STARCANVAS_AUTOMATION_FILE: infoFile };
 function runCli(args) {
   const result = spawnSync(process.execPath, [cliPath, ...args], { cwd: projectRoot, env: cliEnv, encoding: "utf8", timeout: 15000 });
   if (result.status !== 0) throw new Error((result.stderr || `CLI ${args.join(" ")} 失败`).trim());
@@ -122,8 +124,9 @@ async function inspectMcp() {
   const deadline = Date.now() + 5000;
   while (replies.size < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   mcp.kill();
-  assert.equal(replies.get(1)?.result?.serverInfo?.name, "wanjuan-lingjing");
-    assert.equal(replies.get(2)?.result?.tools?.length, 9);
+  assert.equal(replies.get(1)?.result?.serverInfo?.name, "starcanvas");
+  assert.equal(replies.get(2)?.result?.tools?.length, 9);
+  assert.equal(replies.get(2)?.result?.tools?.every((tool) => tool.name.startsWith("starcanvas_")), true);
 }
 
 (async () => {

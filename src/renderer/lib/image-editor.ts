@@ -157,6 +157,94 @@ export function wanjuanBuildEditedImageNodeData(data: any, options: any) {
   return nextData;
 }
 
+/**
+ * Keep the source image intact and place every saved edit in a new image node.
+ * Edited nodes are laid out beside the source in a small grid so repeated edits
+ * remain visible instead of stacking on top of the original or one another.
+ */
+export function wanjuanAppendEditedImageToCanvasNodes(nodes: any[], sourceNodeId: any, options: any) {
+  if (!Array.isArray(nodes)) return nodes;
+  const sourceId = String(sourceNodeId || ``);
+  const sourceNode = nodes.find((node) => String(node?.id || ``) === sourceId);
+  if (!sourceNode) return nodes;
+
+  const editedNodeId = String(options?.editedNodeId || ``).trim();
+  if (!editedNodeId || nodes.some((node) => String(node?.id || ``) === editedNodeId)) return nodes;
+
+  const priorEdits = nodes.filter((node) => String(node?.data?.imageEditorSourceNodeId || ``) === sourceId);
+  const editIndex = Math.max(
+    priorEdits.length,
+    ...priorEdits.map((node) => Number(node?.data?.imageEditorEditIndex || 0)).filter(Number.isFinite),
+  ) + 1;
+  const nodeDimension = (value: any, fallback: number) => {
+    const parsed = typeof value === `string` ? Number.parseFloat(value) : Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const sourceWidth = nodeDimension(sourceNode?.style?.width || sourceNode?.measured?.width, 224);
+  const sourceHeight = nodeDimension(sourceNode?.style?.height || sourceNode?.measured?.height, 224);
+  const column = Math.floor((editIndex - 1) / 3) + 1;
+  const row = (editIndex - 1) % 3;
+  const sourcePosition = (() => {
+    const absolute = sourceNode?.positionAbsolute;
+    if (Number.isFinite(Number(absolute?.x)) && Number.isFinite(Number(absolute?.y))) {
+      return { x: Number(absolute.x), y: Number(absolute.y) };
+    }
+    const byId = new Map(nodes.map((node) => [String(node?.id || ``), node]));
+    const visited = new Set([sourceId]);
+    let current = sourceNode;
+    let x = Number(current?.position?.x || 0);
+    let y = Number(current?.position?.y || 0);
+    while (current?.parentId) {
+      const parentId = String(current.parentId);
+      if (!parentId || visited.has(parentId)) break;
+      visited.add(parentId);
+      current = byId.get(parentId);
+      if (!current) break;
+      x += Number(current?.position?.x || 0);
+      y += Number(current?.position?.y || 0);
+    }
+    return { x, y };
+  })();
+  const sourceData = sourceNode?.data || {};
+  const runtimeData = Object.fromEntries([
+    `onCrop`,
+    `onZoom`,
+    `onEdit`,
+    `onVideoEdit`,
+    `onSendToActiveTab`,
+    `onTianjiPortraitReview`,
+    `onArkTrustedAssetReview`,
+    `onShowToast`,
+  ].flatMap((key) => typeof sourceData[key] === `function` ? [[key, sourceData[key]]] : []));
+  const nextData = wanjuanBuildEditedImageNodeData({
+    ...runtimeData,
+    label: sourceData.label,
+    originalName: sourceData.originalName,
+    arkTrustedAssetEnabled: sourceData.arkTrustedAssetEnabled,
+  }, options);
+  const editedNode = {
+    id: editedNodeId,
+    type: `imageNode`,
+    selected: false,
+    dragging: false,
+    position: {
+      x: Number(sourcePosition.x || 0) + column * (sourceWidth + 32),
+      y: Number(sourcePosition.y || 0) + row * (sourceHeight + 32),
+    },
+    style: sourceNode?.type === `imageNode` && sourceNode?.style
+      ? { ...sourceNode.style }
+      : { width: 224, height: 224 },
+    data: {
+      ...nextData,
+      sourceOrigin: `image-editor`,
+      selectedContextResources: undefined,
+      imageEditorSourceNodeId: sourceId,
+      imageEditorEditIndex: editIndex,
+    },
+  };
+  return [...nodes, editedNode];
+}
+
 const mediaValues = (value: any) => {
   if (!value || typeof value !== `object`) return [];
   return [
@@ -170,7 +258,7 @@ const mediaValues = (value: any) => {
   ].map((item) => String(item || ``).trim()).filter(Boolean);
 };
 
-/** Replace both the source node and cached context entries that explicitly point to its old image. */
+/** Legacy replacement helper retained for older project migrations and compatibility tests. */
 export function wanjuanApplyEditedImageToCanvasNodes(nodes: any[], sourceNodeId: any, options: any) {
   if (!Array.isArray(nodes)) return nodes;
   const sourceId = String(sourceNodeId || ``);

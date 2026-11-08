@@ -70,8 +70,22 @@ async function clearAllUserRuntimeData() {
   clearLegacyThemeStorage();
 }
 
+function getLegacyDocumentStorage() {
+  try {
+    const storage = window.localStorage;
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+    return storage;
+  } catch {
+    // Electron may run preload for the initial opaque document before the
+    // localhost navigation. Defer all recovery/migration work to that origin.
+    return null;
+  }
+}
+
 async function confirmLegacyUserDataChoice() {
-  const decision = window.localStorage.getItem(LEGACY_DATA_DECISION_KEY);
+  const storage = getLegacyDocumentStorage();
+  if (!storage) return false;
+  const decision = storage.getItem(LEGACY_DATA_DECISION_KEY);
   if (decision === LEGACY_DATA_DECISION_VERSION) return;
 
   clearLegacyThemeStorage();
@@ -79,10 +93,11 @@ async function confirmLegacyUserDataChoice() {
   const hasLegacyData =
     databaseNames.some((name) => name && name !== STORAGE_DB_NAME);
   if (!hasLegacyData) {
-    window.localStorage.setItem(LEGACY_DATA_DECISION_KEY, LEGACY_DATA_DECISION_VERSION);
-    return;
+    storage.setItem(LEGACY_DATA_DECISION_KEY, LEGACY_DATA_DECISION_VERSION);
+    return true;
   }
-  window.localStorage.setItem(LEGACY_DATA_DECISION_KEY, LEGACY_DATA_DECISION_VERSION);
+  storage.setItem(LEGACY_DATA_DECISION_KEY, LEGACY_DATA_DECISION_VERSION);
+  return true;
 }
 
 const THEME_STORAGE_KEYS = ["themeMode", "uiTheme", "theme", "appearanceTheme"];
@@ -168,6 +183,7 @@ module.exports = {
   listIndexedDbNames,
   clearAllIndexedDbDatabases,
   clearAllUserRuntimeData,
+  getLegacyDocumentStorage,
   confirmLegacyUserDataChoice,
   THEME_STORAGE_KEYS,
   LEGACY_THEME_VALUE_MAP,

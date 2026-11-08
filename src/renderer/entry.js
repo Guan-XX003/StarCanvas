@@ -4,6 +4,7 @@
 // 仍依赖 bundle/vendor.js（react/react-dom/@xyflow/react/zustand/lucide/localforage/dagre 的打包副本）
 // 与 bundle/rolldown-runtime.js。后续反混淆会逐步把 index.js 拆成可读模块，
 // 并将 vendor 依赖切换为 package.json 中的真实 npm 包。
+import "./lib/diagnostic-bootstrap";
 import "./styles/reactflow.css";
 import "./styles/app.css";
 import "./styles/canvas-controls-polish.css";
@@ -12,5 +13,8 @@ import "./styles/theme-controls-final.css";
 import "./styles/tianji-settings-native.css";
 import "./styles/account.css";
 import "./styles/stellar-editor.css";
+import "./styles/canvas-microinteractions.css";
+import "./styles/rounded-controls.css";
+import "./styles/agent-card-menu.css";
 import "./lib/i18n-runtime.js";
 import "./bundle/index.js";

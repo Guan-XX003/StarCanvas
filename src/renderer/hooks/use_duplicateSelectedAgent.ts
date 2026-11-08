@@ -21,12 +21,12 @@ export function use_duplicateSelectedAgent(deps: UseDuplicateSelectedAgentDeps) 
     setSelectedAgentId,
     showToast2,
   } = deps;
-  const duplicateSelectedAgent = () => {
-            if (!selectedAgent) return;
+  const duplicateSelectedAgent = (targetAgent = selectedAgent) => {
+            if (!targetAgent) return;
             let clonedAgent = {
-              ...selectedAgent,
+              ...targetAgent,
               id: `agent-${Date.now()}`,
-              name: `${selectedAgent.name || `智能体`} 副本`,
+              name: `${targetAgent.name || `智能体`} 副本`,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             };
@@ -34,7 +34,7 @@ export function use_duplicateSelectedAgent(deps: UseDuplicateSelectedAgentDeps) 
               setSelectedAgentId(clonedAgent.id),
               setAgentConversations((prevConversations) => ({
                 ...prevConversations,
-                [clonedAgent.id]: cloneBackupValue(prevConversations[selectedAgent.id] || []).map((message, index) => ({
+                [clonedAgent.id]: cloneBackupValue(prevConversations[targetAgent.id] || []).map((message, index) => ({
                   ...message,
                   id: `${clonedAgent.id}-copy-${index}-${Date.now()}`,
                 })),

@@ -13,6 +13,9 @@ const fakeElectron = {
     getVersion: () => "1.3.9-test",
   },
   safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (value) => Buffer.from(`encrypted:${value}`, "utf8"),
+    decryptStringAsync: async (buffer) => ({ result: buffer.toString("utf8").replace(/^encrypted:/, ""), shouldReEncrypt: false }),
     isEncryptionAvailable: () => true,
     encryptString: (value) => Buffer.from(`encrypted:${value}`, "utf8"),
     decryptString: (buffer) => buffer.toString("utf8").replace(/^encrypted:/, ""),

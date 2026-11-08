@@ -1,0 +1,171 @@
+/* The existing layout, theme colors and states stay intact; only control shape changes. */
+html {
+  --wj-rounded-control: 12px;
+  --wj-rounded-container: 20px;
+  --wj-rounded-pill: 999px;
+}
+
+/* Canvas: make both the toolbar and its individual buttons visibly rounded. */
+html body .wanjuan-canvas-bottom-dock[class][class] {
+  border-radius: var(--wj-rounded-container) !important;
+}
+
+html body .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button[class][class][class],
+html body .wanjuan-canvas-dock-tool-items > button.wanjuan-canvas-dock-button[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body .wanjuan-canvas-dock-popover[class][class] {
+  border-radius: var(--wj-rounded-container) !important;
+}
+
+html body .wanjuan-canvas-dock-tool-tab[class][class][class],
+html body .wanjuan-empty-canvas-action[class][class][class],
+html body .wanjuan-empty-canvas-title[class][class][class] {
+  border-radius: var(--wj-rounded-pill) !important;
+}
+
+html body .react-flow__controls[class][class] {
+  border-radius: 16px !important;
+}
+
+html body .react-flow__controls-button[class][class][class] {
+  border-radius: 10px !important;
+}
+
+/* Named controls only: ports, checkboxes, stars and connected node geometry
+   intentionally retain their existing shapes. */
+html body :is(
+  .wanjuan-settings-nav-item,
+  .wanjuan-settings-button,
+  .wanjuan-settings-chip-button,
+  .wanjuan-settings-save-button,
+  .wanjuan-settings-reset-api-button,
+  .wanjuan-settings-advanced-toggle,
+  .wanj-seedance-portrait-library-toggle,
+  .wanjuan-resource-filter-button,
+  .wanjuan-resource-filter-tab,
+  .wanjuan-node-picker-trigger,
+  .wanjuan-node-model-option,
+  .wanjuan-node-popover-option,
+  .wanjuan-theme-option,
+  .wanjuan-video-node-toolbar-option,
+  .wanjuan-seedance-api-trigger,
+  .wanjuan-tianji-mode-option,
+  .wanjuan-custom-node-mode-button,
+  .wanjuan-custom-node-secondary-button,
+  .wanjuan-custom-node-primary-soft-button,
+  .wanjuan-custom-node-primary-button,
+  .wanjuan-custom-node-danger-button,
+  .wanjuan-custom-node-run-button,
+  .wanjuan-custom-node-save-button,
+  .wanjuan-node-preset-save-button,
+  .wanjuan-tts-node-mode-button,
+  .wj-mode-tab,
+  .wanjuan-account-primary-button,
+  .wanjuan-account-primary-inline,
+  .wanjuan-account-secondary-button,
+  .wanjuan-account-outline-button,
+  .wanjuan-account-danger-button,
+  .wanjuan-account-local-button,
+  .wanjuan-topbar-notification-button
+)[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body :is(.wanjuan-resource-toolbar, .wanjuan-resource-source-filter, .wanjuan-mention-picker, .wanjuan-material-picker)
+  .wanjuan-resource-filter-group[class][class][class] {
+  border-radius: 16px !important;
+}
+
+html body .wanjuan-agent-page .wanjuan-agent-role-card[class][class][class],
+html body .wanjuan-agent-page button:not(.wanjuan-agent-role-card)[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body :is(.wanjuan-context-menu-item, .wanjuan-context-menu-row, .wanjuan-context-menu-item-plain)[class][class][class] {
+  border-radius: 10px !important;
+}
+
+/* These older Electron theme rules are highly specific. Match their scope so
+   the selected resource filters stay rounded in the real app, not just web. */
+html body .wanjuan-resource-toolbar button.wanjuan-resource-filter-button[class][class][class],
+html body .wanjuan-resource-source-filter button.wanjuan-resource-filter-button[class][class][class],
+html body .wanjuan-mention-picker button.wanjuan-resource-filter-button[class][class][class],
+html body .wanjuan-material-picker button.wanjuan-resource-filter-button[class][class][class] {
+  border-radius: var(--wj-rounded-pill) !important;
+}
+
+html body :is(.wanjuan-settings-content, .wanjuan-workspace-page) button:not([role="switch"]):not(.rounded-full)[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body :is(.wanjuan-settings-content, .wanjuan-workspace-page) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea
+) {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body :is(.wanjuan-settings-card, .wanjuan-settings-subcard, .wanjuan-settings-list-card,
+  .wanjuan-account-settings-hero, .wanjuan-account-settings-band, .wanjuan-storage-optimization-card)[class][class][class] {
+  border-radius: 16px !important;
+}
+
+html body .wanjuan-agent-composer[class][class][class] {
+  border-radius: 18px !important;
+}
+
+html body .wanjuan-agent-composer textarea {
+  border-radius: 18px 18px 0 0 !important;
+}
+
+html body .wanjuan-agent-composer > div:last-child {
+  border-radius: 0 0 18px 18px !important;
+}
+
+/* Dialogs and their controls live outside the settings page in portal layers. */
+html body :is(.wanjuan-membership-dialog, .wanjuan-account-auth-shell,
+  .wanjuan-enterprise-create-dialog, .wanjuan-project-group-panel,
+  .wanjuan-global-tasks-panel, [data-wanjuan-context-menu="true"])[class][class][class] {
+  border-radius: var(--wj-rounded-container) !important;
+}
+
+html body :is(.wanjuan-membership-dialog, .wanjuan-account-auth-shell) button:not(.rounded-full)[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body .wanjuan-account-auth-shell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body .wanjuan-account-auth-tabs button[class][class][class] {
+  border-radius: var(--wj-rounded-pill) !important;
+}
+
+html body .wanjuan-resource-toolbar button:not(.wanjuan-resource-favorite-filter):not(.wanjuan-resource-filter-button):not(.rounded-full)[class][class][class] {
+  border-radius: var(--wj-rounded-control) !important;
+}
+
+html body .wanjuan-canvas-project-toolbar > div:last-child > button:not(.wanjuan-topbar-notification-button)[class][class][class] {
+  border-radius: var(--wj-rounded-pill) !important;
+}
+
+html body :is(.wanjuan-project-group-dialog, .wanjuan-beginner-guide-coachmark)[class][class][class] {
+  border-radius: var(--wj-rounded-container) !important;
+}
+
+html body :is(.wanjuan-system-notification-dialog, .wanjuan-enterprise-dialog,
+  .wanjuan-enterprise-managed-dialog, .wanjuan-tianji-points-native-dialog,
+  .wanjuan-node-popover, .wanjuan-node-picker, .wanjuan-seedance-api-picker,
+  .wanjuan-mention-picker, .wanjuan-material-picker, .wanjuan-context-flyout-panel,
+  .wanjuan-theme-popover, .wanjuan-config-butler-help-popover)[class][class][class] {
+  border-radius: 16px !important;
+}
+
+/* Keep the already-selected dock button filled, including after pointer exit. */
+html body .wanjuan-canvas-bottom-dock > button.wanjuan-canvas-dock-button.is-active[class][class][class] {
+  background: var(--wj-control-selected-bg, var(--wj-accent, #d8dde3)) !important;
+  color: var(--wj-control-selected-text, var(--wj-accent-contrast, #171819)) !important;
+}
