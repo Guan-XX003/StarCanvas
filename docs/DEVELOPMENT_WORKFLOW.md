@@ -1,12 +1,12 @@
 # StarCanvas开发工作流
 
-## 固定地址
+## 目录约定
 
-- 主线源码：`/Users/guanpeng/Desktop/claude工作区/StarCanvas`
+- 主线源码：本 Git 仓库根目录。
 - 正式版 App：`/Applications/StarCanvas.app`
-- 正式用户数据：`/Users/guanpeng/Library/Application Support/wanjuan-ai-canvas-desktop-test`
+- 正式用户数据：Electron 当前用户的 `appData/wanjuan-ai-canvas-desktop-test`，不得在开发测试中直接写入。
 - 开发用户数据：源码目录下的 `.wanjuan-dev-user-data`
-- App 备份目录：`/Users/guanpeng/Desktop/codex工作区/`
+- App 备份目录：仓库外的带时间戳私有目录，不提交用户资料。
 - GitHub：`https://github.com/Guan-XX003/StarCanvas.git`
 
 ## 标准流程
@@ -54,6 +54,18 @@ npm run test:storage:state
 npm run test:canvas-perf
 npm run build:web
 ```
+
+包含主智能体的 macOS arm64 或 Windows x64 打包前，需要从官方 PyPI
+获取 `deepseek-harness-runtime-bin` 0.2.1rc2 对应平台的 wheel，再在源码根目录执行：
+
+```bash
+node scripts/prepare-assistant-runtime.cjs --target darwin-arm64 --wheel /absolute/path/to/macos-wheel.whl
+node scripts/prepare-assistant-runtime.cjs --target win32-x64 --wheel /absolute/path/to/windows-wheel.whl
+```
+
+脚本校验固定 wheel 与可执行文件哈希，不覆盖已有运行时；构建会携带官方许可文件，
+并在 `afterPack` 对资源再次校验。运行时文件在 `tool-runtime/deepseek-harness/` 下，
+不提交 Git。打包签名可能改变文件，正式发行前还需复核签名后的资源哈希及对应平台实机。
 
 UI 修改必须在真实运行的源码窗口中检查；媒体和大画布修改必须使用带有真实生成结果的节点测试。
 
