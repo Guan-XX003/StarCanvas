@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),fsp=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto'),ts=require('typescript');
+const old=require.extensions['.ts'];require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},fileName:file}).outputText,file);
+const {protectCanvasCustomConfigs:protect,restoreCanvasCustomConfigs:restore}=require('../src/renderer/lib/custom-node-config-transform.ts');
+const {createCustomNodeConfigVault}=require('../electron/main/custom-node-config-vault.cjs');
+const {createCustomNodeConfigService}=require('../electron/main/custom-node-config-service.cjs');
+(async()=>{const scope=await fsp.mkdtemp(path.join(os.tmpdir(),'starcanvas-transform-test-'));try{
+ const key=crypto.randomBytes(32),encrypt=async value=>{const iv=crypto.randomBytes(12),c=crypto.createCipheriv('aes-256-gcm',key,iv),body=Buffer.concat([c.update(value,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),body]).toString('base64')},decrypt=async value=>{const b=Buffer.from(value,'base64'),d=crypto.createDecipheriv('aes-256-gcm',key,b.subarray(0,12));d.setAuthTag(b.subarray(12,28));return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString('utf8')};
+ const service=createCustomNodeConfigService(createCustomNodeConfigVault({userDataPath:scope,encrypt,decrypt})),bridge={customConfigProtect:service.protect,customConfigRestore:service.restore};
+ const state={nodes:[{id:'a',type:'customNode',data:{config:{apiUrl:'https://fixture.invalid/?key=SYNTHETIC_KEY',headers:'SYNTHETIC_SECRET'}}},{id:'b',type:'textNode',data:{text:'ordinary'}}],edges:[{source:'a',target:'b'}]},before=JSON.stringify(state);
+ const saved=await protect(state,bridge);assert.doesNotMatch(JSON.stringify(saved),/SYNTHETIC_KEY|SYNTHETIC_SECRET|fixture\.invalid/);assert.equal(JSON.stringify(state),before,'live canvas is unchanged');assert.deepEqual(await restore(saved,bridge),state);assert.deepEqual(saved.edges,state.edges);
+ await assert.rejects(protect(state,{}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});await assert.rejects(restore(saved,{}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});
+ const broken=structuredClone(saved);broken.nodes[0].data.config.$starcanvasEncryptedConfig='custom-config-v1:../../private';await assert.rejects(restore(broken,bridge),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});
+ const injected=structuredClone(saved);injected.nodes[0].data.config.extra='SYNTHETIC_SECRET';await assert.rejects(restore(injected,bridge),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});
+ const calls=[];let release;const pending=new Promise(resolve=>{release=resolve});const two={nodes:[{type:'customNode',data:{config:{name:'first'}}},{type:'customNode',data:{config:{name:'original'}}}]};
+ const operation=protect(two,{customConfigProtect:async config=>{calls.push(config);if(calls.length===1)await pending;return {ok:true,reference:'custom-config-v1:'+crypto.randomUUID()}}});two.nodes[1].data.config.name='modified';release();await operation;assert.equal(calls[1].name,'original','all config snapshots precede asynchronous writes');
+ let processed=0;await assert.rejects(protect(two,{customConfigProtect:async()=>++processed===1?{ok:true,reference:'custom-config-v1:'+crypto.randomUUID()}:{ok:false}}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});assert.equal(two.nodes[0].data.config.name,'first');assert.equal(two.nodes[1].data.config.name,'modified','a partial protect failure does not mutate the live canvas');
+ const refs=['custom-config-v1:'+crypto.randomUUID(),'custom-config-v1:'+crypto.randomUUID(),'custom-config-v1:'+crypto.randomUUID()];
+ const refNodes={nodes:refs.slice(0,2).map((id,index)=>({id:String(index),type:'customNode',data:{config:{$starcanvasEncryptedConfig:id}}}))};
+ let releaseRead;const waitRead=new Promise(resolve=>{releaseRead=resolve}),reads=[];
+ const restoring=restore(refNodes,{customConfigRestore:async id=>{reads.push(id);if(reads.length===1)await waitRead;return {ok:true,config:{id}}}});
+ refNodes.nodes[1].data.config.$starcanvasEncryptedConfig=refs[2];refNodes.nodes[1].id='replaced';releaseRead();
+ const restored=await restoring;assert.deepEqual(reads,refs.slice(0,2),'all references captured before async reads');assert.equal(restored.nodes[1].id,'1');assert.equal(restored.nodes[1].data.config.id,refs[1]);
+ const invalidLater={nodes:[{type:'customNode',data:{config:{$starcanvasEncryptedConfig:refs[0]}}},{type:'customNode',data:{config:{$starcanvasEncryptedConfig:'invalid'}}}]};
+ let restoreCalls=0;await assert.rejects(restore(invalidLater,{customConfigRestore:async()=>{restoreCalls++;return {ok:true,config:{}}}}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});assert.equal(restoreCalls,0,'invalid later references fail before any vault reads');
+ await assert.rejects(protect(state,{customConfigProtect:async()=>({ok:false,code:'SYNTHETIC_SECRET'})}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});assert.equal(JSON.stringify(state),before);
+ console.log('PASS_CUSTOM_NODE_CONFIG_CANVAS_TRANSFORM');
+}finally{await fsp.rm(scope,{recursive:true,force:true});if(old)require.extensions['.ts']=old;else delete require.extensions['.ts']}})().catch(error=>{console.error(error);process.exitCode=1});

@@ -167,8 +167,8 @@ export const mediaUrlToDataUrl = async (url) => {
 	              localPath: localPathFromProjectFileUrl(url) || (wanjuanLooksLikeLocalMediaPath(url) ? url : ``),
 	            });
 	            if (result?.ok && result.dataUrl) return result.dataUrl;
-	          } catch (error) {
-	            console.warn(`Failed to read local media:`, url, error);
+	          } catch {
+	            console.warn(`Failed to read local media`);
 	          }
 	        try {
           let _r = await fetch(url);
@@ -183,8 +183,8 @@ export const mediaUrlToDataUrl = async (url) => {
               (reader.onerror = reject),
               reader.readAsDataURL(blob));
           });
-        } catch (error) {
-          return (console.warn(`Failed to convert URL to Base64:`, url, error), url);
+        } catch {
+          return (console.warn(`Failed to convert URL to Base64`), url);
         }
       };
 export const wanjuanMediaUrlToDataUrl = mediaUrlToDataUrl;

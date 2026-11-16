@@ -69,6 +69,7 @@ function createMainWindow(baseUrl) {
     }
   });
   setAutomationWindow(win);
+  require('./desktop-close-coordinator.cjs').getDesktopCloseCoordinator().registerWindow(win);
   win.once("closed", () => setAutomationWindow(null));
 
   let hasShownWindow = false;

@@ -305,6 +305,7 @@ function isProjectMigrationLocked(payload = {}) {
 }
 
 module.exports = {
+  knownMigrationDirectories,
   beginProjectMigration,
   getProjectMigration,
   listIncompleteMigrations,

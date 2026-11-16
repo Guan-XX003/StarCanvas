@@ -1,5 +1,20 @@
 Persists media payloads, writes manifests, diagnoses missing assets, relinks files, validates external bundles, and maps node fields to durable project files.
 
+Explicit operation media export reuses persistProjectAsset's existing
+forceArchiveExistingFile/content-addressed writer after scoped approval.
+application-media-output validates and privately snapshots the selected result,
+then verifies the actual archived file bytes before disclosing that file's
+path. No new project save format, arbitrary destination or overwrite is added.
+The default task metadata read path performs no media persistence. Existing
+content-store hash/copy behavior remains, including its synchronous final
+archive implementation; no large-file responsiveness guarantee is claimed.
+
+Explicit reference input reuses that verified CAS publication after exact-file
+or public-source approval. Existing media/project formats are unchanged; only
+actor/project-bound temporary IDs are exposed. Capability release/expiry does
+not delete approved durable media, and no source/capability is persisted into
+chat records. No generation upload is authorized by importing alone.
+
 Cloud project media preparation is being built separately: verified local node bindings become deduplicated opaque cloud references, and verified downloaded assets can be rebound to the destination's local paths. Main-process staging restricts files to trusted roots and snapshots them in a private temporary directory. Account-scoped transfers and metadata operations are bounded by the login lifecycle; download checks length and SHA-256. The IPC bridge is enabled by default with an explicit local kill switch; the account panel advertises sync only after an authenticated quota endpoint probe, hides it when the server does not support it, and offers retry on transient failure. The bridge permits only assets in the saved project's complete reference manifest and managed project/shared-blob roots, runs the shared safety guard on project state, and writes downloaded assets via exclusive content-addressed publication without overwriting existing files. It exposes no credentials or arbitrary filesystem root. The account panel coordinates saved-project upload and restoration as a new project using the existing storage write barrier and rollback transaction. Synthetic tests cover idempotent retries, asset validation, and preservation of the original project. Non-bound asset forms, production data and backup, final native UI end-to-end verification and rollout remain required before release.
 
 Legacy IndexedDB-backed `*Ref` media can be found recursively, checked against any hydrated value and converted into opaque hash references. The main-process bridge stages renderer-provided bytes privately, checks their SHA-256 and account lifecycle, and transfers them without accepting renderer filesystem paths. Restore verifies downloaded bytes, writes fresh destination-project references and data alongside the project in the existing rollback transaction. Unsupported formats fail closed rather than pretending to sync.

@@ -10,9 +10,9 @@ const {
 
 const APP_VERSION = (() => {
   try {
-    return require("../../package.json").version || "1.4.8";
+    return require("../../package.json").version || "1.4.9";
   } catch {
-    return "1.4.8";
+    return "1.4.9";
   }
 })();
 
@@ -53,6 +53,7 @@ function createChromeShim() {
     storage: {
       local: {
         get: (keys, cb) => callbackOrPromise(cb, getDesktopStorageItems(keys)),
+        getWithStatus: (keys, cb) => callbackOrPromise(cb, getDesktopStorageItemsWithStatus(keys)),
         set: (items, cb) => {
           return callbackOrPromise(cb, setDesktopStorageItems(items || {}).then(() => undefined));
         },
@@ -241,7 +242,7 @@ module.exports = {
   exposeGlobal
 };
 
-var { getDesktopStorageItems, setDesktopStorageItems, removeDesktopStorageItems } = require("./storage.cjs");
+var { getDesktopStorageItems, getDesktopStorageItemsWithStatus, setDesktopStorageItems, removeDesktopStorageItems } = require("./storage.cjs");
 var { clearDesktopStorage } = require("./project-safety.cjs");
 var {
   asyncCallback,

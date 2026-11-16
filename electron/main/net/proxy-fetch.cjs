@@ -186,9 +186,11 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
     let req;
     let timeoutId = null;
     let responseStream;
+    let abortListener;
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = null;
+      if(abortListener){options.signal?.removeEventListener('abort',abortListener);abortListener=null;}
     };
     const finish = (error, result) => {
       if (settled) return;
@@ -197,6 +199,9 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
       if (error) reject(markProxyTransportError(error, requestCommitted));
       else resolve(result);
     };
+    // Electron IncomingMessage is an EventEmitter, not Node's Readable: its
+    // public contract has no destroy(). Settle once, then abort ClientRequest.
+    const stopTransport=error=>{if(settled)return;finish(error);try{req?.abort();}catch{};if(typeof responseStream?.destroy==='function')try{responseStream.destroy(error);}catch{}};
 
     try {
       const method = String(options.method || "GET").toUpperCase();
@@ -238,8 +243,16 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
       req.on("response", (res) => {
         responseStream = res;
         const chunks = [];
+        let streamSize=0;
+        if(options.onResponse)try{options.onResponse({status:Number(res.statusCode||200),statusText:String(res.statusMessage||'OK'),headers:serializeElectronNetHeaders(res.headers)});}catch(error){stopTransport(error);return;}
         res.on("data", (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          if(settled)return;
+          const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);
+          if(options.onChunk){
+            streamSize+=bytes.length;
+            if(streamSize>8*1024*1024){stopTransport(new Error('Streaming response exceeded limit'));return;}
+            try{for(let offset=0;offset<bytes.length;offset+=65536)options.onChunk(bytes.subarray(offset,offset+65536));}catch(error){stopTransport(error);}
+          }else chunks.push(bytes);
         });
         res.on("end", () => {
           finish(null, {
@@ -252,33 +265,28 @@ function proxyHttpRequestViaElectronNet(url, options = {}) {
         res.on("error", (error) => {
           finish(error);
         });
+        if(options.onChunk){res.on('aborted',()=>finish(new Error('Streaming response interrupted')));res.on('close',()=>{if(!settled)finish(new Error('Streaming response interrupted'));});}
       });
       req.on("error", (error) => {
         finish(error);
       });
       timeoutId = setTimeout(() => {
         const timeoutError = new Error(`Proxy fetch request timeout after ${options.requestTimeout || 120000}ms`);
-        if (responseStream && !responseStream.destroyed) responseStream.destroy(timeoutError);
-        if (req) req.abort();
-        finish(timeoutError);
+        stopTransport(timeoutError);
       }, Number(options.requestTimeout || 120000));
 
       if (options.signal) {
         const onAbort = () => {
           const abortError = new Error("The operation was aborted.");
           abortError.name = "AbortError";
-          if (responseStream && !responseStream.destroyed) responseStream.destroy(abortError);
-          if (req) req.abort();
-          finish(abortError);
+          stopTransport(abortError);
         };
         if (options.signal.aborted) {
           onAbort();
           return;
         }
+        abortListener=onAbort;
         options.signal.addEventListener("abort", onAbort, { once: true });
-        req.on("close", () => {
-          options.signal.removeEventListener("abort", onAbort);
-        });
       }
 
       if (body && body.length > 0) {
@@ -389,6 +397,7 @@ async function proxyHttpRequest(url, options = {}) {
     return await proxyHttpRequestViaElectronNet(url, options);
   } catch (error) {
     if (options.signal?.aborted || error?.name === "AbortError") throw error;
+    if(options.onChunk)throw error; // A partial or paid stream is never replayed on another transport.
     if (!canFallbackProxyTransport(options.method, error)) {
       appendDesktopLog("proxy-http-electron-net-no-replay", {
         url,

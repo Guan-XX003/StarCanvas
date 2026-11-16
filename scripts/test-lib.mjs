@@ -3,14 +3,20 @@
 //
 // 运行：npm run test:lib
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const outDir = mkdtempSync(join(tmpdir(), "wj-lib-"));
+const buildRoot = mkdtempSync(join(tmpdir(), "wj-lib-"));
+const outDir = join(buildRoot, "src/renderer/lib");
+mkdirSync(outDir, { recursive: true });
+// Preserve the source module's actual relative import, rather than rewriting
+// it or depending on a shared module accidentally existing above OS temp.
+mkdirSync(join(buildRoot, "electron/shared"), { recursive: true });
+copyFileSync(join(root, "electron/shared/application-task-data.mjs"), join(buildRoot, "electron/shared/application-task-data.mjs"));
 
 function compile() {
   execFileSync(
@@ -42,6 +48,8 @@ function compile() {
       join(root, "src/renderer/lib/account-records.ts"),
       join(root, "src/renderer/lib/app-notifications.ts"),
       join(root, "src/renderer/lib/config-butler.ts"),
+      join(root, "src/renderer/lib/butler-protocol-safety.ts"),
+      join(root, "src/renderer/lib/assistant-onboarding.ts"),
       join(root, "src/renderer/lib/jixin-catalog.ts"),
       join(root, "src/renderer/lib/tianji-api.ts"),
       join(root, "src/renderer/lib/tianji-local-previews.ts"),
@@ -80,16 +88,18 @@ async function run() {
   const { wanjuanBuildGeminiImageTransport } = await import(pathToFileURL(join(outDir, "gemini-image.js")).href);
   const { normalizeVideoAspectRatioValue, normalizeVideoSizeValue } = await import(pathToFileURL(join(outDir, "video-aspect-ratio.js")).href);
   const { applyRunScopedStateUpdate, compactGlobalTasks, failGlobalTaskRefresh, indexGlobalTasks, supersedeActiveNodeTasks, updateTaskRunningProgress } = await import(pathToFileURL(join(outDir, "global-tasks.js")).href);
-  const { collectTaskCredentialConfigs, isCurrentSettingsSave, mergeGlobalConfigApiConfigs, replaceGlobalConfigApiConfigs, resolveTaskApiCredential, resolveTaskPollUrl } = await import(pathToFileURL(join(outDir, "global-config.js")).href);
+  const { collectTaskCredentialConfigs, isCurrentSettingsSave, mergeGlobalConfigApiConfigs, replaceGlobalConfigApiConfigs, resolveSeedanceTaskPollUrl, resolveTaskApiCredential, resolveTaskPollUrl } = await import(pathToFileURL(join(outDir, "global-config.js")).href);
   const { WanJuanShouldAutoPreferredModel } = await import(pathToFileURL(join(outDir, "model-selection.js")).href);
   const membershipBenefits = await import(pathToFileURL(join(outDir, "membership-benefits.js")).href);
   const managedRelay = await import(pathToFileURL(join(outDir, "managed-relay.js")).href);
   const accountRecords = await import(pathToFileURL(join(outDir, "account-records.js")).href);
   const appNotifications = await import(pathToFileURL(join(outDir, "app-notifications.js")).href);
+  const assistantOnboarding = await import(pathToFileURL(join(outDir, "assistant-onboarding.js")).href);
   const videoTask = await import(pathToFileURL(join(outDir, "video-task.js")).href);
   const videoParameterMode = await import(pathToFileURL(join(outDir, "video-parameter-mode.js")).href);
   const nodeRuntime = await import(pathToFileURL(join(outDir, "node-runtime-contract.js")).href);
   const configButler = await import(pathToFileURL(join(outDir, "config-butler.js")).href);
+  const butlerSafety = await import(pathToFileURL(join(outDir, "butler-protocol-safety.js")).href);
   const { WANJUAN_JIXIN_BUILTIN_GLOBAL_CONFIG_ID, WANJUAN_JIXIN_BUILTIN_IMAGE_MODELS, WANJUAN_JIXIN_BUILTIN_IMAGE_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_TEXT_MODELS, WANJUAN_JIXIN_BUILTIN_TEXT_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_UNIFIED_VIDEO_MODELS, WANJUAN_JIXIN_BUILTIN_PROTOCOLS, WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS, WANJUAN_JIXIN_DEFAULT_API_CONFIG_ID, wanjuanApplyJixinBuiltinProtocolPatch, wanjuanBuildJixinBuiltinBasePatch, wanjuanMergeJixinVideoProtocolDefaults, wanjuanMigrateJixinBuiltinCatalog, wanjuanSyncJixinBuiltinStoredGlobalConfig } = await import(pathToFileURL(join(outDir, "jixin-catalog.js")).href);
   const {
     WANJUAN_TIANJI_DEFAULT_BASE_URL,
@@ -383,6 +393,14 @@ async function run() {
   };
   const englishStartupStatus = startupReadiness.inspectRendererStartupDocument(startupDocument, startupWindow);
   check("startup readiness is structural and language independent", englishStartupStatus.hasMainNav && startupReadiness.isRendererBaseReady(englishStartupStatus), true);
+  for (const [bootState, expected] of [["true", true], ["stable-shell-fallback", true], ["error", false], [undefined, false]]) {
+    let removedSplash = false, removedClass = false;
+    const fakeDocument = {
+      documentElement: {dataset:{wanjuanBootReady:bootState},classList:{remove:value=>{removedClass = value === "wanjuan-booting";}}},
+      getElementById:id=>id === "wanjuan-boot-splash" ? {remove:()=>{removedSplash = true;}} : null
+    };
+    check(`confirmed boot recovery only clears a ready splash (${bootState})`, [startupReadiness.clearConfirmedReadySplash(fakeDocument),removedClass,removedSplash], [expected,expected,expected]);
+  }
   const startupLifecycle = startupReadiness.createRendererStartupLifecycle();
   const firstStartup = startupLifecycle.beginNavigation();
   check("first startup reveal is armed", startupLifecycle.beginReveal(), firstStartup);
@@ -830,6 +848,7 @@ async function run() {
     allExtractedImages: ["https://cdn.example.com/frame-1.jpg"],
     apiConfigs: [{ id: "runtime-only" }],
     modelProtocolRegistry: { runtime: true },
+    audioApiKey: "SYNTHETIC_RUNTIME_AUDIO_KEY",
     wanjuanRenderMode: "lite",
     wanjuanRenderZoom: 0.5,
     arkTrustedAssetEnabled: true,
@@ -989,6 +1008,40 @@ async function run() {
 
   // config butler: tool hints must specialize per model, and fallback/invalid
   // results must not be selected for import automatically.
+  const safetyTestBase = "https://gateway.example.com/v1";
+  const normalizedGood = configButler.finalizeButlerProtocolConfig(configButler.normalizeProtocolConfig({category:"video",requestType:"openai-video",submitPath:"/v1/videos",pollPath:"/v1/videos/{taskId}"}, "video"), {category:"video",modelName:"test-video",apiUrl:safetyTestBase});
+  const normalizedBad = configButler.finalizeButlerProtocolConfig(configButler.normalizeProtocolConfig({category:"video",requestType:"json-video",submitPath:"/v1/video/create",pollPath:"https://evil.example/video/{taskId}"}, "video"), {category:"video",modelName:"test-video",apiUrl:safetyTestBase});
+  check("configButler safety accepts normalized same-origin video", butlerSafety.validateButlerProtocolSafety(normalizedGood, safetyTestBase).ok, true);
+  check("configButler safety rejects normalized cross-origin polling", butlerSafety.validateButlerProtocolSafety(normalizedBad, safetyTestBase).ok, false);
+  const explicitVideoRoute = configButler.finalizeButlerProtocolConfig({category:"video",requestType:"openai-video",submitPath:"/v1/videos",pollPath:"/gateway/tasks/{taskId}",contentPath:"/gateway/content/{taskId}"}, {category:"video",modelName:"sora-custom",apiUrl:safetyTestBase});
+  check("configButler preserves explicit custom video polling path", explicitVideoRoute.pollPath, "/gateway/tasks/{taskId}");
+  check("configButler preserves explicit custom video content path", explicitVideoRoute.contentPath, "/gateway/content/{taskId}");
+  const unknownPolling = configButler.finalizeButlerProtocolConfig({category:"video",requestType:"openai-video",submitPath:"/custom/create"}, {category:"video",modelName:"sora-custom",apiUrl:safetyTestBase});
+  check("configButler never invents polling for a custom submit path", Boolean(unknownPolling.pollPath), false);
+  check("configButler rejects a video protocol missing custom polling", configButler.validateButlerProtocolConfig(unknownPolling,{category:"video"}).ok, false);
+  const unknownJsonPolling = configButler.finalizeButlerProtocolConfig({category:"video",requestType:"json-video",submitPath:"/gateway/create"}, {category:"video",modelName:"custom",apiUrl:safetyTestBase});
+  check("configButler does not guess JSON polling for a custom submit path", Boolean(unknownJsonPolling.pollPath), false);
+  check("configButler rejects JSON video missing its custom polling", configButler.validateButlerProtocolConfig(unknownJsonPolling,{category:"video"}).ok, false);
+  const foreignVideoRoute = configButler.finalizeButlerProtocolConfig({category:"video",requestType:"openai-video",submitPath:"/v1/videos",pollPath:"https://evil.example/video/{taskId}"}, {category:"video",modelName:"sora-custom",apiUrl:safetyTestBase});
+  check("configButler safety can see explicit cross-origin poll after normalization", butlerSafety.validateButlerProtocolSafety(foreignVideoRoute, safetyTestBase).ok, false);
+  const explicitVeo = {modelName:"veo-portrait",category:"video",protocol:{name:"documented",config:{category:"video",requestType:"json-video",submitPath:"/v2/create",pollPath:"/v2/jobs/{taskId}",fieldValueTypes:{duration:"number"}}}};
+  const veoOptions = {modelName:"veo-portrait",category:"video",apiUrl:"https://aigc.x-see.cn",preserveExplicitProtocol:true};
+  const veoAssistantResult = configButler.validateAndRepairConfigButlerResult(explicitVeo, veoOptions).protocol.config;
+  check("assistant retains the documented Veo submit route", veoAssistantResult.submitPath, "/v2/create");
+  check("assistant retains the documented Veo polling route", veoAssistantResult.pollPath, "/v2/jobs/{taskId}");
+  check("assistant retains the documented Veo request type", veoAssistantResult.requestType, "json-video");
+  check("assistant retains explicit video field type", veoAssistantResult.fieldValueTypes.duration, "number");
+  const reappliedVeo = configButler.finalizeButlerProtocolConfig(veoAssistantResult, {...veoOptions,preserveExplicitProtocol:veoAssistantResult.__wanjuanPreferExplicitProtocol === true});
+  check("applying assistant result does not overwrite its polling route", reappliedVeo.pollPath, "/v2/jobs/{taskId}");
+  const legacyVeo = configButler.validateAndRepairConfigButlerResult(explicitVeo, {...veoOptions,preserveExplicitProtocol:false}).protocol.config;
+  check("legacy Veo compatibility behavior remains in place", legacyVeo.pollPath, "/v1/videos/{taskId}");
+  const safeCurl = assistantOnboarding.redactAssistantDocumentation('curl https://api.example.com/chat -H "Authorization: Bearer synthetic-secret" -d \'{"model":"demo"}\'');
+  const parsedCurl = configButler.extractButlerCurlExamples(safeCurl)[0];
+  check("configButler parses redacted one-line curl as POST", parsedCurl?.method, "POST");
+  check("configButler retains request fields after redaction", parsedCurl?.bodyKeys, ["model"]);
+  check("configButler never exposes redacted key", safeCurl.includes("synthetic-secret"), false);
+  check("configButler recognizes data equals", configButler.extractButlerCurlExamples("curl https://api.example.com --data='{\"model\":\"demo\"}'")[0]?.method, "POST");
+  check("configButler honors curl --get", configButler.extractButlerCurlExamples("curl --get https://api.example.com -d 'q=one'")[0]?.method, "GET");
   const butlerContext = configButler.buildConfigButlerToolContext(
     "POST /v1/videos\nPOST /v1/chat/completions",
     "https://docs.example.com",
@@ -1259,6 +1312,9 @@ async function run() {
     }),
     "https://original.example.com/jobs/remote-123"
   );
+  check("older video refresh avoids duplicate v1", resolveTaskPollUrl({ baseUrl: "https://relay.example.com/v1", taskId: "abc" }), "https://relay.example.com/v1/videos/abc");
+  check("Ark Seedance refresh includes native API prefix", resolveSeedanceTaskPollUrl("https://ark.cn-beijing.volces.com", "abc"), "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/abc");
+  check("gateway Seedance refresh keeps gateway path", resolveSeedanceTaskPollUrl("https://relay.example.com/v1", "abc"), "https://relay.example.com/v1/contents/generations/tasks/abc");
   check("older async settings save cannot overwrite a newer config", isCurrentSettingsSave(12, 11), false);
   check("latest async settings save may commit", isCurrentSettingsSave(12, 12), true);
   check(
@@ -1434,10 +1490,10 @@ async function run() {
   const refreshFailureTasks = failGlobalTaskRefresh(
     [{ id: "remote-video", status: "running", progress: 87 }],
     "remote-video",
-    "任务查询认证失败（401）"
+    "HTTP 429 provider reported failure"
   );
-  check("401 refresh failure stops automatic task polling", refreshFailureTasks[0].status, "failed");
-  check("401 refresh failure replaces stale progress error", refreshFailureTasks[0].errorMsg, "任务查询认证失败（401）");
+  check("explicit failure helper records the supplied terminal state", refreshFailureTasks[0].status, "failed");
+  check("explicit failure helper retains the supplied failure text", refreshFailureTasks[0].errorMsg, "HTTP 429 provider reported failure");
   const indexedTasks = Array.from({ length: 1200 }, (_, index) => ({
     id: `indexed-task-${index}`,
     projectId: `p${index % 3}`,
@@ -2228,7 +2284,7 @@ async function run() {
   check("suno.url", suno.sunoUrl("https://x.newapi.com/", "/suno/submit/music"), "https://x.newapi.com/suno/submit/music");
 
   console.log(`\n结果：${pass} 通过，${fail} 失败`);
-  rmSync(outDir, { recursive: true, force: true });
+  rmSync(buildRoot, { recursive: true, force: true });
   process.exit(fail ? 1 : 0);
 }
 

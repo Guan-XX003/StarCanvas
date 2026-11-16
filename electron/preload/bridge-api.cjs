@@ -74,6 +74,54 @@ function isSafeExternalUrl(rawUrl) {
 }
 
 exposeGlobal("wanjuanDesktop", {
+  customConfigProtect: async (config) => ipcRenderer.invoke('wanjuan:custom-config-protect', {config}),
+  customConfigRestore: async (reference) => ipcRenderer.invoke('wanjuan:custom-config-restore', {reference}),
+  applicationOperationList: () => ipcRenderer.invoke('wanjuan:application-operation-list'),
+  applicationOperationApprove: (id,revision) => ipcRenderer.invoke('wanjuan:application-operation-approve',{id,revision}),
+  applicationOperationReject: (id,revision) => ipcRenderer.invoke('wanjuan:application-operation-reject',{id,revision}),
+  applicationOperationDismiss: (id) => ipcRenderer.invoke('wanjuan:application-operation-dismiss',{id}),
+  applicationOperationConsume: (id,nonce) => ipcRenderer.invoke('wanjuan:application-operation-consume',{id,nonce}),
+  applicationOperationSubmitInternal: (owner,request,selectionVersion) => ipcRenderer.invoke('wanjuan:application-operation-submit-internal',{owner,request,selectionVersion}),
+  applicationOperationReadInternal: (owner,id) => ipcRenderer.invoke('wanjuan:application-operation-read-internal',{owner,id}),
+  applicationOperationApproveInternal: (owner,id,revision) => ipcRenderer.invoke('wanjuan:application-operation-approve-internal',{owner,id,revision}),
+  applicationOperationCancelInternal: (owner,id) => ipcRenderer.invoke('wanjuan:application-operation-cancel-internal',{owner,id}),
+  onApplicationOperationsChanged: (callback) => {
+    const listener=()=>callback();ipcRenderer.on('wanjuan:application-operations-changed',listener);
+    return ()=>ipcRenderer.removeListener('wanjuan:application-operations-changed',listener);
+  },
+  assistantStatus: async () => ipcRenderer.invoke('wanjuan:assistant-status'),
+  assistantAccountStart: async () => ipcRenderer.invoke('wanjuan:assistant-account-start'),
+  assistantAccountStatus: async () => ipcRenderer.invoke('wanjuan:assistant-account-status'),
+  assistantAccountCancel: async () => ipcRenderer.invoke('wanjuan:assistant-account-cancel'),
+  assistantAccountClear: async () => ipcRenderer.invoke('wanjuan:assistant-account-clear'),
+  assistantCheckConnection: async () => ipcRenderer.invoke('wanjuan:assistant-check-connection'),
+  assistantSetKey: async (key) => ipcRenderer.invoke('wanjuan:assistant-set-key', {key}),
+  assistantClearKey: async () => ipcRenderer.invoke('wanjuan:assistant-clear-key'),
+  assistantSend: async (text, context) => ipcRenderer.invoke('wanjuan:assistant-send', {text, context}),
+  assistantCancel: async () => ipcRenderer.invoke('wanjuan:assistant-cancel'),
+  assistantReset: async () => ipcRenderer.invoke('wanjuan:assistant-reset'),
+  assistantAnalyzeConfig: async (prompt) => ipcRenderer.invoke('wanjuan:assistant-analyze-config', {prompt}),
+  assistantWorkspaceList: async () => ipcRenderer.invoke('wanjuan:assistant-workspace-list'),
+  assistantWorkspaceCreateSession: async (input) => ipcRenderer.invoke('wanjuan:assistant-workspace-create-session', input),
+  assistantWorkspaceReadSession: async (id) => ipcRenderer.invoke('wanjuan:assistant-workspace-read-session', {id}),
+  assistantWorkspaceProgress: async (id, requestId, afterRevision) => ipcRenderer.invoke('wanjuan:assistant-workspace-progress', {id,requestId,afterRevision}),
+  assistantWorkspacePatchSession: async (id, patch, revision) => ipcRenderer.invoke('wanjuan:assistant-workspace-patch-session', {id,patch,revision}),
+  assistantWorkspaceChangeSession: async (id, patch, revision) => ipcRenderer.invoke('wanjuan:assistant-workspace-change-session', {id,patch,revision}),
+  assistantWorkspaceSelectSession: async (id) => ipcRenderer.invoke('wanjuan:assistant-workspace-select-session', {id}),
+  assistantWorkspaceCreateRole: async (configuration) => ipcRenderer.invoke('wanjuan:assistant-workspace-create-role', {configuration}),
+  assistantWorkspaceReadRole: async (id) => ipcRenderer.invoke('wanjuan:assistant-workspace-read-role', {id}),
+  assistantWorkspacePatchRole: async (id,configuration,revision) => ipcRenderer.invoke('wanjuan:assistant-workspace-patch-role', {id,configuration,revision}),
+  assistantWorkspaceAddAttachment: async (id,attachment) => ipcRenderer.invoke('wanjuan:assistant-workspace-add-attachment', {id,attachment}),
+  assistantWorkspaceReadTurnAttachments: async (id,turnId) => ipcRenderer.invoke('wanjuan:assistant-workspace-read-turn-attachments', {id,turnId}),
+  assistantWorkspacePreviewAttachment: async (id,assetId) => ipcRenderer.invoke('wanjuan:assistant-workspace-preview-attachment', {id,assetId}),
+  assistantWorkspaceExportBackup: async input => ipcRenderer.invoke('wanjuan:assistant-workspace-export-backup', input),
+  assistantWorkspaceImportBackup: async input => ipcRenderer.invoke('wanjuan:assistant-workspace-import-backup', input),
+  assistantWorkspaceImportLegacyRole: async (configuration,conversation) => ipcRenderer.invoke('wanjuan:assistant-workspace-import-legacy-role', {configuration,conversation}),
+  assistantWorkspaceBeginCustomTurn: async (id,text) => ipcRenderer.invoke('wanjuan:assistant-workspace-begin-custom-turn', {id,text}),
+  assistantWorkspaceCustomRunning: async (id,turnId) => ipcRenderer.invoke('wanjuan:assistant-workspace-custom-running', {id,turnId}),
+  assistantWorkspaceCompleteCustomTurn: async (id,turnId,result) => ipcRenderer.invoke('wanjuan:assistant-workspace-complete-custom-turn', {id,turnId,text:result?.text,code:result?.code}),
+  assistantWorkspaceSend: async (id, text, context, requestId) => ipcRenderer.invoke('wanjuan:assistant-workspace-send', {id,text,context,requestId}),
+  assistantWorkspaceCancel: async (id) => ipcRenderer.invoke('wanjuan:assistant-workspace-cancel', {id}),
   checkForUpdates: async () => ipcRenderer.invoke("wanjuan:check-for-updates"),
   openExternal: async (url) => {
     try {
@@ -304,6 +352,14 @@ exposeGlobal("wanjuanDesktop", {
 	      return { ok: false, error: String(error?.message || error) };
 	    }
 	  },
+	  proxyFetchStream: async(payload={},onFrame)=>{
+      if(typeof onFrame!=='function')return {ok:false,error:'Streaming receiver unavailable'};
+      const request=require('./fetch-proxy.cjs').buildDesktopProxyFetchBridgePayload(payload);
+      const listener=(_event,part)=>{if(part?.requestId!==request.requestId)return;try{onFrame(part);}catch{ipcRenderer.send('wanjuan:abort-fetch',request.requestId);}};
+      ipcRenderer.on('wanjuan:proxy-fetch-stream',listener);
+      try{return await ipcRenderer.invoke('wanjuan:proxy-fetch',{...request,streamResponse:true});}
+      finally{ipcRenderer.removeListener('wanjuan:proxy-fetch-stream',listener);}
+    },
 	  proxyFetch: async (payload = {}) => {
     const nextPayload = buildDesktopProxyFetchBridgePayload(payload);
     // 透传 AbortSignal，取消时通过 wanjuan:abort-fetch 中断主进程请求（见 fetch-proxy.cjs）。

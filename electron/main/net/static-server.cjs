@@ -100,7 +100,8 @@ function createStaticServer() {
         reject(new Error("Unable to bind desktop static server"));
         return;
       }
-      app.on("before-quit", () => server.close());
+      // before-quit may be cancelled while local saves are still pending.
+      app.on("will-quit", () => server.close());
       resolve(`http://127.0.0.1:${address.port}`);
     });
   });

@@ -1,0 +1,32 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),ts=require('typescript');
+for(const ext of ['.ts','.tsx'])require.extensions[ext]=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX},fileName:file}).outputText,file);
+const {use_sanitizeProjectCanvasStateForExport}=require('../src/renderer/hooks/use_sanitizeProjectCanvasStateForExport.ts');
+const {use_sanitizeProjectNodeDataForExport}=require('../src/renderer/hooks/use_sanitizeProjectNodeDataForExport.ts');
+const {use_buildProjectLocalforageExportPayload}=require('../src/renderer/hooks/use_buildProjectLocalforageExportPayload.ts');
+const {use_collectSelectedLocalforageBackup}=require('../src/renderer/hooks/use_collectSelectedLocalforageBackup.ts');
+const {backupExportFailureMessage}=require('../src/renderer/lib/backup-export-errors.ts');
+const {use_$t}=require('../src/renderer/hooks/use_$t.ts');
+(async()=>{
+ const ref='custom-config-v1:11111111-1111-4111-8111-111111111111',protectedState={nodes:[{id:'fixture',type:'customNode',data:{config:{$starcanvasEncryptedConfig:ref}}}],edges:[]};
+ const sanitizeNode=use_sanitizeProjectNodeDataForExport({EXPORT_INLINE_MEDIA_FIELDS:[]}).sanitizeProjectNodeDataForExport;
+ const sanitize=use_sanitizeProjectCanvasStateForExport({sanitizeProjectNodeDataForExport:sanitizeNode}).sanitizeProjectCanvasStateForExport;
+ assert.throws(()=>sanitize(protectedState),{code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'});
+ const ordinary={nodes:[{type:'customNode',data:{config:{headers:'USER_MANUAL'}}}],edges:[]};
+ assert.throws(()=>sanitize(ordinary),{code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'},'live plaintext config also requires password encryption');
+ assert.deepEqual(sanitize(ordinary,{allowLocalConfigReferences:true}),ordinary,'encrypted export preserves manual configurations without mutation');
+ let writes=0;global.prepareProjectMediaStateForPersistence=async state=>{writes++;return state};
+ const build=use_buildProjectLocalforageExportPayload({externalizeProjectCanvasState:async state=>state,extractProjectAssetRefs:()=>[],getProjectCanvasStorageKey:id=>`canvas-${id}`,sanitizeProjectCanvasStateForExport:sanitize}).buildProjectLocalforageExportPayload;
+ await assert.rejects(build({'canvas-a':protectedState},['a']),{code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'});assert.equal(writes,0,'nonportable references are blocked before asset work');
+ const factory=getItem=>use_collectSelectedLocalforageBackup({localforageModule:{default:{getItem}},extractProjectAssetRefs:()=>[],getDesktopProjectMirrorStorageKey:id=>`mirror-${id}`,getProjectCanvasStorageKey:id=>`canvas-${id}`,projects:[]}).collectSelectedLocalforageBackup;
+ const unavailable=factory(async()=>{throw Error('SYNTHETIC_PRIVATE')});
+ await assert.rejects(unavailable(['projects'],{projectIds:['a']},{}),{code:'PROJECT_BACKUP_READ_UNAVAILABLE'});
+ assert.deepEqual(await unavailable(['projects'],{projectIds:['a']},{'mirror-a':ordinary}),{'canvas-a':ordinary},'available mirror remains a valid fallback');
+ await assert.rejects(unavailable(['projects'],{projectIds:['a']},{'mirror-a':{bad:'data'}}),{code:'PROJECT_BACKUP_READ_UNAVAILABLE'},'malformed mirror cannot masquerade as a recovered canvas');
+ assert.deepEqual(await factory(async()=>null)(['projects'],{projectIds:['a']},{}),{},'a successful empty read remains allowed');
+ for(const lang of ['zh-CN','zh-TW','en-US']){assert.doesNotMatch(backupExportFailureMessage({code:'PROJECT_BACKUP_READ_UNAVAILABLE',message:'SYNTHETIC_PRIVATE'},lang),/SYNTHETIC_PRIVATE/);assert.notEqual(backupExportFailureMessage({code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'},lang),backupExportFailureMessage({},lang));}
+ let saves=0;const notices=[];global.window={wanjuanDesktop:{saveDownload:async()=>{saves++;return {ok:true}}}};global.wanjuanI18nRuntime={getLanguage:()=> 'en-US'};
+ const exportAction=use_$t({BACKUP_MODULE_LABELS:{projects:'Projects'},buildBackupPayload:async()=>{throw Object.assign(Error('SYNTHETIC_PRIVATE'),{code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'})},collectExternalUploadProjectAssetFiles:()=>[],collectSelectedLocalforageBackup:async()=>({}),compactBackupPortableAssets:x=>x,getBackupChromeStorageKeys:()=>[],readChromeStorageSnapshot:async()=>({}),showToast2:text=>notices.push(text),projects:[]}).$t;
+ const previousError=console.error;console.error=()=>{};try{await exportAction(['projects'])}finally{console.error=previousError}assert.equal(saves,0);assert.match(notices[0],/Export stopped/);assert.doesNotMatch(notices[0],/SYNTHETIC_PRIVATE/);
+ delete global.window;delete global.wanjuanI18nRuntime;
+ delete global.prepareProjectMediaStateForPersistence;console.log('PASS_BACKUP_EXPORT_FAIL_CLOSED');
+})().catch(error=>{console.error(error);process.exitCode=1});

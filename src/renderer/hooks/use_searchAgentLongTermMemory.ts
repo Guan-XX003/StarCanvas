@@ -3,6 +3,7 @@
  */
 import { useCallback, useMemo } from "react";
 import { getMem0Headers } from "../lib/app-root-helpers";
+import {assistantMemoryIdentity} from '../lib/assistant-memory-scope';
 
 interface UseSearchAgentLongTermMemoryDeps {
   extractMem0Results: any;
@@ -14,15 +15,16 @@ export function use_searchAgentLongTermMemory(deps: UseSearchAgentLongTermMemory
     extractMem0Results,
     normalizeMem0BaseUrl,
   } = deps;
-  const searchAgentLongTermMemory = async (agent, query) => {
+  const searchAgentLongTermMemory = async (agent, query, options:{sessionId?:string;signal?:AbortSignal} = {}) => {
           if (!agent?.memoryEnabled) return ``;
           let baseUrl = normalizeMem0BaseUrl(agent.memoryBaseUrl || ``);
           if (!baseUrl || !String(query || ``).trim()) return ``;
           let userId = String(agent.memoryUserId || `default-user`).trim() || `default-user`,
-            agentId = String(agent.id || `agent-default`).trim() || `agent-default`,
+            agentId = assistantMemoryIdentity(agent,options.sessionId),
             topK = Math.min(20, Math.max(1, Number.parseInt(agent.memoryTopK || `6`, 10) || 6)),
             headers = getMem0Headers(agent.memoryApiKey),
             response = await fetch(`${baseUrl}/search`, {
+              signal:options.signal,
               method: `POST`,
               headers: headers,
               body: JSON.stringify({
@@ -34,6 +36,7 @@ export function use_searchAgentLongTermMemory(deps: UseSearchAgentLongTermMemory
             });
           if (!response.ok && (response.status === 404 || response.status === 405)) {
             response = await fetch(`${baseUrl}/v3/memories/search/`, {
+              signal:options.signal,
               method: `POST`,
               headers: headers.Authorization || headers[`X-API-Key`] ?
                 {

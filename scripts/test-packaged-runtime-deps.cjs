@@ -58,6 +58,9 @@ test("afterPack preserves platform copying then checks the actual platform ASAR"
         if (name === "./copy-platform-tool-runtime.cjs") return async () => calls.push("copy");
         if (name === "./packaged-resource-root.cjs") return require("./packaged-resource-root.cjs");
         if (name === "./copy-macos-account-keychain.cjs") return () => calls.push("keychain");
+        if (name === "./verify-packaged-assistant-runtime.cjs") return {
+          verifyPackagedAssistantRuntime() { calls.push("assistant"); return { supported: true, target: "synthetic" }; },
+        };
         if (name === "./verify-packaged-runtime-deps.cjs") return {
           verifyPackagedRuntimeDeps(file) { calls.push(file); return { dependencies: [] }; },
         };
@@ -67,7 +70,8 @@ test("afterPack preserves platform copying then checks the actual platform ASAR"
     await module.exports({ electronPlatformName: platform, appOutDir: "/synthetic/output" });
     assert.equal(calls[0], "copy");
     assert.equal(calls[1], "keychain");
-    assert.equal(calls[2], platform === "darwin"
+    assert.equal(calls[2], "assistant");
+    assert.equal(calls[3], platform === "darwin"
       ? "/synthetic/output/StarCanvas.app/Contents/Resources/app.asar"
       : "/synthetic/output/resources/app.asar");
   }

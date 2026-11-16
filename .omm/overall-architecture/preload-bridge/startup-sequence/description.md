@@ -16,6 +16,18 @@ not initialize app, safeStorage or the OS credential store. This prevents a stal
 Electron 39 development installation from silently missing the Electron 42 async
 account-storage API. It is a runtime identity check, not native-storage acceptance.
 
+The desktop bridge also exposes fixed applicationOperation list/approve/reject/
+dismiss/consume calls and a content-free invalidation subscription. Approvals
+are accepted only by the main trusted-origin IPC guard, not by external HTTP.
+Callbacks discard IPC event arguments and return an unsubscribe function. The
+renderer root dispatcher binds reservations to the current controller/project;
+it consumes a main-owned nonce before a normal canvas commit. This source-only
+increment does not yet migrate all old assistant actions or paid generation
+paths. Internal canvas plans now use owner-scoped submit/read/approve/cancel
+callbacks into the same main service. Session selection version is private IPC
+context, not a model/request field; the renderer checks its original-click
+identity again after nonce consumption.
+
 Main and preload install the pure shared `diagnostic-policy.cjs` console guard
 before loading application modules. Renderer entry imports its diagnostic
 bootstrap before the application bundle. Disk diagnostics and tool-install logs
@@ -28,3 +40,7 @@ Trace/assert are emitted through a plain structured console writer without nativ
 stacks; timer/counter labels are retained only in bounded in-memory maps and never
 printed. Group labels, table/dir output and profile/timestamp markers are also
 summarized. This does not rewrite errors returned to the renderer for user action.
+The renderer error diagnostic file accepts only a fixed event type and bounded
+numeric line/column values; exception messages, promise rejection values,
+filenames and stacks are neither read from the events nor written there.
+This applies to new records only and does not clean old logs or other sinks.

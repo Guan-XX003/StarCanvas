@@ -3,8 +3,9 @@ function showWanjuanInputDialog(options = {}) {
   return new Promise((resolve) => {
     const title = String(options.title || "请输入").trim() || "请输入";
     const message = String(options.message || "").trim();
-    const defaultValue = String(options.defaultValue || "");
-    const multiline = options.multiline === true;
+    const password = options.password === true;
+    const defaultValue = password ? "" : String(options.defaultValue || "");
+    const multiline = !password && options.multiline === true;
     const overlay = document.createElement("div");
     overlay.className = "wanjuan-native-input-overlay";
     overlay.innerHTML = `
@@ -26,8 +27,16 @@ function showWanjuanInputDialog(options = {}) {
       messageEl.textContent = message;
       messageEl.style.display = message ? "" : "none";
     }
-    if (input) input.value = defaultValue;
+    if (input) {
+      if (password) {input.type = "password";input.autocomplete = "off";input.spellcheck = false;}
+      input.value = defaultValue;
+    }
+    const cancelButton = overlay.querySelector('[data-action="cancel"]');
+    const confirmButton = overlay.querySelector('[data-action="ok"]');
+    if (cancelButton && typeof options.cancelLabel === "string") cancelButton.textContent = options.cancelLabel;
+    if (confirmButton && typeof options.confirmLabel === "string") confirmButton.textContent = options.confirmLabel;
     const finish = (value) => {
+      if (input && password) input.value = "";
       overlay.remove();
       resolve(value);
     };

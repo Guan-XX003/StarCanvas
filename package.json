@@ -1,6 +1,6 @@
 {
   "name": "wanjuan-lingjing",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "private": true,
   "description": "StarCanvas - macOS AI 创作画布桌面应用",
   "author": "",
@@ -15,6 +15,29 @@
   "scripts": {
     "verify:electron-runtime": "node scripts/verify-electron-runtime.cjs",
     "test:electron-runtime": "node --test scripts/test-electron-runtime.cjs",
+    "test:assistant:workspace": "node --test scripts/test-assistant-attachment-ui.cjs scripts/test-assistant-history.cjs scripts/test-assistant-workspace.cjs scripts/test-assistant-workspace-ipc.cjs scripts/test-assistant-workspace-client.cjs scripts/test-assistant-role-engine.cjs scripts/test-assistant-workspace-media.cjs scripts/test-assistant-workspace-backup.cjs scripts/test-assistant-workspace-ui-contract.cjs",
+    "test:assistant:canvas-plans": "node --test scripts/test-canvas-operation-plan.cjs scripts/test-canvas-plan-runtime.cjs scripts/test-assistant-canvas-planner.cjs scripts/test-canvas-generation-preflight.cjs scripts/test-project-switcher-refresh.cjs scripts/test-canvas-load-fit.cjs",
+    "test:assistant:creative": "node --test scripts/test-canvas-plan-generation.cjs scripts/test-assistant-canvas-planner.cjs scripts/test-assistant-generation-ui.cjs scripts/test-assistant-generation-history.cjs scripts/test-canvas-model-hydration.cjs",
+    "test:assistant:stream": "node --test scripts/test-assistant-main-stream.cjs scripts/test-assistant-text-stream.cjs scripts/test-assistant-stream-ipc.cjs scripts/test-assistant-role-engine.cjs scripts/test-assistant-workspace-client.cjs scripts/test-assistant-workspace-backup.cjs scripts/test-assistant-generation-ui.cjs",
+    "test:application:permissions": "node --test scripts/test-application-operation-policy.cjs scripts/test-application-operation-service.cjs scripts/test-application-operation-ipc.cjs scripts/test-application-protocol-portability.cjs scripts/test-application-entrypoint-parity.cjs scripts/test-application-generation.cjs scripts/test-application-generation-execution.cjs scripts/test-application-generation-workflow.cjs scripts/test-application-tianji-portraits.cjs scripts/test-tianji-node-parameter-sync.cjs scripts/test-application-local-actions.cjs scripts/test-application-task-reads.cjs scripts/test-application-media-export.cjs scripts/test-application-media-input.cjs scripts/test-application-reference-generation.cjs scripts/test-automation-permissions.cjs",
+    "test:assistant:workspace:runtime": "node scripts/verify-electron-runtime.cjs && node scripts/test-assistant-workspace-runtime.cjs",
+    "test:assistant:workspace:native": "node scripts/verify-electron-runtime.cjs && node scripts/test-assistant-workspace-native.cjs",
+    "test:assistant:account-broker:electron": "node scripts/verify-electron-runtime.cjs && electron scripts/test-assistant-account-broker-electron.cjs",
+    "test:custom-node-config-vault": "node scripts/test-custom-node-config-vault.cjs && node scripts/test-custom-node-config-service.cjs && node scripts/test-custom-node-config-ipc.cjs && node scripts/test-custom-node-config-transform.cjs && node scripts/test-custom-node-config-cache.cjs",
+    "test:custom-node-config-native": "node scripts/verify-electron-runtime.cjs && node scripts/test-custom-node-config-native.cjs",
+    "test:canvas-load-guard": "node scripts/test-canvas-load-failure-guard.cjs && node scripts/test-canvas-save-order.cjs && node scripts/test-canvas-custom-config-persistence.cjs",
+    "test:backup-export-guards": "node scripts/test-backup-export-guards.cjs",
+    "test:backup-import-ref-guard": "node scripts/test-backup-import-ref-guard.cjs",
+    "test:portable-backup-crypto": "node scripts/test-portable-backup-crypto.cjs",
+    "test:encrypted-backup-import": "node scripts/test-encrypted-backup-import.cjs",
+    "test:encrypted-backup-export": "node scripts/test-encrypted-backup-export.cjs",
+    "test:encrypted-backup-local-config": "node scripts/test-encrypted-backup-local-config.cjs",
+    "test:encrypted-backup-output-ipc": "node scripts/test-encrypted-backup-output-ipc.cjs",
+    "test:encrypted-backup-media-electron": "node scripts/verify-electron-runtime.cjs && electron scripts/test-encrypted-backup-media-electron.cjs",
+    "test:renderer-debug-privacy": "node scripts/test-renderer-debug-privacy.cjs",
+    "test:canvas-storage-log-privacy": "node scripts/test-canvas-storage-log-privacy.cjs",
+    "test:butler-batch-safety": "node scripts/test-butler-batch-no-implicit-probe.cjs",
+    "test:assistant:stage-one": "node scripts/test-assistant-preferences.cjs && node scripts/test-assistant-preference-barrier.cjs && node scripts/test-assistant-local-operations.cjs && node scripts/test-assistant-task-panel-consistency.cjs && node scripts/test-custom-task-assistant-identity.cjs && node scripts/test-custom-node-ai-privacy.cjs && node scripts/test-butler-error-query-privacy.cjs && node scripts/test-text-generation-privacy.cjs && node scripts/test-project-runtime-secret-boundary.cjs && node scripts/test-task-refresh-privacy.cjs && node scripts/test-tianji-terminal-status.cjs && node scripts/test-assistant-task-storage-status.cjs && node scripts/test-desktop-storage-fallback-order.cjs && node scripts/test-assistant-settings-startup.cjs && node scripts/test-assistant-live-task-flow.cjs && node scripts/test-assistant-onboarding.cjs && node scripts/test-assistant-navigation-rejection.cjs && node scripts/test-assistant-node-receipt.cjs && node scripts/test-assistant-diagnostic-routing.cjs && node scripts/test-assistant-proposal-staleness.cjs && node scripts/test-assistant-auto-download-sync.cjs && node scripts/test-auto-download-input-conversion.cjs && node scripts/test-assistant-context.cjs && node scripts/test-assistant-ipc-log-privacy.cjs && node scripts/test-assistant-hostile-jsonrpc.cjs && node scripts/test-assistant-harness-shutdown.cjs && node scripts/test-assistant-runtime-close.cjs && node scripts/test-harness-restricted.cjs",
     "prestart": "node scripts/verify-electron-runtime.cjs",
     "prestart:dev": "node scripts/verify-electron-runtime.cjs",
     "predebug": "node scripts/verify-electron-runtime.cjs",
@@ -31,6 +54,8 @@
     "verify:bundled-deface": "node scripts/verify-bundled-deface.cjs",
     "verify:packaged-runtime": "node scripts/verify-packaged-runtime-deps.cjs",
     "test:packaged-runtime": "node --test scripts/test-packaged-runtime-deps.cjs",
+    "test:candidate:baseline": "node --test scripts/test-candidate-launcher.cjs scripts/test-isolated-candidate-qa.cjs scripts/test-assistant-packaged-runtime.cjs scripts/test-packaged-runtime-deps.cjs scripts/test-packaged-signing.cjs",
+    "test:desktop-close": "node --test scripts/test-desktop-close.cjs scripts/test-model-settings-close.cjs",
     "test:portable-python": "node --test scripts/test-portable-python-runtime.cjs",
     "build": "vite build --config vite.config.mjs && electron-builder",
     "build:win": "vite build --config vite.config.mjs && electron-builder --win --x64",
@@ -49,9 +74,9 @@
     "test:bundled-deface": "node scripts/test-bundled-deface-contract.cjs && node scripts/test-deface-windows-staging.cjs",
     "test:update-checker": "electron scripts/test-update-checker.cjs",
     "test:workspace-team": "npm run build:web && node scripts/test-workspace-team.cjs",
-    "test:i18n:workspace": "node scripts/test-workspace-i18n.cjs && node scripts/test-i18n-static.cjs",
+    "test:i18n:workspace": "node scripts/test-i18n-inline-locale.cjs && node scripts/test-workspace-i18n.cjs && node scripts/test-i18n-static.cjs",
     "test:storage": "node scripts/test-storage-lab.mjs",
-    "test:storage:electron": "node scripts/test-storage-electron.cjs",
+    "test:storage:electron": "node scripts/verify-electron-runtime.cjs && electron scripts/test-storage-electron.cjs",
     "test:storage:state": "node scripts/test-storage-state-policy.mjs",
     "test:backup-restore-transaction": "node scripts/test-backup-restore-transaction.mjs",
     "test:storage-write-barrier:electron": "electron scripts/test-storage-write-barrier-electron.cjs",
@@ -61,7 +86,7 @@
     "test:storage:real-project": "electron scripts/test-real-project-transaction.cjs",
     "test:file-filter": "electron scripts/test-file-access-filter.cjs",
     "test:navigation-security": "node --test scripts/test-navigation-security.cjs",
-    "test:canvas-perf": "node scripts/test-canvas-performance.cjs",
+    "test:canvas-perf": "node --test scripts/test-canvas-perf-media.cjs && node scripts/test-canvas-performance.cjs",
     "test:canvas-dock": "node scripts/test-canvas-dock-interactions.cjs",
     "test:theme-system": "node scripts/test-theme-system.cjs",
     "test:global-config": "npm run build:web && node scripts/test-global-config-switching.cjs",
@@ -90,7 +115,7 @@
     "test:automation:package": "node scripts/test-automation-app.cjs --packaged",
     "test:automation:client": "node scripts/test-automation-client.mjs",
     "test:automation:cli": "node scripts/test-automation-cli.mjs",
-    "test:automation:mcp": "node scripts/test-automation-mcp.mjs",
+    "test:automation:mcp": "node --test scripts/test-automation-mcp-lifecycle.cjs && node scripts/test-automation-mcp.mjs",
     "arch:status": "omm status",
     "arch:validate": "omm validate",
     "arch:view": "omm view --port 3030",
@@ -126,13 +151,15 @@
   "build": {
     "appId": "com.wanjuan.lingjing",
     "productName": "StarCanvas",
-    "artifactName": "StarCanvas-1.4.8-${arch}.${ext}",
+    "artifactName": "StarCanvas-1.4.9-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "bin/application-operation-protocol.mjs",
+      "config/harness/sdk-restricted.patch.yml"
     ],
     "extraResources": [
       {
@@ -153,15 +180,25 @@
       }
     ],
     "afterPack": "scripts/after-pack.cjs",
+    "afterSign": "scripts/after-sign.cjs",
     "mac": {
+      "identity": "-",
+      "hardenedRuntime": true,
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
+      "signIgnore": [
+        "/Contents/Resources/starcanvas-account-keychain(?:/|$)",
+        "/Contents/Resources/assistant-harness(?:/|$)",
+        "/Contents/Resources/tool-runtime(?:/|$)"
+      ],
+      "extraResources": [{"from":"tool-runtime/deepseek-harness/darwin-${arch}","to":"assistant-harness/darwin-${arch}"}],
       "extendInfo": {
-        "CFBundleShortVersionString": "1.4.8",
-        "CFBundleVersion": "1.4.8"
+        "CFBundleShortVersionString": "1.4.9",
+        "CFBundleVersion": "1.4.9"
       }
     },
     "win": {
+      "extraResources": [{"from":"tool-runtime/deepseek-harness/win32-${arch}","to":"assistant-harness/win32-${arch}"}],
       "target": [
         "nsis",
         "zip"

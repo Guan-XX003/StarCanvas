@@ -64,10 +64,18 @@ export function useCanvasNodes(deps: UseCanvasNodesDeps) {
 	          hasRenderModeChange = data.wanjuanRenderMode !== renderMode,
 	          nextRenderZoom = renderMode === `full` ? undefined : zoom;
 	        let hasRenderZoomChange = data.wanjuanRenderZoom !== nextRenderZoom;
-	        return hasReferenceChange || hasRenderModeChange || hasRenderZoomChange ?
+	        // A renderer-only signal for the desktop auto-download observer.
+	        // Never infer generation from user text, and never write this marker
+	        // back into the project node or override other DOM attributes.
+	        const attributes = node.domAttributes && typeof node.domAttributes === `object` ? node.domAttributes : {};
+	        const hasGenerationMarker = Object.hasOwn(attributes, `data-wanjuan-generating`);
+	        const needsGenerationMarker = data.loading === true || hasGenerationMarker;
+	        const hasDataChange = hasReferenceChange || hasRenderModeChange || hasRenderZoomChange;
+	        return hasDataChange || needsGenerationMarker ?
 	          {
 	            ...node,
-	            data: {
+	            ...(needsGenerationMarker ? {domAttributes: {...attributes, 'data-wanjuan-generating': data.loading === true ? `true` : undefined}} : {}),
+	            ...(hasDataChange ? {data: {
 	              ...data,
 	              ...(nextReferenceSources ? {
 	                wanjuanSelectedReferenceSourceIds: nextReferenceSources
@@ -77,7 +85,7 @@ export function useCanvasNodes(deps: UseCanvasNodesDeps) {
 	              wanjuanRenderMode: renderMode,
 	              wanjuanRenderZoom: nextRenderZoom,
 	              wanjuanRenderRuntime: true
-	            },
+	            }} : {}),
 	          } :
 	          node;
 		      });

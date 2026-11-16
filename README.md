@@ -6,7 +6,7 @@
 
 **面向 AI 创作流程的桌面画布应用**
 
-[![版本](https://img.shields.io/badge/版本-1.4.7-blue.svg)](https://github.com/Guan-XX003/StarCanvas/releases)
+[![版本](https://img.shields.io/badge/版本-1.4.9-blue.svg)](https://github.com/Guan-XX003/StarCanvas/releases)
 [![平台](https://img.shields.io/badge/平台-macOS%20|%20Windows-lightgrey.svg)](#安装)
 [![许可](https://img.shields.io/badge/许可-PolyForm%20Noncommercial-orange.svg)](LICENSE)
 
@@ -48,8 +48,11 @@ StarCanvas是一款强大的本地桌面 AI 创作工作台，专为现代 AI �
 ### 📚 资源库
 集中查看和管理所有生成与导入的素材，支持类型筛选、来源筛选、收藏、下载和一键复用到画布。
 
-### 🤖 智能体工作台
-为不同任务创建专属 AI 智能体，绑定特定模型、角色设定和知识库，通过对话整理创意、优化提示词。
+### 🤖 主智能助手与角色工作台
+可拖动、缩放的聊天窗口，支持多会话、角色、搜索、归档、附件和流式对话。助手可规划画布并申请执行；修改设置、导入素材和开始生成需在 App 内确认，不会自行授权付费调用。
+
+### 🔌 CLI 与 MCP
+为 Codex、Claude Code 等外部 Agent 提供本机接口：查询状态、规划画布、导入素材、提交生成、跟踪任务和保存结果。CLI、MCP 与内置助手共用权限底座；写操作逐次在 App 审批。[接入文档](docs/AUTOMATION_CLI.md)
 
 ### ✅ 任务清单
 统一追踪所有异步生成任务，实时查看进度、刷新结果、处理失败任务，保持创作流程井然有序。
@@ -100,10 +103,10 @@ StarCanvas是一款强大的本地桌面 AI 创作工作台，专为现代 AI �
 
 | 平台 | 架构 | 下载 |
 |------|------|------|
-| macOS | Apple Silicon (arm64) | [StarCanvas-1.4.7-arm64.dmg](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.7-release/StarCanvas-1.4.7-arm64.dmg) |
-| Windows | x64 | [StarCanvas-1.4.7-x64.exe](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.7-release/StarCanvas-1.4.7-x64.exe) |
+| macOS | Apple Silicon (arm64) | [StarCanvas-1.4.9-arm64.dmg](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/StarCanvas-1.4.9-arm64.dmg) |
+| Windows | x64 | [StarCanvas-1.4.9-x64.exe](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/StarCanvas-1.4.9-x64.exe) |
 
-CLI / MCP 独立下载：[starcanvas-cli-1.4.7.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.7-release/starcanvas-cli-1.4.7.zip)
+CLI / MCP 独立下载：[starcanvas-cli-1.4.9.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/starcanvas-cli-1.4.9.zip)
 
 CLI 主命令为 `starcanvas`，MCP 服务为 `starcanvas-mcp`；旧 `wanjuan` 名称暂时保留为兼容别名。
 

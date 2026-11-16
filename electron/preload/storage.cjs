@@ -12,6 +12,8 @@ const { ipcRenderer } = require("./runtime.cjs");
 
 let storageDbPromise = null;
 let legacyStorageMigrationPromise = null;
+let legacyStorageMigrationFailed = false;
+let desktopSetQueue = Promise.resolve();
 let enterpriseOverlayPromise = null;
 
 function readEnterpriseStorageOverlay() {
@@ -140,7 +142,8 @@ async function getIndexedDesktopStorage() {
       cursor.continue();
     };
     transaction.oncomplete = () => resolve(result);
-    transaction.onerror = () => reject(transaction.error || request.error);
+    transaction.onerror = () => reject(transaction.error || request.error || new Error("Desktop storage read failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Desktop storage read aborted"));
   });
 }
 
@@ -151,21 +154,17 @@ async function getIndexedDesktopStorageItems(keys) {
     const result = {};
     const transaction = db.transaction(STORAGE_DB_STORE, "readonly");
     const store = transaction.objectStore(STORAGE_DB_STORE);
-    let pending = keyList.length;
-    if (!pending) {
-      resolve(result);
-      return;
-    }
+    // A successful request is not a successful transaction: it may still abort.
+    transaction.oncomplete = () => resolve(result);
+    transaction.onabort = () => reject(transaction.error || new Error("Desktop storage read aborted"));
     for (const key of keyList) {
       const request = store.get(key);
       request.onsuccess = () => {
         if (request.result !== undefined) result[key] = request.result;
-        pending -= 1;
-        if (pending === 0) resolve(result);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(request.error || new Error("Desktop storage read failed"));
     }
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error || new Error("Desktop storage read failed"));
   });
 }
 
@@ -176,7 +175,8 @@ async function setIndexedDesktopStorageItems(items) {
     const store = transaction.objectStore(STORAGE_DB_STORE);
     for (const [key, value] of Object.entries(items || {})) store.put(value, key);
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error || new Error("Desktop storage write failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Desktop storage write aborted"));
   });
 }
 
@@ -187,7 +187,8 @@ async function removeIndexedDesktopStorageItems(keys) {
     const store = transaction.objectStore(STORAGE_DB_STORE);
     for (const key of Array.isArray(keys) ? keys : [keys]) store.delete(key);
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error || new Error("Desktop storage delete failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Desktop storage delete aborted"));
   });
 }
 
@@ -197,7 +198,8 @@ async function clearIndexedDesktopStorage() {
     const transaction = db.transaction(STORAGE_DB_STORE, "readwrite");
     transaction.objectStore(STORAGE_DB_STORE).clear();
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error || new Error("Desktop storage clear failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Desktop storage clear aborted"));
   });
 }
 
@@ -209,6 +211,22 @@ function readDesktopStorage() {
   }
 }
 
+// Legacy read behavior is retained, but a broken or inaccessible mirror cannot
+// prove that an otherwise empty IndexedDB contains all historic task records.
+function readLegacyStorageForMigration() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      legacyStorageMigrationFailed = true;
+      return null;
+    }
+    return value;
+  } catch {
+    legacyStorageMigrationFailed = true;
+    return null;
+  }
+}
+
 function writeDesktopStorage(value) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value || {}));
 }
@@ -216,12 +234,23 @@ function writeDesktopStorage(value) {
 function migrateLegacyDesktopStorage() {
   if (legacyStorageMigrationPromise) return legacyStorageMigrationPromise;
   legacyStorageMigrationPromise = (async () => {
-    const legacy = readDesktopStorage();
-    if (!legacy || Object.keys(legacy).length === 0) return;
+    const snapshot = window.localStorage.getItem(STORAGE_KEY);
+    const legacy = readLegacyStorageForMigration();
+    if (!legacy) return false;
+    if (Object.keys(legacy).length === 0) return true;
     await setIndexedDesktopStorageItems(legacy);
+    // Another writer may have updated the mirror while IndexedDB was busy.
+    // Never remove a newer snapshot that this migration did not copy.
+    if (window.localStorage.getItem(STORAGE_KEY) !== snapshot) {
+      legacyStorageMigrationFailed = true;
+      return false;
+    }
     window.localStorage.removeItem(STORAGE_KEY);
+    return true;
   })().catch((error) => {
-    console.warn("desktop storage migration skipped", error);
+    legacyStorageMigrationFailed = true;
+    console.warn("desktop storage migration skipped");
+    return false;
   });
   return legacyStorageMigrationPromise;
 }
@@ -231,14 +260,15 @@ async function readDesktopStorageAsync() {
     await migrateLegacyDesktopStorage();
     return await getIndexedDesktopStorage();
   } catch (error) {
-    console.warn("desktop storage read fallback", error);
+    console.warn("desktop storage read fallback");
     return readDesktopStorage();
   }
 }
 
-async function getDesktopStorageItems(keys) {
+async function getDesktopStorageItemsWithStatus(keys) {
   const overlay = await readEnterpriseStorageOverlay();
-  if (keys === null || keys === undefined) return overlayStorageResult(keys, await readDesktopStorageAsync(), overlay);
+  // The legacy all-keys reader can silently fall back; it cannot assert provenance.
+  if (keys === null || keys === undefined) return { values: overlayStorageResult(keys, await readDesktopStorageAsync(), overlay), reliable: false };
   const keyList = Array.isArray(keys)
     ? keys
     : typeof keys === "string"
@@ -250,31 +280,48 @@ async function getDesktopStorageItems(keys) {
     await migrateLegacyDesktopStorage();
     const stored = await getIndexedDesktopStorageItems(keyList);
     if (keys && typeof keys === "object" && !Array.isArray(keys)) {
-      return overlayStorageResult(keys, { ...keys, ...stored }, overlay);
+      return { values: overlayStorageResult(keys, { ...keys, ...stored }, overlay), reliable: !legacyStorageMigrationFailed };
     }
-    return overlayStorageResult(keys, stored, overlay);
+    return { values: overlayStorageResult(keys, stored, overlay), reliable: !legacyStorageMigrationFailed };
   } catch (error) {
-    console.warn("desktop storage keyed read fallback", error);
-    return overlayStorageResult(keys, pickStorage(keys, readDesktopStorage()), overlay);
+    console.warn("desktop storage keyed read fallback");
+    return { values: overlayStorageResult(keys, pickStorage(keys, readDesktopStorage()), overlay), reliable: false };
   }
 }
 
-async function setDesktopStorageItems(items) {
+async function getDesktopStorageItems(keys) {
+  return (await getDesktopStorageItemsWithStatus(keys)).values;
+}
+
+function setDesktopStorageItems(items) {
+  // Writes can also originate in preload listeners, outside the renderer's
+  // write barrier. Preserve their order while a fallback is being recovered.
+  const operation = desktopSetQueue.then(() => setDesktopStorageItemsOrdered(items));
+  desktopSetQueue = operation.catch(() => {});
+  return operation;
+}
+
+async function setDesktopStorageItemsOrdered(items) {
   const overlay = await readEnterpriseStorageOverlay();
   const writableItems = filterEnterpriseManagedWrites(items, overlay);
   if (!Object.keys(writableItems).length) return;
   try {
-    await migrateLegacyDesktopStorage();
+    if (!await migrateLegacyDesktopStorage()) throw new Error("Desktop storage recovery pending");
     await setIndexedDesktopStorageItems(writableItems);
     mirrorBootThemeFromStore(writableItems);
   } catch (error) {
-    console.warn("desktop storage set fallback", error);
+    console.warn("desktop storage set fallback");
     try {
-      const next = { ...readDesktopStorage(), ...writableItems };
+      const legacy = readLegacyStorageForMigration();
+      if (!legacy) throw new Error("Desktop storage mirror unavailable");
+      const next = { ...legacy, ...writableItems };
       writeDesktopStorage(next);
+      // A new fallback must be reconciled before a later IndexedDB write, or
+      // an older value could be replayed over that later write on restart.
+      legacyStorageMigrationPromise = null;
       mirrorBootThemeFromStore(writableItems);
     } catch (fallbackError) {
-      console.warn("desktop localStorage fallback skipped", fallbackError);
+      console.warn("desktop localStorage fallback skipped");
     }
   }
 }
@@ -288,7 +335,7 @@ async function removeDesktopStorageItems(keys) {
     await migrateLegacyDesktopStorage();
     await removeIndexedDesktopStorageItems(writableKeys);
   } catch (error) {
-    console.warn("desktop storage remove fallback", error);
+    console.warn("desktop storage remove fallback");
     const store = readDesktopStorage();
     for (const key of writableKeys) delete store[key];
     writeDesktopStorage(store);
@@ -316,6 +363,7 @@ module.exports = {
   migrateLegacyDesktopStorage,
   readDesktopStorageAsync,
   getDesktopStorageItems,
+  getDesktopStorageItemsWithStatus,
   setDesktopStorageItems,
   removeDesktopStorageItems,
   resetEnterpriseStorageOverlay,

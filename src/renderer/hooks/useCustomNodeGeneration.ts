@@ -4,8 +4,10 @@
  * 自 bundle(WanJuanAppCanvas) 抽出，逻辑逐字搬运、行为不变。
  */
 import { useCallback } from "react";
+import { customNodeAiContext } from "../lib/custom-node-ai-privacy";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, SetState, Toast, WjEdge, WjNode } from "../lib/app-types";
 import { WanJuanIsTransientNetworkError } from "../lib/log-utils";
+import { safeCustomTaskError } from "../lib/custom-task-error";
 
 interface UseCustomNodeGenerationDeps {
   abortControllersRef: Ref;
@@ -55,7 +57,7 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
           let apiUrl = `${propTextApiUrl.replace(/\/$/, ``)}/v1/chat/completions`,
             contextPrefix = ``;
           existingConfig &&
-            (contextPrefix = `当前节点的已有配置如下，请在这个配置的基础上进行修改或补充，而不是完全从零生成（除非用户要求重置）：\n\`\`\`json\n${JSON.stringify(existingConfig, null, 2)}\n\`\`\`\n\n`);
+            (contextPrefix = `节点的非敏感选项：${JSON.stringify(customNodeAiContext(existingConfig))}。已有地址、请求头、请求体和变量未提供；不要假设你知道它们。\n\n`);
           let messages = [{
                 role: `system`,
                 content: `你是一个智能API配置助手。用户会描述一个API的需求，你需要理解意图并严格返回一个包含完整配置的 JSON 对象。不要有任何额外的解释文字，不要使用Markdown代码块包裹，必须直接返回纯 JSON 字符串。
@@ -213,13 +215,9 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                       (fileReader.onerror = reject),
                       fileReader.readAsDataURL(blob));
                   });
-                } catch (error) {
+                } catch {
                   return (
-                    console.warn(
-                      `Failed to fetch and convert URL to Base64:`,
-                      url,
-                      error,
-                    ),
+                    console.warn(`Failed to fetch and convert media to Base64.`),
                     url
                   );
                 }
@@ -264,16 +262,16 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
               headersStr && (headers = {
                 ...JSON.parse(headersStr)
               });
-            } catch (error) {
-              console.warn(`Failed to parse headers`, error);
+            } catch {
+              console.warn(`Failed to parse headers.`);
             }
             let pollingHeaders = headers;
             try {
               pollingHeadersStr && pollingHeadersStr !== `{}` && (pollingHeaders = {
                 ...JSON.parse(pollingHeadersStr)
               });
-            } catch (error) {
-              console.warn(`Failed to parse polling headers`, error);
+            } catch {
+              console.warn(`Failed to parse polling headers.`);
             }
             let requestPayload = config.method === `GET` ? undefined : requestBody;
             if (requestPayload && headers[`Content-Type`] === `multipart/form-data`)
@@ -301,12 +299,9 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                     );
                 }
                 ((requestPayload = formData), delete headers[`Content-Type`]);
-              } catch (error) {
+              } catch {
                 throw (
-                  console.warn(
-                    `Failed to parse body as JSON for FormData conversion`,
-                    error,
-                  ),
+                  console.warn(`Failed to parse body as JSON for FormData conversion.`),
                   Error(
                     `FormData 请求的 Body 必须是有效的 JSON 格式，以便自动转换为文件`,
                   )
@@ -397,21 +392,22 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
             } else {
               let taskId2 = extractByPath(responseData, config.taskIdPath || ``);
               if (!taskId2) throw Error(`无法提取 Task ID`);
-              ((taskId = `custom-${taskId2 || Date.now()}`),
+              // Provider-controlled task identifiers can contain private data.
+              // Poll with the original value in memory, but persist a separate
+              // local identity for node/task associations and diagnostics.
+              ((taskId = `custom-local-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`),
                 updateTaskList &&
-                updateTaskList((nodes2) => [
-                  ...nodes2,
+                updateTaskList((existingTasks) => [
+                  ...existingTasks,
                   {
                     id: taskId,
                     type: `custom`,
                     projectId: projectIdRef.current,
-                    nodeId: nodes2,
+                    nodeId,
                     status: `pending`,
                     progress: 0,
                     createdAt: Date.now(),
-                    prompt: config.apiUrl,
                     customOutputType: config.outputType,
-                    customRawResponse: responseData,
                   },
                 ]));
               setNodes((nodes2) =>
@@ -471,7 +467,7 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                     throw error;
                   if (!WanJuanIsTransientNetworkError(error)) throw error;
                   (customPollingNetworkErrorCount++,
-                    console.warn(`Custom node polling transient network error:`, error),
+                    console.warn(`Custom node polling transient network error.`),
                     customPollingNetworkErrorCount === 3 &&
                     showToast(`异步节点状态查询遇到临时网络错误，仍会继续重试...`));
                   continue;
@@ -507,7 +503,6 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                           status: `completed`,
                           progress: 100,
                           customResultData: resultData,
-                          customRawResponse: pollingData,
                         } :
                         node2,
                       ),
@@ -568,7 +563,6 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                           ...node2,
                           status: `running`,
                           progress: progress,
-                          customRawResponse: pollingData,
                         } :
                         node2,
                       ),
@@ -590,7 +584,8 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
               }
             }
           } catch (error) {
-            error.name !== `AbortError` &&
+            const safeError = safeCustomTaskError(error);
+            error?.name !== `AbortError` &&
               (updateTaskList &&
                 taskId &&
                 updateTaskList((nodes2) =>
@@ -599,7 +594,7 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                     {
                       ...node2,
                       status: `failed`,
-                      errorMsg: error.message
+                      errorMsg: safeError
                     } :
                     node2,
                   ),
@@ -612,13 +607,13 @@ export function useCustomNodeGeneration(deps: UseCustomNodeGenerationDeps) {
                       data: {
                         ...node2.data,
                         loading: false,
-                        errorMessage: error.message
+                        errorMessage: safeError
                       },
                     } :
                     node2,
                   ),
                 ),
-                showToast(`节点执行失败: ${error.message}`));
+                showToast(`节点执行失败: ${safeError}`));
           } finally {
             (abortControllersRef.current.delete(nodeId),
               setEdges((edges2) =>

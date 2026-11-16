@@ -66,6 +66,9 @@ export function WanJuanSettingsSectionD(props: any) {
     Trash2,
     VtRenameProject,
     WanJuanCanvasShell,
+    assistantCanvasControllerRef,
+    modelConfigurationReady = true,
+    modelConfigurationUnavailable = false,
     activeProjectId,
     activeView,
     addCustomNodeTemplate,
@@ -199,6 +202,7 @@ export function WanJuanSettingsSectionD(props: any) {
   };
 
   return jsxs(`div`, {
+              "data-wanjuan-assistant-view": `canvas`,
               className: `absolute inset-0 w-full h-full bg-[#121212] flex flex-col ${activeView === `canvas` ? `visible z-10` : `invisible -z-10`}`,
               children: [
                 jsxs(`div`, {
@@ -209,6 +213,7 @@ export function WanJuanSettingsSectionD(props: any) {
                       children: [
                         jsx(`button`, {
                           type: `button`,
+                          "data-wanjuan-project-control": `rename`,
                           onClick: () => VtRenameProject(activeProjectId),
                           className: `bg-[#2a2a2a] text-gray-100 text-xs rounded px-3 py-1 border border-[#444] hover:border-blue-500 hover:text-blue-300 w-40 truncate text-left`,
                           title: `点击重命名项目`,
@@ -216,6 +221,7 @@ export function WanJuanSettingsSectionD(props: any) {
                             `未命名项目`,
                         }),
                         jsx(`select`, {
+                          "data-wanjuan-project-control": `switcher`,
                           value: activeProjectId,
                           onChange: (event) => setActiveProjectId(event.target.value),
                           className: `bg-[#2a2a2a] text-gray-200 text-xs rounded px-3 py-1 border border-[#333] outline-none w-40`,
@@ -265,6 +271,7 @@ export function WanJuanSettingsSectionD(props: any) {
                           children: projectStorageLabel(projects.find((project) => project.id === activeProjectId)),
                         }),
                         jsx(`button`, {
+                          "data-wanjuan-project-control": `create`,
                           onClick: () => {
                             let activeProject = projects.find((project) => project.id === activeProjectId),
                               currentProjectGroupId = activeProject?.groupId || ``;
@@ -277,6 +284,7 @@ export function WanJuanSettingsSectionD(props: any) {
                         }),
                         projects.length > 1 &&
                         jsx(`button`, {
+                          "data-wanjuan-project-control": `delete`,
                           onClick: () => handleDeleteProject(activeProjectId),
                           className: `wanjuan-canvas-model-toolbar-icon is-delete text-red-400 hover:text-red-300 p-1`,
                           title: `删除当前项目`,
@@ -489,10 +497,15 @@ export function WanJuanSettingsSectionD(props: any) {
 }),
                 jsx(`div`, {
                   className: `flex-1 relative`,
-                  children: jsx(
+                  // Do not mount editable model nodes against boot defaults.
+                  // Their normal parameter effects are writers, not a read-only
+                  // loading skeleton, and can overwrite a restored manual choice.
+                  children: modelConfigurationReady ? jsx(
                     WanJuanCanvasShell, {
+                      assistantCanvasControllerRef,
                       appLanguage: (globalThis as any).wanjuanI18nRuntime?.getLanguage?.() || `zh-CN`,
                       projectId: activeProjectId,
+                      canvasVisible: activeView === `canvas`,
                       textApiUrl: textApiUrl,
                       textApiKey: textApiKey,
                       imageApiUrl: imageApiUrl,
@@ -567,7 +580,15 @@ export function WanJuanSettingsSectionD(props: any) {
                       layeredRunMaxConcurrency: layeredRunMaxConcurrency,
                     },
                     activeProjectId,
-                  ),
+                  ) : jsx('div',{
+                    role:'status','data-wanjuan-model-config-state':modelConfigurationUnavailable?'unavailable':'loading',
+                    className:'h-full flex items-center justify-center text-sm',style:{color:'var(--wj-text-muted)'},
+                    children:((globalThis as any).wanjuanI18nRuntime?.getLanguage?.()==='en-US'
+                      ?modelConfigurationUnavailable?'Model settings could not be read. Canvas editing is paused to protect this project.':'Loading model settings; canvas editing is paused…'
+                      :(globalThis as any).wanjuanI18nRuntime?.getLanguage?.()==='zh-TW'
+                        ?modelConfigurationUnavailable?'無法讀取模型設定，已暫停畫布編輯以保護專案。':'正在載入模型設定，已暫停畫布編輯…'
+                        :modelConfigurationUnavailable?'无法读取模型配置，已暂停画布编辑以保护项目。':'正在载入模型配置，已暂停画布编辑…'),
+                  }),
                 }),
                 projectGroupPanelOpen &&
                 jsx(WanJuanProjectGroupPanel, {

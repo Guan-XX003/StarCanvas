@@ -34,6 +34,8 @@ const DIAGNOSTIC_EVENTS = new Set([
 ]);
 const ENUM_FIELDS = {
   level: ["verbose", "debug", "info", "log", "warn", "warning", "error", "unknown"],
+  // Fixed internal names only; arbitrary IPC channels must never become log text.
+  channel: ["wanjuan:assistant-status", "wanjuan:assistant-account-start", "wanjuan:assistant-account-status", "wanjuan:assistant-account-cancel", "wanjuan:assistant-account-clear", "wanjuan:assistant-check-connection", "wanjuan:assistant-set-key", "wanjuan:assistant-clear-key", "wanjuan:assistant-send", "wanjuan:assistant-cancel", "wanjuan:assistant-reset", "wanjuan:assistant-analyze-config"],
   method: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
   kind: ["image", "video", "audio", "text", "file"],
   reason: ["env", "unresponsive", "did-fail-load", "render-process-gone", "crashed", "oom", "killed", "clean-exit", "abnormal-exit", "launch-failed", "integrity-failure"],

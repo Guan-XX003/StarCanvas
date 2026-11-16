@@ -1,11 +1,12 @@
 // @ts-nocheck
 /**
- * saveApiModelCloudSettings。自 bundle 抽出，逐字搬运、行为不变。
+ * Debounced model settings with an acknowledged normal-close save.
  */
-import { useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, StoredGlobalConfig } from "../lib/app-types";
 import { WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS, wanjuanMergeModelText } from "../lib/jixin-catalog";
 import { isCurrentSettingsSave } from "../lib/global-config";
+import { registerDesktopCloseParticipant } from "../lib/desktop-close";
 declare const chrome: any;
 
 interface UseSaveApiModelCloudSettingsDeps {
@@ -148,18 +149,10 @@ export function use_saveApiModelCloudSettings(deps: UseSaveApiModelCloudSettings
     videoModels,
     videoResolutions,
   } = deps;
-  const saveApiModelCloudSettings = () => {
-      if (
-        !settingsHydratedRef.current ||
-        typeof chrome > `u` ||
-        !chrome.storage ||
-        !chrome.storage.local
-      )
-        return;
-      apiModelCloudSettingsSaveTimerRef.current &&
-        clearTimeout(apiModelCloudSettingsSaveTimerRef.current),
-        (apiModelCloudSettingsSaveTimerRef.current = setTimeout(async () => {
-          const scheduledSaveId = apiModelCloudSettingsSaveTimerRef.current;
+  const pendingWrites = useRef(new Set<Promise<boolean>>());
+  const latest = useRef<any>(null);
+  const closing = useRef(false);
+  const buildSettingsPatch = () => {
           let settingsPatch = {
             textApiUrl: textApiUrl,
             textApiKey: textApiKey,
@@ -230,22 +223,83 @@ export function use_saveApiModelCloudSettings(deps: UseSaveApiModelCloudSettings
               JSON.parse(videoModelRequestProfilesText);
             settingsPatch.videoModelRequestProfiles = videoModelRequestProfilesText;
           } catch (error) {
-            console.warn(`Skip autosaving invalid video model request profiles`, error);
+            console.warn(`Skip autosaving invalid video model request profiles`);
           }
+          return settingsPatch;
+  };
+  // Capture committed state before passive effects schedule a save. Updating
+  // this in render could expose an abandoned render to the close coordinator.
+  useLayoutEffect(() => {
+    latest.current = { buildSettingsPatch, syncTianjiConfigFromJixinApi, tianjiSeedanceModel };
+  });
+  const persistSnapshot = async (snapshot, scheduledSaveId) => {
+          // API inputs must not mutate an in-flight snapshot while the local
+          // Tianji projection or storage queue is awaiting completion.
+          const settingsPatch = structuredClone(snapshot.buildSettingsPatch());
           try {
-            let syncedTianjiSeedanceConfig = await syncTianjiConfigFromJixinApi(apiConfigs);
+            let syncedTianjiSeedanceConfig = await snapshot.syncTianjiConfigFromJixinApi(settingsPatch.apiConfigs);
             syncedTianjiSeedanceConfig &&
               (settingsPatch.tianjiSeedanceConfig = {
                 ...syncedTianjiSeedanceConfig,
-                models: String(tianjiSeedanceModel || ``).trim() || wanjuanMergeModelText(WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS),
+                models: String(snapshot.tianjiSeedanceModel || ``).trim() || wanjuanMergeModelText(WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS),
               });
           } catch (error) {
-            console.warn(`Auto sync Tianji config from Jixin API failed`, error);
+            console.warn(`Auto sync Tianji config from Jixin API failed`);
           }
-          if (!isCurrentSettingsSave(apiModelCloudSettingsSaveTimerRef.current, scheduledSaveId)) return;
-          chrome.storage.local.set(settingsPatch);
-          apiModelCloudSettingsSaveTimerRef.current = 0;
-        }, 250));
-    };
+          if (!isCurrentSettingsSave(apiModelCloudSettingsSaveTimerRef.current, scheduledSaveId)) return false;
+          await chrome.storage.local.set(settingsPatch);
+          return isCurrentSettingsSave(apiModelCloudSettingsSaveTimerRef.current, scheduledSaveId);
+  };
+  const trackWrite = (operation: Promise<boolean>) => {
+    pendingWrites.current.add(operation);
+    // Install a rejection handler immediately; callers still observe failure.
+    void operation.then(() => pendingWrites.current.delete(operation), () => pendingWrites.current.delete(operation));
+    return operation;
+  };
+  const cancelDebounce = () => {
+    if (apiModelCloudSettingsSaveTimerRef.current) clearTimeout(apiModelCloudSettingsSaveTimerRef.current);
+    apiModelCloudSettingsSaveTimerRef.current = 0;
+  };
+  const saveApiModelCloudSettings = () => {
+    if (closing.current || !settingsHydratedRef.current || typeof chrome === `undefined` || !chrome.storage?.local) return;
+    cancelDebounce();
+    const scheduledId = setTimeout(() => {
+      void trackWrite(persistSnapshot(latest.current, scheduledId)).catch(() => {
+        console.warn(`Model settings save failed`);
+      }).finally(() => {
+        if (isCurrentSettingsSave(apiModelCloudSettingsSaveTimerRef.current, scheduledId)) apiModelCloudSettingsSaveTimerRef.current = 0;
+      });
+    }, 250);
+    apiModelCloudSettingsSaveTimerRef.current = scheduledId;
+  };
+  useEffect(() => registerDesktopCloseParticipant('settings', async () => {
+    if (!settingsHydratedRef.current) return { ok: true };
+    if (!latest.current || typeof chrome === `undefined` || !chrome.storage?.local) return { ok: false };
+    closing.current = true;
+    try {
+      cancelDebounce();
+      // Invalidate and drain older saves before the final current snapshot.
+      // This waits for local writes only, never uploads or model requests.
+      await Promise.allSettled([...pendingWrites.current]);
+      const snapshot = latest.current;
+      const expected = structuredClone(snapshot.buildSettingsPatch());
+      const signature = JSON.stringify(expected);
+      const committed = await trackWrite(persistSnapshot(snapshot, 0));
+      if (!committed) return { ok: false };
+      const keys = Object.keys(expected);
+      const readback = typeof chrome.storage.local.getWithStatus === 'function'
+        ? await chrome.storage.local.getWithStatus(keys)
+        : { values: await chrome.storage.local.get(keys), reliable: true };
+      // Some legacy shims swallow storage exceptions after fallback. A settled
+      // set() alone is not evidence that the latest user values were persisted.
+      const matches = readback?.reliable === true && keys.every(key =>
+        JSON.stringify(readback.values?.[key]) === JSON.stringify(expected[key]));
+      return { ok: matches && signature === JSON.stringify(latest.current.buildSettingsPatch()) };
+    } catch {
+      return { ok: false };
+    } finally {
+      closing.current = false;
+    }
+  }), []);
   return { saveApiModelCloudSettings };
 }

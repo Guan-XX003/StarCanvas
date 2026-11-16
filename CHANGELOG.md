@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.9 - 2026-11-16
+
+- Added a draggable, resizable main assistant with multiple conversations, reusable roles, search, archives, attachments and streaming responses.
+- Unified the built-in assistant, CLI and 14-tool stdio MCP server behind the same App-confirmed operation service. Canvas edits, reference imports, generation and result export require explicit approval; fee-bearing generation is not silently retried.
+- Added structured canvas planning, undo, task tracking, reference-media workflows and safe result saving through the normal canvas request and polling paths.
+- Improved seven-theme and three-language surfaces, long-conversation rendering, session isolation and close-time settings persistence.
+- Bundled matching standalone CLI/MCP clients and documentation. Verified isolated macOS arm64 and Windows x64 installation/upgrade flows with synthetic data and local mock model services.
+- Personal-project distribution: macOS is ad-hoc signed, not notarized; Windows is not Authenticode signed. Real upstream model compatibility and billing depend on the configured provider.
+
 ## 1.4.7 - 2026-08-19
 
 - Fixed stale reviewed Tianji portrait references after switching portraits by using a single authoritative React Flow snapshot, persisted binding revisions, typed reference channels, and fail-closed conflict handling.

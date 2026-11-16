@@ -1,5 +1,5 @@
 /**
- * useCanvasLoadEffect（自 bundle 抽出的 useEffect，行为不变）。
+ * Canvas restoration, including in-memory hydration of encrypted custom configs.
  */
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { GlobalTask, Ref, SetAny, SetState, WjEdge, WjNode } from "../lib/app-types";
@@ -8,6 +8,7 @@ import { WanJuanTtsMusicTaskAudioUrl } from "../components/audio-nodes";
 import { wanjuanClearProjectAssetBindingsFromData } from "../lib/resource";
 import { wanjuanResetTianjiPortraitBindingForImage } from "../lib/tianji-portrait";
 import { wanjuanNewestNodeTask, wanjuanTaskUsesSeedanceSlot, wanjuanVideoTaskCanAttachToNode, wanjuanVideoTaskMatchesNodeByPrompt } from "../lib/video-task";
+import { restoreCanvasCustomConfigs } from '../lib/custom-node-config-transform';
 declare const chrome: any;
 
 interface UseCanvasLoadEffectDeps {
@@ -20,12 +21,14 @@ interface UseCanvasLoadEffectDeps {
   initialEmptyProject: any;
   localforageModule: any;
   onInitialEmptyProjectReady: any;
+  onAssistantCanvasLoadState?: (projectId: any, ready: boolean) => void;
   projectId: any;
   projectIdRef: Ref;
   resolveWanjuanPlayableTaskUrl: any;
   setEdges: SetState<WjEdge[]>;
   setNodes: SetState<WjNode[]>;
   setShouldFitView: SetAny;
+  showToast?: (message:string) => void;
   shouldFitViewRef: Ref;
 }
 
@@ -40,15 +43,19 @@ export function useCanvasLoadEffect(deps: UseCanvasLoadEffectDeps) {
     initialEmptyProject,
     localforageModule,
     onInitialEmptyProjectReady,
+    onAssistantCanvasLoadState,
     projectId,
     projectIdRef,
     resolveWanjuanPlayableTaskUrl,
     setEdges,
     setNodes,
     setShouldFitView,
+    showToast,
     shouldFitViewRef,
   } = deps;
   useEffect(() => {
+      let assistantLoadActive = true;
+      onAssistantCanvasLoadState?.(projectId, false);
       let __wjLoadToken = (globalThis.__wanjuanCanvasLoadToken = (globalThis.__wanjuanCanvasLoadToken || 0) + 1),
         guardedSetNodes = (v) => { (__wjLoadToken === globalThis.__wanjuanCanvasLoadToken) && setNodes(v); },
         guardedSetEdges = (v) => { (__wjLoadToken === globalThis.__wanjuanCanvasLoadToken) && setEdges(v); };
@@ -66,21 +73,26 @@ export function useCanvasLoadEffect(deps: UseCanvasLoadEffectDeps) {
               chrome.storage.local &&
               chrome.storage.local.remove(`${desktopCanvasMirrorPrefix}${storageKey.slice(canvasStateKeyPrefix.length)}`);
             } catch (error) {
-              console.warn(`清理新项目画布缓存失败`, error);
+              console.warn(`清理新项目画布缓存失败`);
 	            } finally {
 	              setTimeout(() => {
+	                if (!assistantLoadActive || __wjLoadToken !== globalThis.__wanjuanCanvasLoadToken) return;
 	                (setShouldFitView(true), (shouldFitViewRef.current = true), (LoadOnceRef.current = true));
+	                // The parent clears initialEmptyProject here, causing a second
+	                // load. Wait for that load rather than accepting a node that
+	                // the subsequent load could overwrite.
 	                typeof onInitialEmptyProjectReady == `function` &&
 	                  onInitialEmptyProjectReady(projectId);
 	              }, 80);
 	            }
 	            return;
 	          }
-          try {
+	          let assistantLoadSucceeded = false;
+	          try {
             let storedState = await localforageModule.default.getItem(storageKey);
             if (!storedState) {
               let rawValue = localStorage.getItem(storageKey);
-              rawValue && ((storedState = JSON.parse(rawValue)), await localforageModule.default.setItem(storageKey, storedState));
+              rawValue && (storedState = JSON.parse(rawValue));
             }
             if (
               !storedState &&
@@ -93,18 +105,13 @@ export function useCanvasLoadEffect(deps: UseCanvasLoadEffectDeps) {
                   resolve(items?.[`${desktopCanvasMirrorPrefix}${storageKey.slice(canvasStateKeyPrefix.length)}`]),
                 );
               });
-              mirroredState && ((storedState = mirroredState), await localforageModule.default.setItem(storageKey, mirroredState));
+              mirroredState && (storedState = mirroredState);
             }
-            if (
-              storedState &&
-              typeof chrome < `u` &&
-              chrome.storage &&
-              chrome.storage.local
-            )
-              chrome.storage.local.set({
-                [`${desktopCanvasMirrorPrefix}${storageKey.slice(canvasStateKeyPrefix.length)}`]: storedState,
-              });
             if (storedState) {
+              // Hydrate only in memory. The save pipeline owns all migrations
+              // and mirrors, so a legacy plaintext fallback is never copied
+              // into another project store before encryption succeeds.
+              storedState = await restoreCanvasCustomConfigs(storedState, window.wanjuanDesktop || {});
               let {
                 nodes: nodes2,
                 edges: edges2
@@ -142,7 +149,7 @@ export function useCanvasLoadEffect(deps: UseCanvasLoadEffectDeps) {
                       checkResult.assets.map((asset) => [asset.path, asset.exists !== false]),
                     ));
                 } catch (error) {
-                  console.warn(`Project asset check skipped`, error);
+                  console.warn(`Project asset check skipped`);
                 }
 	                wanjuanIsDefaultStarterCanvas(nodes2, edges2) && ((nodes2 = []), (edges2 = []));
 	                (nodes2 && nodes2.length > 0 ?
@@ -268,13 +275,19 @@ export function useCanvasLoadEffect(deps: UseCanvasLoadEffectDeps) {
                   guardedSetNodes([]),
 	                  edges2 && guardedSetEdges(edges2));
 	            } else(guardedSetNodes([]), guardedSetEdges(WANJUAN_STARTER_EDGES));
+	            assistantLoadSucceeded = true;
 	          } catch (error) {
-            (console.error(`Failed to load canvas state`, error), guardedSetNodes([]), guardedSetEdges(WANJUAN_STARTER_EDGES));
+            (console.error(`Failed to load canvas state`), guardedSetNodes([]), guardedSetEdges(WANJUAN_STARTER_EDGES));
+	            if (assistantLoadActive && __wjLoadToken === globalThis.__wanjuanCanvasLoadToken)
+	              showToast?.(`画布读取失败，自动保存已暂停。请重新打开项目并检查数据后再编辑。`);
 	          } finally {
             setTimeout(() => {
+              if (!assistantLoadActive || __wjLoadToken !== globalThis.__wanjuanCanvasLoadToken || !assistantLoadSucceeded) return;
               (setShouldFitView(true), (shouldFitViewRef.current = true), (LoadOnceRef.current = true));
+              if (assistantLoadActive && assistantLoadSucceeded && __wjLoadToken === globalThis.__wanjuanCanvasLoadToken) onAssistantCanvasLoadState?.(projectId, true);
             }, 300);
           }
         })());
+          return () => { assistantLoadActive = false; };
 	    }, [projectId, setNodes, setEdges, initialEmptyProject]);
 }

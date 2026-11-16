@@ -18,6 +18,7 @@ import {
   normalizeProjectResourceMap,
 } from "../lib/project-normalize";
 import { runBackupRestoreTransaction } from "../lib/backup-restore-transaction";
+import { assertCanvasHasNoLocalConfigReferences, protectCanvasCustomConfigs } from "../lib/custom-node-config-transform";
 declare const chrome: any;
 
 interface UseRestoreSelectedBackupDeps {
@@ -95,11 +96,38 @@ export function use_restoreSelectedBackup(deps: UseRestoreSelectedBackupDeps) {
     const importedAgentConversations = agentChromeStorage.agentConversations && typeof agentChromeStorage.agentConversations === `object` ? cloneBackupValue(agentChromeStorage.agentConversations) : {};
     const projectResourceMap = normalizeProjectResourceMap(modules.projects?.projectResources);
     const selectedCanvasStates = Object.fromEntries(selectedProjectIds.filter((id) => Object.prototype.hasOwnProperty.call(projectPayload.canvasStates, id)).map((id) => [id, cloneBackupValue(projectPayload.canvasStates[id])]));
+    // A local vault reference is not portable and may not exist here. Reject
+    // before reading or writing the destination, rather than overwriting a
+    // working project with a configuration that cannot be restored.
+    if (restoreProjects) for (const state of Object.values(selectedCanvasStates)) assertCanvasHasNoLocalConfigReferences(state);
     const allowedImportedAssetKeys = new Set([
       ...Object.values(selectedCanvasStates).flatMap((state) => extractProjectAssetRefs(state)),
       ...Object.values(selectedCanvasStates).flatMap((state) => extractProjectPortableDataRefs(state)),
     ]);
     const assets = Object.fromEntries(Object.entries(projectPayload.assets || {}).filter(([key]) => allowedImportedAssetKeys.has(key)).map(([key, value]) => [key, cloneBackupValue(value)]));
+    // Export replaces some inline data with an external-file marker. If the
+    // import did not resolve one, committing would overwrite a working canvas
+    // while silently omitting its asset. Only inspect selected-project refs.
+    if (restoreProjects && typeof PROJECT_ASSET_MANIFEST_STORAGE_PREFIX === `string` && PROJECT_ASSET_MANIFEST_STORAGE_PREFIX) {
+      const isMarker = value => typeof value === `string` && value.startsWith(PROJECT_ASSET_MANIFEST_STORAGE_PREFIX);
+      const unresolvedValue = value => isMarker(value) || (value && typeof value === `object` && value.__wanjuanExternalAssetFile === true && (typeof value.filePath !== `string` || !value.filePath));
+      const unresolvedBinding = Object.values(selectedCanvasStates).some((state:any) => (Array.isArray(state?.nodes) ? state.nodes : []).some(node => {
+        const bindings = node?.data?.projectAssetBindings;
+        return bindings && typeof bindings === `object` && Object.values(bindings).some((binding:any) => {
+          if (!binding || typeof binding !== `object` || !isMarker(binding.sourceSignature)) return false;
+          const ref = binding.portableDataRef;
+          return typeof ref !== `string` || !Object.hasOwn(assets,ref) || unresolvedValue(assets[ref]);
+        });
+      }));
+      if (Object.values(assets).some(unresolvedValue) || unresolvedBinding) throw Object.assign(new Error(`PROJECT_BACKUP_ASSET_UNAVAILABLE`), {code:`PROJECT_BACKUP_ASSET_UNAVAILABLE`});
+    }
+    // Target-device encryption completes before reading or modifying any
+    // destination project store or staging a restore journal. A failed vault
+    // write leaves the existing projects intact; no raw-config fallback.
+    if (restoreProjects) for (const [id,state] of Object.entries(selectedCanvasStates)) {
+      if (Array.isArray((state as any)?.nodes)) selectedCanvasStates[id]=await protectCanvasCustomConfigs(state,
+        typeof window !== 'undefined' ? window.wanjuanDesktop || {} : {});
+    }
     const transitResources2 = Object.prototype.hasOwnProperty.call(resourcePayload, TRANSIT_RESOURCES_STORAGE_KEY) ? cloneBackupValue(resourcePayload[TRANSIT_RESOURCES_STORAGE_KEY]) : undefined;
     const currentStorage = await readChromeStorage(chrome.storage.local);
     const chromeSet: any = {};

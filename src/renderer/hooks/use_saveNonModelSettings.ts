@@ -47,7 +47,7 @@ export function use_saveNonModelSettings(deps: UseSaveNonModelSettingsDeps) {
     storageOptimizationPaused,
     themeMode,
   } = deps;
-  const saveNonModelSettings = () => {
+  const saveNonModelSettings = (overrides: Partial<Pick<UseSaveNonModelSettingsDeps, "themeMode" | "appLanguage" | "autoDownloadGeneratedResults">> = {}) => {
       if (
         !settingsHydratedRef.current ||
         typeof chrome > `u` ||
@@ -55,20 +55,26 @@ export function use_saveNonModelSettings(deps: UseSaveNonModelSettingsDeps) {
         !chrome.storage.local
       )
         return;
-      nonModelSettingsSaveTimerRef.current &&
-        clearTimeout(nonModelSettingsSaveTimerRef.current),
-        (nonModelSettingsSaveTimerRef.current = setTimeout(() => {
+      // An assistant command can arrive while an older debounced batch is
+      // pending. Reschedule the batch with the new value instead of letting
+      // the older snapshot overwrite the already-confirmed targeted write.
+      const nextTheme = overrides.themeMode ?? themeMode;
+      const nextLanguage = overrides.appLanguage ?? appLanguage;
+      const nextAutoDownload = overrides.autoDownloadGeneratedResults ?? autoDownloadGeneratedResults;
+      if (nonModelSettingsSaveTimerRef.current != null) clearTimeout(nonModelSettingsSaveTimerRef.current);
+      const timer = setTimeout(() => {
+          if (nonModelSettingsSaveTimerRef.current === timer) nonModelSettingsSaveTimerRef.current = null;
           chrome.storage.local.set({
             globalPollingInterval: pollingInterval,
             globalMaxPollingDuration: maxPollingDuration,
-            themeMode: themeMode,
-            uiTheme: themeMode,
-            theme: themeMode,
-            appearanceTheme: themeMode,
-            appLanguage: appLanguage,
-            uiLanguage: appLanguage,
+            themeMode: nextTheme,
+            uiTheme: nextTheme,
+            theme: nextTheme,
+            appearanceTheme: nextTheme,
+            appLanguage: nextLanguage,
+            uiLanguage: nextLanguage,
             downloadDirectory: downloadDirectory,
-            autoDownloadGeneratedResults: autoDownloadGeneratedResults,
+            autoDownloadGeneratedResults: nextAutoDownload,
             storageOptimizationEnabled: storageOptimizationEnabled,
             storageOptimizationPaused: storageOptimizationPaused,
             presetPrompts: presetPrompts,
@@ -80,7 +86,8 @@ export function use_saveNonModelSettings(deps: UseSaveNonModelSettingsDeps) {
             selectedAgentId: selectedAgentId,
             agentConversations: agentConversations,
           });
-        }, 250));
+        }, 250);
+      nonModelSettingsSaveTimerRef.current = timer;
     };
   return { saveNonModelSettings };
 }

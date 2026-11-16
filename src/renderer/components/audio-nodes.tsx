@@ -16,6 +16,7 @@ import { resolveModelApiBindingIdHelper } from "../lib/model-binding";
 import { WanJuanGetPreferredModel, WanJuanShouldAutoPreferredModel, WanJuanUseFavoriteModels } from "../lib/model-favorites";
 import { WanJuanSameModelId } from "../lib/model-id";
 import { buildProjectMediaFileUrl } from "../lib/resource";
+import { noteManualMediaReplacement } from "../lib/manual-media-replacement";
 import { useWanJuanMediaBudget } from "../lib/media-budget";
 import { WanJuanNodeHandle } from "./render-mode";
 
@@ -1664,7 +1665,8 @@ export const WanJuanAudioNode = reactMemo(({
               } catch {
                 audioName = connectedUrl;
               }
-              ((data.audioUrl = connectedUrl),
+              (noteManualMediaReplacement(nodeId, connectedUrl),
+                (data.audioUrl = connectedUrl),
                 (data.audioName = audioName),
                 setPrompt((e) => e),
                 updateNodeData(nodeId, {
@@ -1691,6 +1693,7 @@ export const WanJuanAudioNode = reactMemo(({
           if (!file) return;
           setAudioFile(file);
           let objectUrl = URL.createObjectURL(file);
+          noteManualMediaReplacement(nodeId, objectUrl);
           ((data.audioUrl = objectUrl),
             (data.audioName = file.name),
             setPrompt((e) => e),
@@ -1788,8 +1791,10 @@ export const WanJuanAudioNode = reactMemo(({
                   ((selectedFile = new File([byteArray], fileName, {
                       type: mimeType
                     })),
+                    (audioUrl = URL.createObjectURL(selectedFile)),
+                    noteManualMediaReplacement(nodeId, audioUrl),
                     updateNodeData(nodeId, {
-                      audioUrl: URL.createObjectURL(selectedFile),
+                      audioUrl: audioUrl,
                       audioName: fileName
                     }));
                 } else {
@@ -1801,8 +1806,10 @@ export const WanJuanAudioNode = reactMemo(({
                   ((selectedFile = new File([blob], fileName, {
                       type: blob.type || `audio/mpeg`
                     })),
+                    (audioUrl = URL.createObjectURL(selectedFile)),
+                    noteManualMediaReplacement(nodeId, audioUrl),
                     updateNodeData(nodeId, {
-                      audioUrl: URL.createObjectURL(selectedFile),
+                      audioUrl: audioUrl,
                       audioName: fileName
                     }));
                 }

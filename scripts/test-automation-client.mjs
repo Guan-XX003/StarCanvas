@@ -14,11 +14,13 @@ const staleFile = path.join(tempRoot, "stale-automation.json");
 const liveFile = path.join(devData, "starcanvas-automation.json");
 const legacyFile = path.join(tempRoot, "legacy-automation.json");
 const token = "client-test-token-000000000000000000000001";
+let networkRequests = 0;
 
 fs.mkdirSync(devData, { recursive: true });
 fs.writeFileSync(staleFile, JSON.stringify({ host: "127.0.0.1", port: 9, token, pid: 99999999 }));
 
 const server = http.createServer((req, res) => {
+  networkRequests++;
   if (req.headers.authorization !== `Bearer ${token}`) {
     res.writeHead(401);
     return res.end(JSON.stringify({ ok: false }));
@@ -48,9 +50,20 @@ const server = http.createServer((req, res) => {
 
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const liveInfo = JSON.stringify({ host: "127.0.0.1", port: server.address().port, token, pid: process.pid });
+  const liveInfo = JSON.stringify({ protocolVersion:2,host: "127.0.0.1", port: server.address().port, token, pid: process.pid });
   fs.writeFileSync(liveFile, liveInfo);
   fs.writeFileSync(legacyFile, liveInfo);
+  // New clients must not send content or writes to a pre-approval App. Status
+  // remains diagnostic-only; it must not silently grant the newer protocol.
+  process.env.STARCANVAS_AUTOMATION_FILE = legacyFile;
+  fs.writeFileSync(legacyFile,JSON.stringify({host:'127.0.0.1',port:server.address().port,token,pid:process.pid,protocolVersion:1}));
+  const beforeLegacy=networkRequests;
+  for(const [method,endpoint,body]of [['GET','/v1/tasks'],['POST','/v1/image/generate',{prompt:'DO_NOT_SEND'}]]){
+    await assert.rejects(starcanvasRequest(method,endpoint,body),{code:'OPERATION_APP_UPGRADE_REQUIRED'});
+  }
+  assert.equal(networkRequests,beforeLegacy,'incompatible Apps receive no task read or generation request');
+  assert.equal((await starcanvasRequest('GET','/v1/status')).ready,true);
+  fs.writeFileSync(legacyFile,liveInfo);
   process.chdir(tempRoot);
   process.env.STARCANVAS_AUTOMATION_FILE = staleFile;
   assert.deepEqual(automationCandidates(), [path.resolve(staleFile)], "显式 StarCanvas 凭据不得回退到其他实例");

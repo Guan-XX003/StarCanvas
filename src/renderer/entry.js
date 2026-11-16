@@ -16,5 +16,6 @@ import "./styles/stellar-editor.css";
 import "./styles/canvas-microinteractions.css";
 import "./styles/rounded-controls.css";
 import "./styles/agent-card-menu.css";
+import "./styles/assistant-onboarding.css";
 import "./lib/i18n-runtime.js";
 import "./bundle/index.js";

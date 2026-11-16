@@ -14,6 +14,7 @@ import { wanjuanBrokenResourceImage } from "../lib/resource-tabs";
 import { wanjuanArkAssetBindingMatchesImage } from "../lib/ark-trusted-assets";
 import { wanjuanResetTianjiPortraitBindingForImage } from "../lib/tianji-portrait";
 import { wanjuanImageEditorSourceFromNodeData } from "../lib/image-editor";
+import { noteManualMediaReplacement } from "../lib/manual-media-replacement";
 
 /** chrome 扩展运行时（仅在浏览器扩展环境存在）。 */
 declare const chrome: any;
@@ -27,6 +28,7 @@ export const WanJuanImageNode = reactMemo(({
       updateNodeData: updateNodeData
     } = useReactFlow(),
       fileInputRef = useRef(null),
+      manualSelectedDataRef = useRef<string | null>(null),
       imageUrl = data.imageUrl,
       label = data.label,
       mediaType = useMemo(
@@ -54,6 +56,8 @@ export const WanJuanImageNode = reactMemo(({
     // 用 ref 防重入；只处理图片/视频；file://、http、已落盘的不处理。
     let wjPersistRef = useRef(``);
     useEffect(() => {
+      const manualSelectedData = manualSelectedDataRef.current === imageUrl;
+      manualSelectedDataRef.current = null;
       if (typeof imageUrl !== `string` || !imageUrl.startsWith(`data:`)) return;
       if (mediaType !== `image` && mediaType !== `video`) return;
       if (wjPersistRef.current === imageUrl) return;
@@ -71,11 +75,16 @@ export const WanJuanImageNode = reactMemo(({
             directory: ``,
           });
           if (cancelled || !result?.ok || !result.localPath) return;
-          let fileUrl = buildProjectMediaFileUrl(result.localPath);
+          let fileUrl = buildProjectMediaFileUrl(result.localPath),
+            thumbnailUrl = result.thumbnailLocalPath ? buildProjectMediaFileUrl(result.thumbnailLocalPath) : fileUrl;
+          if (manualSelectedData) {
+            noteManualMediaReplacement(nodeId, fileUrl);
+            if (thumbnailUrl !== fileUrl) noteManualMediaReplacement(nodeId, thumbnailUrl);
+          }
           updateNodeData(nodeId, {
             ...wanjuanResetTianjiPortraitBindingForImage(data, fileUrl),
             imageUrl: fileUrl,
-            thumbnailUrl: result.thumbnailLocalPath ? buildProjectMediaFileUrl(result.thumbnailLocalPath) : fileUrl,
+            thumbnailUrl,
             localPath: result.localPath,
             filePath: result.localPath,
             projectAssetBindings: {
@@ -143,6 +152,7 @@ export const WanJuanImageNode = reactMemo(({
         children: arkBindingState.label,
       }) :
       null;
+    const portraitWithoutPreview = mediaType === `empty` && tianjiBindingStatus === `ready`;
     return jsxs(`div`, {
       className: `relative group/node w-full h-full min-w-[120px] min-h-[80px]`,
       children: [
@@ -184,6 +194,8 @@ export const WanJuanImageNode = reactMemo(({
               nativePath = wanjuanGetDroppedFilePath(file),
               stableUrl = nativePath ? buildProjectMediaFileUrl(nativePath) : ``,
               applySelectedMedia = (mediaUrl) => {
+                manualSelectedDataRef.current = typeof mediaUrl === `string` && mediaUrl.startsWith(`data:`) ? mediaUrl : null;
+                noteManualMediaReplacement(nodeId, mediaUrl);
                 updateNodeData(nodeId, {
                   ...wanjuanResetTianjiPortraitBindingForImage(data, mediaUrl),
                   imageUrl: mediaUrl,
@@ -225,12 +237,15 @@ export const WanJuanImageNode = reactMemo(({
                 if (!payload.localPath) return;
                 let result = await window.wanjuanDesktop.persistProjectAsset(payload);
                 if (!result?.ok || !result.localPath) return;
-                let fileUrl = buildProjectMediaFileUrl(result.localPath);
+                let fileUrl = buildProjectMediaFileUrl(result.localPath),
+                  thumbnailUrl = mediaKind === `image` && result.thumbnailLocalPath ? buildProjectMediaFileUrl(result.thumbnailLocalPath) : fileUrl;
+                noteManualMediaReplacement(nodeId, fileUrl);
+                if (mediaKind === `image` && thumbnailUrl !== fileUrl) noteManualMediaReplacement(nodeId, thumbnailUrl);
                 updateNodeData(nodeId, {
                   ...wanjuanResetTianjiPortraitBindingForImage(data, fileUrl),
                   imageUrl: fileUrl,
                   thumbnailUrl: mediaKind === `image` ?
-                    (result.thumbnailLocalPath ? buildProjectMediaFileUrl(result.thumbnailLocalPath) : fileUrl) :
+                    thumbnailUrl :
                     data.thumbnailUrl,
                   label: file.name,
                   mediaKind,
@@ -243,8 +258,9 @@ export const WanJuanImageNode = reactMemo(({
                     }),
                   },
                 });
-              } catch (error) {
-                console.warn(`Image node media persist skipped`, error);
+              } catch {
+                // Storage errors can contain private local paths or media URLs.
+                console.warn(`Image node media persist skipped`);
               }
             })();
             event.target.value = ``;
@@ -491,7 +507,7 @@ export const WanJuanImageNode = reactMemo(({
                     }),
                   ],
                 }),
-                mediaType === `empty` &&
+                mediaType === `empty` && !portraitWithoutPreview &&
                 jsx(`div`, {
                   className: `text-gray-600 text-[9px] flex flex-col items-center gap-1 p-3`,
                   children: jsx(`span`, {
@@ -499,7 +515,22 @@ export const WanJuanImageNode = reactMemo(({
                     children: `空`,
                   }),
                 }),
-                tianjiBindingBadge,
+                portraitWithoutPreview && jsxs(`div`, {
+                  "data-wanjuan-portrait-reference": true,
+                  className: `w-full flex flex-col items-center justify-center gap-2 p-3 text-center`,
+                  style: { color: `var(--wj-muted, #9ca3af)`, minWidth: 0 },
+                  children: [
+                    jsx(ShieldCheck, { size: 24, style: { color: `var(--wj-accent, currentColor)` } }),
+                    jsx(`span`, { className: `text-[11px] leading-tight`, children: tianjiBindingState.label }),
+                    jsx(`code`, {
+                      "data-wanjuan-i18n-skip": true,
+                      title: data.tianjiPortraitAssetId,
+                      style: { fontSize: 11, maxWidth: `100%`, maxHeight: `3.6em`, overflow: `hidden`, overflowWrap: `anywhere` },
+                      children: data.tianjiPortraitAssetId,
+                    }),
+                  ],
+                }),
+                !portraitWithoutPreview && tianjiBindingBadge,
                 arkBindingBadge,
               ],
             }),

@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const { spawn, spawnSync } = require("node:child_process");
+const { createCandidateLaunchPlan } = require("./candidate-launch-plan.cjs");
 
 const projectRoot = path.resolve(__dirname, "..");
 const mode = process.argv.includes("--packaged") ? "packaged" : "dev";
@@ -29,18 +30,15 @@ function findPackagedApp() {
 }
 
 let command;
-let appArgs;
 let cliRoot;
 if (mode === "packaged") {
   if (process.platform !== "darwin") throw new Error("当前打包版冒烟脚本仅在 macOS 运行；Windows 使用 build:win 后检查 resources/starcanvas-cli");
   const appBundle = findPackagedApp();
   if (!appBundle) throw new Error("找不到打包后的StarCanvas.app，请先运行 npm run build");
   command = path.join(appBundle, "Contents", "MacOS", "StarCanvas");
-  appArgs = [];
   cliRoot = path.join(appBundle, "Contents", "Resources", "starcanvas-cli");
 } else {
   command = require("electron");
-  appArgs = [projectRoot];
   cliRoot = path.join(projectRoot, "bin");
 }
 
@@ -51,19 +49,19 @@ assert.equal(fs.existsSync(mcpPath), true, `${mode} MCP 文件应存在`);
 assert.equal(fs.existsSync(path.join(cliRoot, "wanjuan.mjs")), true, `${mode} 旧 CLI 兼容入口应存在`);
 assert.equal(fs.existsSync(path.join(cliRoot, "wanjuan-mcp.mjs")), true, `${mode} 旧 MCP 兼容入口应存在`);
 
-const child = spawn(command, appArgs, {
-  cwd: projectRoot,
+const launch = createCandidateLaunchPlan({env:{
+  ...process.env,
+  STARCANVAS_CANDIDATE_APP:mode === "packaged" ? path.dirname(path.dirname(path.dirname(command))) : projectRoot,
+  STARCANVAS_CANDIDATE_USER_DATA:userDataPath,
+  WANJUAN_GPU_MODE:"off",
+  WANJUAN_AUTOMATION_TEST_ENDPOINTS:"1",
+}});
+const child = spawn(launch.command, launch.args, {
+  cwd: launch.cwd,
   stdio: "ignore",
-  env: {
-    ...process.env,
-    WANJUAN_TEST_USER_DATA_PATH: userDataPath,
-    WANJUAN_ALLOW_PACKAGED_TEST_USER_DATA: "1",
-    WANJUAN_ALLOW_RANDOM_PORT: "1",
-    WANJUAN_DISABLE_UPDATE_CHECK: "1",
-    WANJUAN_GPU_MODE: "off",
-    WANJUAN_AUTOMATION_TEST_ENDPOINTS: "1",
-  },
+  env: launch.env,
 });
+const ownExit = new Promise(resolve => child.once("exit", resolve));
 
 const cliEnv = { ...process.env, STARCANVAS_AUTOMATION_FILE: infoFile };
 function runCli(args) {
@@ -82,18 +80,6 @@ async function requestApp(method, endpoint, payload, allowError = false) {
   if (!allowError) assert.equal(response.ok, true, JSON.stringify(result));
   return result;
 }
-async function waitForMaterialize(payload) {
-  const deadline = Date.now() + 15000;
-  let lastResult;
-  while (Date.now() < deadline) {
-    lastResult = await requestApp("POST", "/v1/automation-test/materialize", payload, true);
-    if (lastResult?.ok) return lastResult;
-    if (!/自动化接口尚未就绪/.test(String(lastResult?.error || ""))) break;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(JSON.stringify(lastResult || { error: "隔离媒体持久化测试超时" }));
-}
-
 async function waitForStatus() {
   const deadline = Date.now() + 45000;
   let lastError;
@@ -114,18 +100,24 @@ async function waitForStatus() {
 
 async function inspectMcp() {
   const mcp = spawn(process.execPath, [mcpPath], { cwd: projectRoot, env: cliEnv, stdio: ["pipe", "pipe", "pipe"] });
+  const exited = new Promise(resolve=>mcp.once("exit",(code,signal)=>resolve({code,signal})));
   const replies = new Map();
   readline.createInterface({ input: mcp.stdout }).on("line", (line) => {
     try { const value = JSON.parse(line); replies.set(value.id, value); } catch {}
   });
   const send = (value) => mcp.stdin.write(`${JSON.stringify(value)}\n`);
   send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "automation-smoke", version: "1" } } });
+  send({ jsonrpc: "2.0", method: "notifications/initialized" });
   send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   const deadline = Date.now() + 5000;
   while (replies.size < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  mcp.kill();
+  mcp.stdin.end();
+  const exit = await Promise.race([exited,new Promise(resolve=>setTimeout(()=>resolve(null),3000))]);
+  if (!exit) { mcp.kill("SIGTERM"); throw new Error("MCP shutdown unconfirmed"); }
+  assert.equal(exit.code,0);
   assert.equal(replies.get(1)?.result?.serverInfo?.name, "starcanvas");
-  assert.equal(replies.get(2)?.result?.tools?.length, 9);
+  assert.equal(replies.get(2)?.result?.tools?.length, 14);
+  for (const name of ["starcanvas_submit_operation", "starcanvas_get_operation", "starcanvas_cancel_operation", "starcanvas_import_media", "starcanvas_export_task"]) assert(replies.get(2).result.tools.some(tool => tool.name === name));
   assert.equal(replies.get(2)?.result?.tools?.every((tool) => tool.name.startsWith("starcanvas_")), true);
 }
 
@@ -146,22 +138,26 @@ async function inspectMcp() {
     assert.equal(tasks.ok, true);
     assert.equal(Array.isArray(tasks.tasks), true);
     if (mode === "dev") {
-      const mediaRoot = path.join(tempRoot, "media-root");
-      const materialized = await waitForMaterialize({ kind: "image", dataUrl: tinyPng, directory: mediaRoot });
-      assert.equal(materialized.ok, true);
-      assert.match(materialized.resultUrl, /^file:\/\//);
-      assert.equal(fs.existsSync(materialized.localPath), true, "隔离项目媒体文件应已写入");
-      assert.equal(path.resolve(materialized.localPath).startsWith(path.resolve(mediaRoot)), true, "媒体结果必须写入隔离测试目录");
+      const mediaRoot = path.join(userDataPath, "media-root");
+      const denied = await requestApp("POST", "/v1/automation-test/materialize", { kind: "image", dataUrl: tinyPng, directory: mediaRoot }, true);
+      assert.equal(denied.ok, false);
+      assert.equal(denied.code, "OPERATION_PERMISSION_REQUIRED");
+      assert.equal(denied.permission, "media.export");
+      assert.equal(fs.existsSync(mediaRoot), false, "未获应用端确认时不能借旧测试入口写入媒体");
     }
     await inspectMcp();
     console.log(`automation ${mode} app: status/models/tasks and MCP initialize/tools/list passed`);
   } finally {
-    if (child.exitCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     await Promise.race([
-      new Promise((resolve) => child.once("exit", resolve)),
+      ownExit,
       new Promise((resolve) => setTimeout(resolve, 3000)),
     ]);
-    if (child.exitCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await Promise.race([ownExit,new Promise(resolve=>setTimeout(resolve,3000))]);
+    }
+    if (child.exitCode === null && child.signalCode === null) throw new Error(`Candidate exit unconfirmed; isolated data retained at ${tempRoot}`);
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 })().catch((error) => {

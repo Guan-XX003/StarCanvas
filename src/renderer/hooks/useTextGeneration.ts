@@ -7,6 +7,7 @@ import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, S
 import { resolveModelApiBindingIdHelper, resolveModelProtocolBindingHelper } from "../lib/model-binding";
 import { mediaUrlToDataUrl, wanjuanCollectNodeReferenceMedia, wanjuanNodeTextValue, wanjuanNormalizeReferenceMediaUrl } from "../lib/reference-media";
 import { serializeErrorPreview } from "../lib/log-utils";
+import { safeGenerationError } from "../lib/custom-task-error";
 import { WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE } from "../lib/upload-defaults";
 import { wanjuanResourceKind, wanjuanResourceMediaUrl } from "../lib/resource";
 
@@ -269,7 +270,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     textNodeVideoLooksLikeDirectUrl(trimmedUrl)
                   )
                     return (
-                      console.log(`Text node chat video using direct public URL:`, trimmedUrl),
+                      console.log(`Text node chat video uses a direct public URL`),
                       trimmedUrl
                     );
                   let uploadMode = seedanceUploadMode || WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE;
@@ -309,22 +310,20 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                       textNodeVideoLooksLikeDirectUrl(uploadResult.url)
                     )
                       return (
-                        console.log(`Text node chat video uploaded to public URL:`, trimmedUrl, uploadResult.url),
+                        console.log(`Text node chat video uploaded`),
                         uploadResult.url
                       );
-                    uploadResult && console.warn(`Text node video upload did not return a direct public URL:`, uploadResult);
-                  } catch (error) {
-                    console.warn(`Failed to upload text node video for chat payload:`, trimmedUrl, error);
+                    uploadResult && console.warn(`Text node video upload did not return a direct public URL`);
+                  } catch {
+                    console.warn(`Failed to upload text node video for chat payload`);
                   }
                   return /^https?:\/\//i.test(trimmedUrl) && textNodeVideoIsPublicUrl(trimmedUrl) ?
                     (console.warn(
-                        `Text node chat video fallback is using non-direct public URL; upstream may still ignore it:`,
-                        trimmedUrl,
+                        `Text node chat video fallback is using a non-direct public URL; upstream may still ignore it`,
                       ),
                       trimmedUrl) :
                     (console.warn(
-                        `Video was not attached to chat payload because it could not be normalized to a public video URL:`,
-                        trimmedUrl,
+                        `Video was not attached to chat payload because it could not be normalized to a public video URL`,
                       ),
                       ``);
                 },
@@ -394,9 +393,6 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
             console.log(
               `Text node routing:`,
               JSON.stringify({
-                textModelName,
-                textProtocolBindingName,
-                textRequestProtocol,
                 multimodalImageCount: imageUrls.length,
                 multimodalVideoCount: videoUrls.length,
                 forceGeminiMultimodal,
@@ -431,7 +427,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     }
                   });
                 } catch (error) {
-                  console.warn(`Failed to process image for text node:`, imageUrl, error);
+                  console.warn(`Failed to process image for text node`);
                 }
               for (let videoUrl of videoUrls)
                 try {
@@ -493,7 +489,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     }
                   });
                 } catch (error) {
-                  console.warn(`Failed to process image for text node chat payload:`, imageUrl, error);
+                  console.warn(`Failed to process image for text node chat payload`);
                 }
               for (let videoUrl of videoUrls)
                 try {
@@ -507,11 +503,10 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                       }
                     }) :
                     console.warn(
-                      `Video was not attached to chat payload because it could not be normalized to a public video URL:`,
-                      videoUrl,
+                      `Video was not attached to chat payload because it could not be normalized to a public video URL`,
                     );
                 } catch (error) {
-                  console.warn(`Failed to process video for text node chat payload:`, videoUrl, error);
+                  console.warn(`Failed to process video for text node chat payload`);
                 }
               textContent ? contentParts.push({
                 type: `text`,
@@ -675,18 +670,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                   `${baseUrl}${endpointPath.startsWith(`/`) ? `` : `/`}${endpointPath}` :
                   baseUrl;
               })();
-              console.log(
-                `Sending Text API payload:`,
-                JSON.stringify(requestPayload, null, 2).substring(0, 1e3) + `...(truncated)`,
-              );
-              console.log(
-                `Sending Text API request info:`,
-                JSON.stringify({
-                  url: textRequestUrl,
-                  authType: isGeminiProtocol ? (authScheme === `x-goog-api-key` && isGoogleEndpoint ? `x-goog-api-key` : `bearer`) : `bearer`,
-                  requestType: isGeminiProtocol ? `gemini-compatible` : `chat-completions-multimodal`,
-                }),
-              );
+              console.log(`Sending Text API request`);
               requestUrl = textRequestUrl;
               let response = await fetch(requestUrl, {
                 method: `POST`,
@@ -710,7 +694,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     errorMessage = `API Error: ${response.status} - ${serializeErrorPreview(errorText)}`;
                   } catch {}
                 }
-                throw Error(errorMessage);
+                throw Error(`HTTP ${response.status}: ${errorMessage}`);
               }
 	              let responseData = await response.json(),
 	                textProtocolResponsePaths =
@@ -766,7 +750,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                         }
                       }));
                   } catch (error) {
-                    console.warn(`Failed to process image for text node:`, imageUrl, error);
+                    console.warn(`Failed to process image for text node`);
                   }
                 for (let videoUrl of videoUrls)
                   try {
@@ -780,11 +764,10 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                         }
                       }) :
                       console.warn(
-                        `Video was not attached to text node payload because it could not be normalized to a public video URL:`,
-                        videoUrl,
+                        `Video was not attached to text node payload because it could not be normalized to a public video URL`,
                       );
                   } catch (error) {
-                    console.warn(`Failed to process video for text node:`, videoUrl, error);
+                    console.warn(`Failed to process video for text node`);
                   }
                   (textContent ?
                     contentParts.push({
@@ -803,10 +786,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                 role: `user`,
                 content: textContent || ` `
               });
-              console.log(
-                `Sending Text API payload:`,
-                JSON.stringify(messages, null, 2).substring(0, 1e3) + `...(truncated)`,
-              );
+              console.log(`Sending Text API request`);
               requestUrl = `${textApiBaseUrl}/v1/chat/completions`;
               let response = await fetch(requestUrl, {
                 method: `POST`,
@@ -846,7 +826,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     errorMessage = `API Error: ${response.status} - ${serializeErrorPreview(responseText)}`;
                   } catch {}
                 }
-                throw Error(errorMessage);
+                throw Error(`HTTP ${response.status}: ${errorMessage}`);
               }
               generatedText = (await response.json()).choices?.[0]?.message?.content || ``;
             }
@@ -877,7 +857,6 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                 } catch (error) {
                   console.warn(
                     `JSON parsing failed, attempting fallback regex parsing`,
-                    error,
                   );
                   let titleContentRegex =
                     /"title"\s*:\s*"([^"]+)"\s*,\s*"content"\s*:\s*"([^"]+)"/g,
@@ -1007,7 +986,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                   );
                 } else throw Error(`Result is not an array`);
               } catch (error) {
-                (console.warn(`Auto split failed, fallback to normal text`, error),
+                (console.warn(`Auto split failed, fallback to normal text`),
                   showToast(`自动拆分失败 (格式不符)，已显示完整文本`),
                   setNodes((nodes3) =>
                     nodes3.map((node2) =>
@@ -1057,6 +1036,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
               console.log(`Fetch aborted`);
               return;
             }
+            let safeError = safeGenerationError(error, "media");
             (updateGlobalTaskList &&
               updateGlobalTaskList((taskList) =>
                 taskList.map((task) =>
@@ -1064,13 +1044,13 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                   {
                     ...task,
                     status: `failed`,
-                    errorMsg: error.message
+                    errorMsg: safeError
                   } :
                   task,
                 ),
               ),
-              console.error(error),
-              showToast(`生成失败: ${error.message}`),
+              console.error(`Text generation failed`),
+              showToast(safeError),
               setNodes((nodes2) =>
                 nodes2.map((node) =>
                   node.id === nodeId ?
@@ -1079,7 +1059,7 @@ export function useTextGeneration(deps: UseTextGenerationDeps) {
                     data: {
                       ...node.data,
                       loading: false,
-                      errorMessage: error.message
+                      errorMessage: safeError
                     },
                   } :
                   node,

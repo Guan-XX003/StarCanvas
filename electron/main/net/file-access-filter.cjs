@@ -13,6 +13,8 @@ const path = require("node:path");
 const { app, session } = require("../electron-refs.cjs");
 const { appendDesktopLog, truncateLogValue } = require("../logging.cjs");
 const { defaultDownloadDirectory, localPathFromFileUrl } = require("../utils/paths.cjs");
+const {isolatedCandidatePaths,candidateQaFileAllowed,candidateQaNetworkAllowed}=require('../../shared/isolated-candidate-qa.cjs');
+const {getDesktopBaseUrl}=require('../runtime-state.cjs');
 
 const ROOTS_CACHE_TTL_MS = 10000;
 let cachedRoots = null;
@@ -26,6 +28,7 @@ function addRoot(roots, candidate) {
 }
 
 function computeAllowedFileRoots() {
+  const qa=isolatedCandidatePaths();if(qa)return [qa.profile];
   const roots = new Set();
   addRoot(roots, defaultDownloadDirectory());
   addRoot(roots, app.getPath("userData"));
@@ -69,7 +72,7 @@ function isPathAllowed(filePath, roots) {
 }
 
 function installFileAccessFilter() {
-  if (process.env.WANJUAN_DISABLE_FILE_FILTER === "1") {
+  if (process.env.WANJUAN_DISABLE_FILE_FILTER === "1" && !isolatedCandidatePaths()) {
     appendDesktopLog("file-access-filter-disabled", { reason: "env" });
     return;
   }
@@ -77,11 +80,13 @@ function installFileAccessFilter() {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const url = String(details.url || "");
     if (!/^file:\/\//i.test(url)) {
-      callback({});
+      const qa=isolatedCandidatePaths();
+      callback(qa&&/^(?:https?|wss?):/i.test(url)?{cancel:!candidateQaNetworkAllowed(url,getDesktopBaseUrl())}:{});
       return;
     }
     const localPath = localPathFromFileUrl(url);
-    const allowed = Boolean(localPath) && isPathAllowed(localPath, allowedFileRoots());
+    const qaAllowed=candidateQaFileAllowed(localPath);
+    const allowed = qaAllowed===null?Boolean(localPath) && isPathAllowed(localPath, allowedFileRoots()):qaAllowed;
     if (!allowed) {
       appendDesktopLog("file-access-blocked", {
         url: truncateLogValue(url),
@@ -95,6 +100,7 @@ function installFileAccessFilter() {
 
 // 供 IPC 本地文件读取/上传路径复用同一套白名单（与 file:// 渲染过滤一致）。
 function isLocalFilePathAllowed(filePath) {
+  const qaAllowed=candidateQaFileAllowed(filePath);if(qaAllowed!==null)return qaAllowed;
   return Boolean(filePath) && isPathAllowed(filePath, allowedFileRoots());
 }
 

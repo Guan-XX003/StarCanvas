@@ -1,0 +1,41 @@
+// Exercise the actual restore hook with synthetic, in-memory storage only.
+const assert=require('node:assert/strict'),fs=require('node:fs'),Module=require('node:module'),ts=require('typescript');
+const oldLoad=Module._load,oldTs=require.extensions['.ts'],oldChrome=global.chrome,oldLocal=global.localStorage,oldWindow=global.window;
+require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},fileName:file}).outputText,file);
+let commits=[];
+Module._load=function(name,parent,...rest){if(parent?.filename.endsWith('use_restoreSelectedBackup.ts')&&name==='../lib/backup-restore-transaction')return {runBackupRestoreTransaction:async value=>{commits.push(value);return {ok:true}}};return oldLoad.apply(this,[name,parent,...rest])};
+const {use_restoreSelectedBackup}=require('../src/renderer/hooks/use_restoreSelectedBackup.ts');Module._load=oldLoad;
+const {backupImportFailureMessage}=require('../src/renderer/lib/backup-export-errors.ts');
+const protectedState={nodes:[{id:'n',type:'customNode',data:{config:{$starcanvasEncryptedConfig:'custom-config-v1:11111111-1111-4111-8111-111111111111'}}}],edges:[]};
+const ordinary={nodes:[{id:'m',type:'customNode',data:{config:{headers:'SYNTHETIC_MANUAL'}}}],edges:[]};
+const backup={modules:{projects:{chromeStorage:{projects:[{id:'proj-a'},{id:'proj-b'}]},localforage:{canvasStates:{'proj-a':protectedState,'proj-b':ordinary},assets:{}}}}};
+let reads=0,localReads=0,localWrites=0;
+global.chrome={runtime:{lastError:null},storage:{local:{get:(_keys,cb)=>{reads++;cb({projects:[{id:'proj-a',name:'existing'}]})}}}};
+global.localStorage={setItem:()=>{localWrites++},removeItem:()=>{localWrites++}};
+const deps={localforageModule:{default:{getItem:async()=>{localReads++;return ordinary}}},PROJECT_ASSET_MANIFEST_STORAGE_PREFIX:'external-asset-file:',TRANSIT_RESOURCES_STORAGE_KEY:'resources',extractProjectAssetRefs:()=>[],getAvailableBackupModules:()=>['projects'],getBackupSettingsSectionMap:()=>({availableSections:[],sections:{}}),getDesktopProjectMirrorStorageKey:id=>`mirror-${id}`,getProjectCanvasStorageKey:id=>`canvas-${id}`,normalizeBackupModules:value=>value.modules,normalizeResourceLocalforagePayload:()=>({}),agentConversations:{},projectGroups:[],projects:[],selectedAgentId:'',transitResources:[]};
+(async()=>{try{
+ const restore=use_restoreSelectedBackup(deps).restoreSelectedBackup;
+ await assert.rejects(restore(backup,['projects'],{projectIds:['proj-a']}),{code:'CUSTOM_CONFIG_BACKUP_NOT_PORTABLE'});
+ assert.equal(reads,0,'nonportable references rejected before destination read');assert.equal(localReads,0);assert.equal(localWrites,0);assert.equal(commits.length,0,'existing project must not be overwritten');
+ global.window={wanjuanDesktop:{customConfigProtect:async()=>({ok:false})}};
+ await assert.rejects(restore(backup,['projects'],{projectIds:['proj-b']}),{code:'CUSTOM_CONFIG_PROTECTION_FAILED'});
+ assert.equal(reads,0,'failed target-device encryption precedes destination reads');assert.equal(localReads,0);assert.equal(localWrites,0);assert.equal(commits.length,0);
+ const configs=new Map();global.window.wanjuanDesktop.customConfigProtect=async value=>{const reference='custom-config-v1:'+require('node:crypto').randomUUID();configs.set(reference,structuredClone(value));return {ok:true,reference}};
+ const missing=structuredClone(backup);missing.modules.projects.localforage.canvasStates['proj-b']={nodes:[{id:'image',data:{projectAssetBindings:{image:{portableDataRef:'synthetic-ref'}}}}],edges:[]};
+ missing.modules.projects.localforage.assets={'synthetic-ref':'external-asset-file:synthetic-ref'};
+ await assert.rejects(restore(missing,['projects'],{projectIds:['proj-b']}),{code:'PROJECT_BACKUP_ASSET_UNAVAILABLE'});
+ assert.equal(reads,0,'missing external assets rejected before destination read');assert.equal(localReads,0);assert.equal(localWrites,0);assert.equal(commits.length,0);
+ const missingEntry=structuredClone(missing);missingEntry.modules.projects.localforage.canvasStates['proj-b'].nodes[0].data.projectAssetBindings.image.sourceSignature='external-asset-file:synthetic-ref';missingEntry.modules.projects.localforage.assets={};
+ await assert.rejects(restore(missingEntry,['projects'],{projectIds:['proj-b']}),{code:'PROJECT_BACKUP_ASSET_UNAVAILABLE'});assert.equal(commits.length,0,'an absent manifest entry with an explicit marker is also rejected');
+ const safeSelected=structuredClone(missing);safeSelected.modules.projects.localforage.canvasStates['proj-a']=ordinary;
+ await restore(safeSelected,['projects'],{projectIds:['proj-a']});assert.equal(commits.length,1,'unselected missing assets do not block safe selection');commits=[];
+ const inline=structuredClone(missing);inline.modules.projects.localforage.assets['synthetic-ref']='data:image/png;base64,aW1hZ2U=';
+ await restore(inline,['projects'],{projectIds:['proj-b']});assert.equal(commits.length,1,'available inline asset remains importable');commits=[];
+ await restore(backup,['projects'],{projectIds:['proj-b']});assert.equal(commits.length,1,'unselected unsafe project does not block a safe selection');
+ const stored=commits[0].localforageSet.get('canvas-proj-b');
+ assert.doesNotMatch(JSON.stringify(stored),/SYNTHETIC_MANUAL/,'target project stores only the protected reference');
+ assert.deepEqual(configs.get(stored.nodes[0].data.config.$starcanvasEncryptedConfig),ordinary.nodes[0].data.config,'manual config values survive target-device encryption');
+ assert.doesNotMatch(JSON.stringify(commits[0].chromeSet),/SYNTHETIC_MANUAL/,'restore mirror and journal input also exclude plaintext');
+ for(const lang of ['zh-CN','zh-TW','en-US']) for(const code of ['CUSTOM_CONFIG_BACKUP_NOT_PORTABLE','PROJECT_BACKUP_ASSET_UNAVAILABLE','CUSTOM_CONFIG_PROTECTION_FAILED']) {const msg=backupImportFailureMessage({code,message:'SYNTHETIC_PRIVATE'},lang);assert.doesNotMatch(msg,/SYNTHETIC_PRIVATE/);assert.notEqual(msg,backupImportFailureMessage({},lang));}
+ console.log('PASS_BACKUP_IMPORT_REFERENCE_GUARD');
+}finally{global.chrome=oldChrome;global.localStorage=oldLocal;global.window=oldWindow;Module._load=oldLoad;if(oldTs)require.extensions['.ts']=oldTs;else delete require.extensions['.ts']}})().catch(error=>{console.error(error);process.exitCode=1});

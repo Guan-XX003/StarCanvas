@@ -759,7 +759,16 @@ function copyExternalProjectAssetFiles(targetJsonPath, assetFiles = [], requeste
     }
     manifest.copied = manifest.files.filter((entry) => !entry.error).length;
     manifest.failed = manifest.files.filter((entry) => entry.error).length;
-    fs.writeFileSync(path.join(stagingPath, "wanjuan-external-assets-manifest.json"), JSON.stringify(manifest, null, 2));
+    // Source paths are local-only diagnostic context, not portable backup
+    // metadata. The matching and restore paths use IDs, filenames, sizes and
+    // hashes; writing absolute source paths would expose the original user's
+    // filesystem layout to anyone receiving a backup. Keep them in the
+    // in-memory result for an export failure, but never in the disk manifest.
+    const portableManifest = {
+      ...manifest,
+      files: manifest.files.map(({sourcePath, ...entry}) => entry)
+    };
+    fs.writeFileSync(path.join(stagingPath, "wanjuan-external-assets-manifest.json"), JSON.stringify(portableManifest, null, 2));
     if (manifest.failed) {
       return {
         folderPath,

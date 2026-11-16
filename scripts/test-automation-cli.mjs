@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import {normalizeTianjiAutomationPayload} from '../bin/starcanvas-tianji-input.mjs';
 
 const require = createRequire(import.meta.url);
 const { validateTianjiPayload } = require("../electron/main/automation-server.cjs");
@@ -35,7 +36,7 @@ const server = http.createServer(async (req, res) => {
 
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  fs.writeFileSync(infoFile, JSON.stringify({ host: "127.0.0.1", port: server.address().port, token, pid: process.pid }));
+  fs.writeFileSync(infoFile, JSON.stringify({ protocolVersion:2,host: "127.0.0.1", port: server.address().port, token, pid: process.pid }));
   const env = { ...process.env, STARCANVAS_AUTOMATION_FILE: infoFile };
   const help = await runCli(["--help"], env);
   assert.equal(help.status, 0, help.stderr);
@@ -54,7 +55,15 @@ try {
     method: "POST", url: "/v1/tianji/generate",
     body: { prompt: "mock only", model: "", resolution: "720p", duration: "5", aspectRatio: "16:9", mode: "reference-media", images: ["/tmp/ordinary.png"], portraitAssetIds: ["asset-reviewed-mock"], videos: ["/tmp/ref.mp4"], audios: ["/tmp/ref.wav"] },
   });
-  assert.equal(requests[1].url, "/v1/tasks/task-cli?materialize=1");
+  assert.equal(requests[1].url, "/v1/tasks/task-cli");
+  const referenceId='reference-11111111-2222-4333-8444-555555555555';
+  const scoped=await runCli(['video','generate','--prompt','mock reference','--reference-id',referenceId,'--project','QA_PROJECT'],env);assert.equal(scoped.status,0,scoped.stderr);assert.deepEqual(requests.at(-1).body.references,[referenceId]);
+  const scopedTianji=await runCli(['tianji','generate','--prompt','mock reference','--reference-id',referenceId],env);assert.equal(scopedTianji.status,0,scopedTianji.stderr);assert.deepEqual(requests.at(-1).body.references,[referenceId]);assert.equal(requests.at(-1).body.mode,'reference-media');
+  const missingReference=await runCli(['image','generate','--prompt','mock','--reference-id'],env);assert.equal(missingReference.status,1);assert.match(JSON.parse(missingReference.stderr).error,/必须提供值/);
+  const rawMode=await runCli(['tianji','generate','--prompt','mock raw','--image','/QA/first.png'],env);assert.equal(rawMode.status,0,rawMode.stderr);assert.equal(requests.at(-1).body.mode,'reference-media');
+  const explicitMode=await runCli(['tianji','generate','--prompt','mock first','--mode','first-frame','--image','/QA/first.png'],env);assert.equal(explicitMode.status,0,explicitMode.stderr);assert.equal(requests.at(-1).body.mode,'first-frame');
+  const missingImage=await runCli(['tianji','generate','--prompt','mock','--image'],env);assert.equal(missingImage.status,1);assert.match(missingImage.stderr,/必须提供值/);
+  for(const bad of [{images:'not-array'},{videos:[42]},{audios:null},{mode:false}])assert.throws(()=>normalizeTianjiAutomationPayload({prompt:'QA',...bad}));
   const forgedImage = await runCli(["tianji", "generate", "--prompt", "mock", "--mode", "reference-media", "--image", "asset://forged"], env);
   assert.equal(forgedImage.status, 1);
   assert.match(forgedImage.stderr, /普通图片参数不能使用 asset:\/\//);

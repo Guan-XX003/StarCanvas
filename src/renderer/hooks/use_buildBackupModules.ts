@@ -113,6 +113,7 @@ export function use_buildBackupModules(deps: UseBuildBackupModulesDeps) {
                                 (backupManifest[canvasStorageKey] = cloneBackupValue(projects2[mirrorStorageKey]));
                             }
                             let projectPayload = await buildProjectLocalforageExportPayload(backupManifest, selectedProjectIds, {
+                              encrypted: selection.encrypted === true,
                               currentProjectId: setEdges.current,
                               currentProjectState: apiConfigs.current ?
                                 {

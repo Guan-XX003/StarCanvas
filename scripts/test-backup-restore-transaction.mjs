@@ -200,11 +200,30 @@ try {
   assert.equal(getStorageWriteBarrierState(barrierLocal).holdUntilReload, true);
   await assert.rejects(() => barrierLocal.setItem("canvas", "delayed-stale-autosave"), /STORAGE_WRITE_SUPERSEDED_BY_RESTORE/);
   assert.equal(await barrierLocal.getItem("canvas"), "imported-new", "autosave after commit but before reload must remain blocked");
-  const callbackError = await new Promise((resolve) => {
-    globalThis.chrome.storage.local.set({ project: "delayed-stale-chrome" }, () => resolve(globalThis.chrome.runtime.lastError));
-  });
+  const loggedWrites = [], originalError = console.error;
+  let callbackError;
+  try {
+    console.error = (...args) => loggedWrites.push(args);
+    callbackError = await new Promise((resolve) => {
+      globalThis.chrome.storage.local.set({ project: "delayed-stale-chrome" }, () => resolve(globalThis.chrome.runtime.lastError));
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  } finally { console.error = originalError; }
   assert.match(String(callbackError?.message || callbackError), /STORAGE_WRITE_SUPERSEDED_BY_RESTORE/);
+  assert.deepEqual(loggedWrites, [["Storage write blocked"]], "callback errors must not enter logs");
   assert.equal(barrierChrome.values.project, "imported-new", "rejected Chrome callback write must not overwrite imported state");
+
+  const privateLocal = makeLocal(), privateChrome = makeChrome(), privateRuntime = {lastError:null};
+  privateChrome.set = () => { throw new Error("SYNTHETIC_PRIVATE_STORAGE_VALUE"); };
+  const privateController = installStorageWriteBarrier({localforage:privateLocal,chromeStorage:privateChrome,chromeRuntime:privateRuntime});
+  const privateLogs=[]; let privateError;
+  try {
+    console.error=(...args)=>privateLogs.push(args);
+    privateError=await new Promise(resolve=>privateController.chromeStorage.set({project:"synthetic"},()=>resolve(privateController.chromeRuntime.lastError)));
+    await new Promise(resolve=>setTimeout(resolve,0));
+  } finally {console.error=originalError;}
+  assert.match(privateError.message,/SYNTHETIC_PRIVATE_STORAGE_VALUE/,"callback error semantics are preserved");
+  assert.deepEqual(privateLogs,[["Storage write blocked"]],"raw storage error must not be logged");
 
   const busyLocal = makeLocal();
   const busyChrome = makeChrome();

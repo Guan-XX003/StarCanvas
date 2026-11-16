@@ -14,6 +14,7 @@ export function WanJuanBackupDialog({
   setBackupDialogState,
   setBackupDialogTab,
 }: any) {
+  const appLanguage = globalThis.wanjuanI18nRuntime?.getLanguage?.() || `zh-CN`;
   return jsx(`div`, {
           className: `absolute inset-0 z-40 flex items-center justify-center bg-black/55 backdrop-blur-sm p-6`,
           children: jsxs(`div`, {
@@ -57,6 +58,7 @@ export function WanJuanBackupDialog({
                           ``,
                         ],
                       }),
+                      jsx(`p`,{className:`mt-2 text-xs leading-5`,'data-wanjuan-i18n-skip':true,'data-wanjuan-assistant-backup-boundary':true,style:{color:backupDialogTheme.textSecondary},children:appLanguage==='en-US'?'The agents module here contains legacy data only. Back up new assistant roles, conversations and attachments separately in Assistant workbench → Workbench backup.':appLanguage==='zh-TW'?'此處的智慧體模組僅包含舊版資料。新助手角色、對話與附件請在「助手工作台 → 工作台備份」中另行加密備份。':'这里的智能体模块仅包含旧版数据。新助手角色、会话和附件请在“助手工作台 → 工作台备份”中另外加密备份。'}),
                     ],
                   }),
                   jsx(`button`, {
@@ -482,6 +484,13 @@ export function WanJuanBackupDialog({
                       1 :
                       0,
                       ` 项`,
+                      backupDialogState.mode === `export` && jsxs(`label`, {
+                        className: `mt-2 flex items-start gap-2 cursor-pointer`,
+                        children: [
+                          jsx(`input`, {type:`checkbox`, checked:backupDialogState.encrypted === true, onChange:(event) => { const checked = event.target.checked; setBackupDialogState(previous => previous ? {...previous,encrypted:checked} : previous); }}),
+                          jsx(`span`, {children: appLanguage === `en-US` ? `Encrypt backup JSON with a password (external media and filenames are not encrypted)` : appLanguage === `zh-TW` ? `使用密碼加密備份 JSON（外部素材與檔名不加密）` : `使用密码加密备份 JSON（外部素材和文件名不加密）`}),
+                        ],
+                      }),
                     ],
                   }),
                   jsxs(`div`, {

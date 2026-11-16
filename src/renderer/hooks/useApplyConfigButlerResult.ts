@@ -8,6 +8,7 @@ import { cloneBackupValue } from "../lib/backup";
 import { ensureModelInList } from "../lib/model-list-utils";
 import { finalizeButlerProtocolConfig, normalizeButlerBaseUrl, normalizeModelCategory, normalizeProtocolConfig, normalizeProtocolName, validateButlerProtocolConfig } from "../lib/config-butler";
 import { guessApiConfigName, normalizeUnifiedApiConfigs } from "../lib/unified-api-config";
+import { validateButlerProtocolSafety } from "../lib/butler-protocol-safety";
 declare const chrome: any;
 
 interface UseApplyConfigButlerResultDeps {
@@ -18,6 +19,7 @@ interface UseApplyConfigButlerResultDeps {
   audioModelProtocolBindings: ProtocolBindings;
   audioModels: any;
   configButlerTargetApiConfigId: any;
+  configButlerDocUrl: any;
   configButlerTargetApiKey: any;
   configButlerTargetApiUrl: any;
   configButlerTargetCategory: any;
@@ -69,6 +71,7 @@ export function useApplyConfigButlerResult(deps: UseApplyConfigButlerResultDeps)
     audioModelProtocolBindings,
     audioModels,
     configButlerTargetApiConfigId,
+    configButlerDocUrl,
     configButlerTargetApiKey,
     configButlerTargetApiUrl,
     configButlerTargetCategory,
@@ -111,48 +114,71 @@ export function useApplyConfigButlerResult(deps: UseApplyConfigButlerResultDeps)
     videoModels,
   } = deps;
   const applyConfigButlerResult = (butlerResult) => {
+          const selectedApiConfig = getSelectedButlerTargetApiConfig();
+          const explicitTargetId = String(configButlerTargetApiConfigId || ``);
+          if (explicitTargetId && (!apiConfigs.some(config => config.id === explicitTargetId) || selectedApiConfig?.id !== explicitTargetId)) {
+            throw Error(`所选 API 配置已变化或不存在，请重新选择并分析`);
+          }
+          const selectedTargetId = String(selectedApiConfig?.id || explicitTargetId || ``);
+          if (butlerResult.__wanjuanTargetApiConfigId && String(butlerResult.__wanjuanTargetApiConfigId) !== selectedTargetId) {
+            throw Error(`目标 API 配置已变化，请重新分析后再应用`);
+          }
+          if (typeof configButlerDocUrl === `string` && butlerResult.toolContext?.sourceUrl && String(butlerResult.toolContext.sourceUrl).trim() !== configButlerDocUrl.trim()) {
+            throw Error(`API 文档链接已变化，请重新分析后再应用`);
+          }
           let modelName = String(butlerResult.modelName || configButlerTargetModel || ``).trim(),
             category =
             normalizeModelCategory(configButlerTargetCategory) ||
             normalizeModelCategory(butlerResult.category) ||
             ``,
-            apiUrl = String(
-              (getSelectedButlerTargetApiConfig() || {}).url ||
-              configButlerTargetApiUrl ||
-              butlerResult.apiConfig?.url ||
-              ``,
-            ).trim(),
-            apiKey = String(
-              (getSelectedButlerTargetApiConfig() || {}).key ||
-              configButlerTargetApiKey ||
-              ``,
-            ).trim();
+            apiUrl = String(selectedApiConfig ? (selectedApiConfig.url || ``) : (configButlerTargetApiUrl || butlerResult.apiConfig?.url || ``)).trim(),
+            apiKey = String(selectedApiConfig ? (selectedApiConfig.key || ``) : (configButlerTargetApiKey || ``)).trim();
           if (!modelName || !category || !apiUrl) throw Error(`配置结果缺少模型名、分类或请求地址`);
+          const requestedModel = String(configButlerTargetModel || ``).trim();
+          if (requestedModel && modelName !== requestedModel) throw Error(`结果模型 ID 与当前选择不一致，请重新分析或先更改模型名称`);
+          const sourceTarget = butlerResult.toolContext?.target;
+          if (sourceTarget && typeof sourceTarget === `object`) {
+            if ((sourceTarget.modelName && String(sourceTarget.modelName).trim() !== modelName) ||
+                (sourceTarget.category && normalizeModelCategory(sourceTarget.category) !== category) ||
+                (sourceTarget.apiUrl && normalizeButlerBaseUrl(sourceTarget.apiUrl) !== normalizeButlerBaseUrl(apiUrl))) {
+              throw Error(`模型、分类或目标 API 已变化，请重新分析后再应用`);
+            }
+          }
+          if (butlerResult.__wanjuanRawSafetyFailed === true) throw Error(`原始分析结果包含不安全地址或认证字段，请重新分析或手动核对配置`);
+          if (butlerResult.protocol?.config) {
+            const rawSafety = validateButlerProtocolSafety(butlerResult.protocol.config, apiUrl);
+            if (!rawSafety.ok) throw Error(`配置安全检查未通过：${rawSafety.errors.join(`；`)}。跨域协议请核实文档后手动配置`);
+          }
           let protocolConfig = finalizeButlerProtocolConfig(normalizeProtocolConfig(butlerResult.protocol?.config, category), {
               modelName: modelName,
               apiUrl: apiUrl,
               category: category,
+              preserveExplicitProtocol: butlerResult.protocol?.config?.__wanjuanPreferExplicitProtocol === true,
             }),
             protocolName = normalizeProtocolName(butlerResult.protocol?.name, protocolConfig),
             apiConfigName = guessApiConfigName(butlerResult.apiConfig?.name, apiUrl),
             apiConfigs2 = [...apiConfigs],
-	            matchedApiConfig =
-            apiConfigs2.find((apiConfig) => apiConfig.id === configButlerTargetApiConfigId) ||
-            apiConfigs2.find(
-              (apiConfig) =>
-              normalizeButlerBaseUrl(apiConfig.url) === normalizeButlerBaseUrl(apiUrl) ||
-              apiConfig.name === apiConfigName,
-	            ) ||
-	            null;
+            matchedApiConfig = selectedTargetId ? apiConfigs2.find((config) => config.id === selectedTargetId) || null : null;
+          if (selectedTargetId && !matchedApiConfig) throw Error(`所选 API 配置已不存在，请重新选择并分析`);
+          if (!selectedTargetId) {
+            const matches = apiConfigs2.filter((config) => normalizeButlerBaseUrl(config.url) === normalizeButlerBaseUrl(apiUrl));
+            if (matches.length > 1) throw Error(`存在多个相同地址的 API 配置，请先选择目标渠道`);
+            matchedApiConfig = matches[0] || null;
+          }
 	          let validation = validateButlerProtocolConfig(protocolConfig, {
 	            modelName: modelName,
 	            apiUrl: apiUrl,
 	            category: category,
 	          });
 	          if (!validation.ok) throw Error(`配置校验未通过：${validation.errors.join(`；`)}`);
+	          const safety = validateButlerProtocolSafety(protocolConfig, apiUrl);
+	          if (!safety.ok) throw Error(`配置安全检查未通过：${safety.errors.join(`；`)}。跨域协议请核实文档后手动配置`);
+	          // Newly applied, validated protocols take precedence over legacy model-name heuristics.
+	          protocolConfig.__wanjuanPreferExplicitProtocol = true;
 	          matchedApiConfig
             ?
-            ((matchedApiConfig.url = apiUrl), apiKey && (matchedApiConfig.key = apiKey), apiConfigName && (matchedApiConfig.name = apiConfigName), matchedApiConfig.protocolFormat || (matchedApiConfig.protocolFormat = `auto`)) :
+            (matchedApiConfig = {...matchedApiConfig, url:apiUrl, protocolFormat:matchedApiConfig.protocolFormat || `auto`},
+              apiConfigs2.splice(apiConfigs2.findIndex((config) => config.id === matchedApiConfig.id), 1, matchedApiConfig)) :
             ((matchedApiConfig = {
                 id: Date.now().toString(),
                 name: apiConfigName,

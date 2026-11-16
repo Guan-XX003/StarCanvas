@@ -98,6 +98,7 @@ test("preload skips recovery for the opaque page and retains valid-page bootstra
   for (const decision of [false, true, undefined]) {
     const calls = [];
     const modules = {
+      "../shared/diagnostic-policy.cjs": { installDiagnosticConsole() {} },
       "./runtime.cjs": { ipcRenderer: { invoke: async () => {} } },
       "./storage.cjs": { getPerformanceSettings: () => ({}) },
       "./boot-theme.cjs": {

@@ -38,6 +38,7 @@ export function WanJuanSettingsSectionC(props: any) {
     wanjuanUseBrokenResourceImage,
   } = props;
   return jsxs(`div`, {
+              "data-wanjuan-assistant-view": `transit`,
               className: `absolute inset-0 flex flex-col bg-[#121212] ${activeView === `transit` ? `visible z-10` : `invisible -z-10`}`,
               children: [
                 jsxs(`div`, {

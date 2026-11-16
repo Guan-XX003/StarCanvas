@@ -49,7 +49,7 @@ export function use_externalizeProjectAssetContainer(deps: UseExternalizeProject
 	                  result[key] = fileValue;
 	                  continue;
 	                }
-	                console.warn(`Skipped oversized project media data URL during canvas externalize`, key, nodeId);
+	                console.warn(`Skipped oversized project media data URL during canvas externalize`);
 	                continue;
 	              }
 	              let portableString = await convertProjectAssetValueToPortableString(value),

@@ -164,6 +164,11 @@ export function useNodeSyncEffect(deps: UseNodeSyncEffectDeps) {
             ...WanJuanStripRuntimeNodeData(node.data || {})
           },
           hasChanged = false;
+        // Explicit Tianji selections are ordinary per-node parameters, not
+        // authority. General Seedance defaults must not overwrite them during
+        // callback refresh, task updates or project restoration.
+        const preserveTianjiParameters = nodeData.seedanceMode === `tianji` && nodeData.tianjiModelManual === true && nodeData.wanjuanModelAuto !== true;
+        const tianjiModelsForNode = preserveTianjiParameters ? nodeData.tianjiSeedanceModel : tianjiSeedanceModel;
         let syncNodeResult = (
           (node.type === `promptNode` ||
             node.type === `textNode` ||
@@ -212,9 +217,9 @@ export function useNodeSyncEffect(deps: UseNodeSyncEffectDeps) {
               ((nodeData.tongyiWanxiangNode = undefined), (hasChanged = true)),
               nodeData.seedanceModel !== seedanceModel &&
               ((nodeData.seedanceModel = seedanceModel), (hasChanged = true)),
-	              nodeData.tianjiSeedanceModel !== tianjiSeedanceModel &&
+              !preserveTianjiParameters && nodeData.tianjiSeedanceModel !== tianjiSeedanceModel &&
 	              ((nodeData.tianjiSeedanceModel = tianjiSeedanceModel), (hasChanged = true)),
-	              nodeData.videoModel !==
+              !preserveTianjiParameters && nodeData.videoModel !==
 	              (nodeData.seedanceMode === `tianji` ? tianjiSeedanceModel : seedanceModel) &&
 	              ((nodeData.videoModel = nodeData.seedanceMode === `tianji` ? tianjiSeedanceModel : seedanceModel),
 	                (hasChanged = true)),
@@ -223,7 +228,7 @@ export function useNodeSyncEffect(deps: UseNodeSyncEffectDeps) {
 	                    manual: nodeData.seedanceModelManual === true,
 	                    auto: nodeData.wanjuanModelAuto === true,
 	                  }),
-	                  tianjiSelectedModel = WanJuanGetPreferredModel(tianjiSeedanceModel, nodeData.tianjiSelectedModel || nodeData.selectedModel || ``, undefined, {
+                  tianjiSelectedModel = WanJuanGetPreferredModel(tianjiModelsForNode, nodeData.tianjiSelectedModel || nodeData.selectedModel || ``, undefined, {
 	                    manual: nodeData.tianjiModelManual === true,
 	                    auto: nodeData.wanjuanModelAuto === true,
 	                  }),
@@ -237,7 +242,7 @@ export function useNodeSyncEffect(deps: UseNodeSyncEffectDeps) {
 	                  ((nodeData.seedanceSelectedModel = officialSelectedModel), (hasChanged = true));
 	                tianjiSelectedModel &&
 	                  !WanJuanSameModelId(nodeData.tianjiSelectedModel, tianjiSelectedModel) &&
-	                  WanJuanShouldAutoPreferredModel(tianjiSeedanceModel, nodeData.tianjiSelectedModel || nodeData.selectedModel || ``, {
+                  WanJuanShouldAutoPreferredModel(tianjiModelsForNode, nodeData.tianjiSelectedModel || nodeData.selectedModel || ``, {
 	                    manual: nodeData.tianjiModelManual === true,
 	                    auto: nodeData.wanjuanModelAuto === true,
 	                  }) &&
@@ -246,15 +251,15 @@ export function useNodeSyncEffect(deps: UseNodeSyncEffectDeps) {
 	                  !WanJuanSameModelId(nodeData.selectedModel, nextSelectedModel) &&
 	                  ((nodeData.selectedModel = nextSelectedModel), (hasChanged = true));
 	              })(),
-	              nodeData.videoDurations !== seedanceDurations &&
+              !preserveTianjiParameters && nodeData.videoDurations !== seedanceDurations &&
 	              ((nodeData.videoDurations = seedanceDurations), (hasChanged = true)),
-              nodeData.seedanceResolutions !== seedanceResolutions &&
+              !preserveTianjiParameters && nodeData.seedanceResolutions !== seedanceResolutions &&
               ((nodeData.seedanceResolutions = seedanceResolutions), (hasChanged = true)),
-              nodeData.seedanceRatios !== seedanceRatios &&
+              !preserveTianjiParameters && nodeData.seedanceRatios !== seedanceRatios &&
               ((nodeData.seedanceRatios = seedanceRatios), (hasChanged = true)),
-              nodeData.generateAudio !== seedanceGenerateAudio &&
+              !preserveTianjiParameters && nodeData.generateAudio !== seedanceGenerateAudio &&
               ((nodeData.generateAudio = seedanceGenerateAudio), (hasChanged = true)),
-              nodeData.watermark !== seedanceWatermark &&
+              !preserveTianjiParameters && nodeData.watermark !== seedanceWatermark &&
               ((nodeData.watermark = seedanceWatermark), (hasChanged = true)),
               nodeData.enableWebSearch !== seedanceEnableWebSearch &&
               ((nodeData.enableWebSearch = seedanceEnableWebSearch), (hasChanged = true)),

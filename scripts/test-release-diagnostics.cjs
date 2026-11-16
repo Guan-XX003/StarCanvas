@@ -81,6 +81,17 @@ test("desktop persistence rejects arbitrary URL/query/path/custom/error values a
   assert.equal(writes[1].type, "application-event");
 });
 
+test("blocked assistant IPC retains only a fixed channel, never sender URL contents", () => {
+  const writes = [];
+  const { appendDesktopLog } = logging({refs:{app:{getPath:()=>'/isolated-fixture'}},fs:{appendFile:(_path,line)=>writes.push(JSON.parse(line))}});
+  appendDesktopLog('untrusted-ipc-blocked', {channel:'wanjuan:assistant-send',senderUrl:'https://PRIVATE_HOST.invalid/PRIVATE_PATH?token=PRIVATE_KEY'});
+  appendDesktopLog('untrusted-ipc-blocked', {channel:'wanjuan:assistant-PRIVATE_KEY'});
+  assert.equal(writes[0].payload.channel,'wanjuan:assistant-send');
+  assert.equal(writes[0].payload.urlScheme,'https');
+  assert.equal(Object.hasOwn(writes[1].payload,'channel'),false);
+  assert.doesNotMatch(JSON.stringify(writes),/PRIVATE_/);
+});
+
 test("console boundaries remove raw provider text, numeric secrets and getters in both processes", () => {
   for (const install of [logging().installDiagnosticConsole, load("src/renderer/lib/log-utils.ts", true).installRendererDiagnosticConsole]) {
     const writes = [];

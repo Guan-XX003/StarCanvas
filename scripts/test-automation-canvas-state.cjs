@@ -11,12 +11,17 @@ assert.match(source, /currentNodes\.some\(\(node\) => node\.id === nodeId\) && n
 assert.match(source, /currentEdges\.some\(\(edge\) => edge\.source === sourceId && edge\.target === nodeId\)/);
 assert.doesNotMatch(source, /const waitForCanvasState = \(\) => new Promise\(\(resolve\) => setTimeout\(resolve, 80\)\)/);
 
-const tianjiStart = source.indexOf("generateTianjiVideo: async");
-assert.notEqual(tianjiStart, -1);
-const tianjiBlock = source.slice(tianjiStart, tianjiStart + 6500);
-assert.match(tianjiBlock, /await waitForCanvasState\(\{ nodeId, sourceNodeIds: sources\.map\(\(item\) => item\.id\) \}\)/);
-assert.match(tianjiBlock, /automationGenerateVideoRef\.current\(nodeId/);
-assert.match(tianjiBlock, /seedanceMode: "tianji"/);
-assert.match(tianjiBlock, /tianjiSelectedModel: String\(model \|\| ""\)/);
+// Tianji no longer owns a parallel unapproved raw-reference implementation.
+// All three aliases invoke the same guarded root function. Its real factory,
+// committed references and actual dispatch are behavior-tested in
+// test-application-reference-generation.cjs, not inferred from this regex.
+assert.match(source,/generateTianjiVideo: \(args,guard\) => executeApprovedGeneration\("tianji",args,guard\)/);
+assert.match(source,/prepareApplicationGenerationReferences\(nodeId,args\.referenceMedia\|\|\[\],nodeFactory\.prepareNodeAt,args\.portraitMedia\|\|\[\]\)/);
+assert.match(source,/resolveTianjiPortraits: async \(ids,guard\)/);
+assert.match(source,/await waitForCanvasState\(\{nodeId,sourceNodeIds:references\.nodes\.map\(n=>n\.id\)\}\)/);
+assert.match(source,/automationGenerateVideoRef\.current\(nodeId/);
+const generation=fs.readFileSync(path.join(root,'src/renderer/lib/application-generation.ts'),'utf8');
+assert.match(generation,/seedanceMode:'tianji'/);
+assert.match(generation,/tianjiSelectedModel:model/);
 
 console.log("automation canvas state: waits for committed nodes/edges and invokes the latest generation callback");

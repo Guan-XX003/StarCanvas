@@ -37,6 +37,17 @@ function isRendererBaseReady(status) {
   );
 }
 
+// A delayed preload watchdog must not undo a readiness decision already made
+// for this document. Removing a leftover splash is safe only after that
+// decision; pending or failed starts retain their recovery UI.
+function clearConfirmedReadySplash(documentRef) {
+  const root = documentRef?.documentElement;
+  if (!root || !["true", "stable-shell-fallback"].includes(root.dataset?.wanjuanBootReady)) return false;
+  root.classList.remove("wanjuan-booting");
+  documentRef.getElementById("wanjuan-boot-splash")?.remove();
+  return true;
+}
+
 function createRendererStartupLifecycle() {
   let generation = 0;
   let activeRevealGeneration = 0;
@@ -77,6 +88,7 @@ function createRendererStartupLifecycle() {
 
 module.exports = {
   createRendererStartupLifecycle,
+  clearConfirmedReadySplash,
   inspectRendererStartupDocument,
   isRendererBaseReady
 };

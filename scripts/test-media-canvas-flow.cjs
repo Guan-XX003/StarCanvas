@@ -50,7 +50,7 @@ const registry = {
   },
 };
 
-async function runFlow(channel, invalidProfile = false) {
+async function runFlow(channel, invalidProfile = false, upstreamFailure = false) {
   const bindings = { [model]: 'relay' };
   const configs = invalidProfile ? apiConfigs.map((config) => config.id === channel
     ? { ...config, imageProtocolBindings: { [model]: 'removed-profile' } } : config) : apiConfigs;
@@ -80,6 +80,7 @@ async function runFlow(channel, invalidProfile = false) {
     assert.ok(['fixture-relay.invalid', 'fixture-official.invalid'].includes(parsed.hostname), `external network forbidden: ${url}`);
     assert.equal(init.method, 'POST');
     requests.push({ url: String(url), init });
+    if (upstreamFailure) return Response.json({error:{message:'rate limit SYNTHETIC_PRIVATE_PROMPT https://synthetic.invalid/private'}},{status:429});
     return Response.json({ data: [{ url: 'https://fixture-output.invalid/generated.png' }] });
   };
   const contract = resolveMediaModelContract({ category: 'image', model, apiConfigs: configs, apiBindings: bindings, selectedApiConfigId: channel, registry });
@@ -98,6 +99,12 @@ async function runFlow(channel, invalidProfile = false) {
     propTextApiUrl: 'https://fixture-forbidden-text.invalid', propTextApiKey: '', textModel: '',
   });
   await generateImage('first', 'Synthetic canvas prompt', '1024x1024', model);
+  if (upstreamFailure) {
+    assert.equal(tasks[0].status,'failed');assert.match(tasks[0].errorMsg,/HTTP 429/);
+    assert.match(nodes.find(node=>node.id==='first').data.errorMessage,/HTTP 429/);
+    for(const value of [tasks[0].errorMsg,nodes.find(node=>node.id==='first').data.errorMessage,...notices])assert.doesNotMatch(value,/SYNTHETIC_PRIVATE_PROMPT|synthetic\.invalid\/private/);
+    return;
+  }
   if (invalidProfile) {
     assert.equal(requests.length, 0);
     assert.equal(persisted.length, 0);
@@ -132,10 +139,68 @@ async function runFlow(channel, invalidProfile = false) {
   assert.ok(edges.every((edge) => edge.animated === false));
 }
 
-(async () => {
+async function runDirectCase({ modelName, baseUrl, response, expectedUrl, checkRequest, expectedImage, expectUnbound = false, execution, expectBlocked = false, aspectRatio = '1:1', imageSizeMode = 'resolution', size = '1024x1024' }) {
+  let nodes = [{ id: 'case', type: 'imageNode', data: { selectedModel: modelName, imageUrl: 'https://fixture.invalid/previous.png', aspectRatio, imageSizeMode, imageResolution: '1024x1024' } }];
+  let edges = [];
+  const requests = [], notices = [];
+  window.wanjuanDesktop.persistProjectAsset = async () => ({ ok: true, localPath: '/fixture/image.png', value: expectedImage });
+  global.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    assert.equal(String(url), expectedUrl);
+    if (checkRequest) checkRequest(init);
+    return Response.json(response);
+  };
+  const { generateImage } = useImageGeneration({
+    propImageApiKey: 'fixture-key', propImageApiUrl: baseUrl, drawingModel: modelName,
+    apiConfigs: [], imageModelApiBindings: {}, imageModelProtocolBindings: {}, modelProtocolRegistry: {},
+    planLimits: {}, membership: {}, showToast: (text) => notices.push(text),
+    getNodes: () => nodes, getEdges: () => edges,
+    setNodes: (fn) => { nodes = typeof fn === 'function' ? fn(nodes) : fn; },
+    setEdges: (fn) => { edges = typeof fn === 'function' ? fn(edges) : fn; },
+    updateTaskList() {}, addGeneratedAsset() {}, abortControllersRef: { current: new Map() },
+    localforageModule: { default: { setItem: async () => {} } }, projectIdRef: { current: 'fixture-project' },
+    setDailyGenerationCount() {}, audioApiKey: 0, timeoutSeconds: 5, propTextApiUrl: '', propTextApiKey: '', textModel: '',
+  });
+  await generateImage('case', 'synthetic prompt', size, modelName, undefined, execution);
+  if (expectBlocked) {
+    assert.equal(requests.length, 0);
+    assert(nodes[0].data.errorMessage);
+  } else if (expectUnbound) {
+    assert.equal(requests.length, 0);
+    assert.equal(nodes[0].data.imageUrl, 'https://fixture.invalid/previous.png');
+    assert.ok(notices.some((text) => text.includes('尚未选择图片请求协议')));
+  } else {
+    assert.equal(requests.length, 1);
+    assert.equal(nodes[0].data.imageUrl, expectedImage);
+  }
+  return { requests, nodes, notices };
+}
+
+async function main() {
   for (const channel of ['relay', 'official']) {
     await runFlow(channel);
     await runFlow(channel, true);
+    await runFlow(channel, false, true);
   }
+  await runDirectCase({ modelName: 'qwen-image-fixture', baseUrl: 'https://fixture.invalid', expectUnbound: true });
+  await runDirectCase({
+    modelName: 'gpt-image-2.5-sunburst', baseUrl: 'https://api.openai.com/v1',
+    expectedUrl: 'https://api.openai.com/v1/images/generations', expectedImage: generatedImage,
+    response: { data: [{ b64_json: Buffer.alloc(100, 7).toString('base64') }] },
+    checkRequest(init) { const body = JSON.parse(init.body); assert.equal(body.model, 'gpt-image-2.5-sunburst'); assert.equal(Object.hasOwn(body, 'response_format'), false); },
+  });
+  await runDirectCase({
+    modelName: 'gpt-image-2.5-sunburst', baseUrl: 'https://relay.fixture.invalid/v1',
+    expectedUrl: 'https://relay.fixture.invalid/v1/images/generations', expectedImage: generatedImage,
+    response: { data: [{ b64_json: Buffer.alloc(100, 7).toString('base64') }] },
+    checkRequest(init) { assert.equal(JSON.parse(init.body).response_format, 'b64_json'); },
+  });
+  await runDirectCase({
+    modelName: 'gemini-3.1-flash-image', baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    expectedUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=fixture-key',
+    response: { candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: 'Z2VuZXJhdGVk' } }] } }] }, expectedImage: generatedImage,
+  });
   console.log('Media canvas flow: edited reference -> per-channel request -> persisted output -> downstream reference; missing profile makes zero requests PASS');
-})().catch((error) => { console.error(error); process.exitCode = 1; });
+}
+module.exports = { runDirectCase };
+if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });

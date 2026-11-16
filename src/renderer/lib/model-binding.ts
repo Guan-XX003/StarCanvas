@@ -21,6 +21,25 @@ export const buildApiUrl = (base, path) => {
     normalizedBase;
 };
 
+/** Join a media endpoint without repeating a version prefix already in the base.
+ * Absolute endpoints stay untouched, and arbitrary provider prefixes are preserved.
+ */
+export function buildMediaApiUrl(base: unknown, path: unknown) {
+  const normalizedBase = String(base || ``).trim().replace(/\/+$/, ``);
+  let endpoint = String(path || ``).trim();
+  if (!endpoint) return normalizedBase;
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  endpoint = `/${endpoint.replace(/^\/+/, ``)}`;
+  for (const prefix of [`/api/v3`, `/v1beta`, `/v1`]) {
+    if (normalizedBase.toLowerCase().endsWith(prefix) &&
+        (endpoint.toLowerCase() === prefix || endpoint.toLowerCase().startsWith(`${prefix}/`))) {
+      endpoint = endpoint.slice(prefix.length);
+      break;
+    }
+  }
+  return `${normalizedBase}${endpoint}`;
+}
+
 export function normalizeModelBindingKeyHelper(e: any) {
   return String(e || ``)
     .trim()

@@ -36,6 +36,14 @@ for (const pattern of [
 }
 
 const dynamicKeys = [
+  "极速性能",
+  "均衡",
+  "高画质",
+  "自定义",
+  "低渲染负载，推荐低配电脑或大项目批量生成。",
+  "默认档位，兼顾稳定和体验。",
+  "更完整的预览和动画，适合高性能电脑。",
+  "保留手动设置的并发和渲染策略。",
   "历史记录",
   "原价信息未知",
   "导入的旧消费记录，不会再次扣款",
@@ -58,6 +66,14 @@ const dynamicKeys = [
   "企业网关离线，未发送；重连后请重试",
 ];
 const packs = context.wanjuanI18nRuntime.languagePacks;
+for (const [saved, expected] of [["zh", "zh-CN"], ["zh-hans", "zh-CN"], ["zh-HK", "zh-TW"], ["zh-hant", "zh-TW"], ["en", "en-US"], ["en-GB", "en-US"], ["en-US", "en-US"]]) {
+  assert.equal(context.wanjuanI18nRuntime.resolveSupportedLanguage(saved), expected, saved);
+  assert.equal(context.wanjuanI18nRuntime.normalizeLanguage(saved), expected, saved);
+}
+for (const saved of ["not-a-language", "__proto__", "constructor", ""]) {
+  assert.equal(context.wanjuanI18nRuntime.resolveSupportedLanguage(saved), null, 'unknown values cannot become a claimed saved preference');
+  assert.equal(context.wanjuanI18nRuntime.normalizeLanguage(saved), 'zh-CN', 'the existing display fallback remains unchanged');
+}
 for (const key of [...literalKeys, ...dynamicKeys]) {
   for (const language of ["zh-TW", "en-US"]) {
     assert.equal(Object.prototype.hasOwnProperty.call(packs[language] || {}, key), true, `${language} is missing workspace translation: ${key}`);
@@ -232,6 +248,12 @@ const canvasProjectToolbarRoot = new FakeElement("wanjuan-canvas-project-toolbar
 const emptyCanvasRoot = new FakeElement("wanjuan-empty-canvas-placeholder").append(new FakeText("创建节点，展开你的想象"));
 const projectGroupRoot = new FakeElement("wanjuan-project-group-dialog").append(new FakeText("项目分组"));
 const taskDrawerRoot = new FakeElement("wanjuan-task-drawer").append(new FakeText("全局任务清单"), new FakeText("清空已结束"));
+const privateTaskPrompt = new FakeElement().append(new FakeText("设置"));
+privateTaskPrompt.setAttribute("data-wanjuan-i18n-skip", "true");
+privateTaskPrompt.setAttribute("title", "设置");
+const privateTaskError = new FakeElement().append(new FakeText("私人任务错误PRIVATE_ERROR"));
+privateTaskError.setAttribute("data-wanjuan-i18n-skip", "true");
+taskDrawerRoot.append(privateTaskPrompt, privateTaskError);
 const unrelatedRoot = new FakeElement("unrelated").append(new FakeText("设置"));
 const body = new FakeElement("body").append(settingsRoot, dockRoot, agentRoot, canvasToolbarRoot, canvasProjectToolbarRoot, emptyCanvasRoot, projectGroupRoot, taskDrawerRoot, unrelatedRoot);
 const rafQueue = [];
@@ -281,7 +303,9 @@ vm.createContext(domContext);
 vm.runInContext(runtimeSource, domContext, { filename: "i18n-runtime-dom-test.js" });
 
 assert.equal(rafQueue.length, 1, "initial language application should schedule one frame");
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"pending", "the requested language is not acknowledged before translation");
 rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"en-US", "completed translation acknowledges the actual language");
 assert.deepEqual(walkedRoots, [settingsRoot, dockRoot, agentRoot, canvasToolbarRoot, canvasProjectToolbarRoot, emptyCanvasRoot, projectGroupRoot, taskDrawerRoot], "full refresh should scan registered UI roots, not document.body");
 assert.equal(settingsRoot.children[0].nodeValue, "Settings");
 assert.equal(latestUpdateText.nodeValue, "Last updated 2026-08-16");
@@ -294,6 +318,10 @@ assert.equal(emptyCanvasRoot.children[0].nodeValue, "Create a node and expand yo
 assert.equal(projectGroupRoot.children[0].nodeValue, "Project Groups");
 assert.equal(taskDrawerRoot.children[0].nodeValue, "Global Task List");
 assert.equal(taskDrawerRoot.children[1].nodeValue, "Clear Finished");
+assert.equal(privateTaskPrompt.children[0].nodeValue, "设置", "user prompts that equal UI labels must stay unchanged");
+assert.equal(privateTaskPrompt.getAttribute("title"), "设置", "user prompt title must stay unchanged");
+assert.equal(privateTaskError.children[0].nodeValue, "私人任务错误PRIVATE_ERROR");
+assert.ok(![...(domContext.__wanjuanI18nMissing || [])].some(value=>value.includes("PRIVATE_ERROR")), "private task content must not enter missing-translation diagnostics");
 assert.equal(unrelatedRoot.children[0].nodeValue, "设置", "unregistered local/user content must remain unchanged");
 
 observerCallback([{ type: "characterData", addedNodes: [], target: agentRoot.children[0] }]);
@@ -328,9 +356,11 @@ observerCallback([{ type: "childList", addedNodes: [addedAccount], target: setti
 let languageNotifications = 0;
 const unsubscribeLanguage = domContext.wanjuanI18nRuntime.subscribe(() => languageNotifications++);
 domContext.wanjuanI18nRuntime.setLanguage("zh-TW");
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"pending", "changing language invalidates the previous acknowledgement");
 assert.equal(languageNotifications, 1, "direct i18n consumers should receive one language-change notification");
 assert.equal(rafQueue.length, 1, "language change should coalesce with pending mutation work");
 rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"zh-TW", "the new language is acknowledged only after the full refresh");
 assert.deepEqual(walkedRoots, [settingsRoot, dockRoot, agentRoot, canvasToolbarRoot, canvasProjectToolbarRoot, emptyCanvasRoot, projectGroupRoot, taskDrawerRoot], "language change should perform one registered-root refresh");
 assert.equal(settingsRoot.children[0].nodeValue, "設定");
 assert.equal(latestUpdateText.nodeValue, "最近更新 2026-08-16", "English placeholder output should restore to the canonical source before translating to Traditional Chinese");
@@ -350,6 +380,33 @@ assert.equal(settingsRoot.children[0].nodeValue, "设置", "settings navigation 
 assert.equal(agentRoot.children[0].nodeValue, "新建智能体");
 assert.equal(agentUserContent.children[0].nodeValue, "用户自定义智能体与提示词正文");
 unsubscribeLanguage();
+domContext.wanjuanI18nRuntime.setLanguage("en-US");
+domContext.wanjuanI18nRuntime.setLanguage("zh-TW");
+assert.equal(rafQueue.length,1,"rapid language changes share a frame");
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"pending");
+rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"zh-TW","an older request cannot confirm a newer one");
+const originalWalker=domContext.document.createTreeWalker;
+domContext.document.createTreeWalker=()=>{throw Error("SYNTHETIC_TRANSLATION_FAILURE")};
+domContext.wanjuanI18nRuntime.setLanguage("en-US");
+assert.throws(()=>rafQueue.shift()(),/SYNTHETIC_TRANSLATION_FAILURE/);
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"pending","a failed translation is never acknowledged");
+domContext.document.createTreeWalker=originalWalker;
+domContext.wanjuanI18nRuntime.setLanguage("en-US");rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"en-US","a later translation can recover");
+
+const originalQueryRoots = domContext.document.querySelectorAll;
+domContext.document.querySelectorAll = () => [];
+domContext.wanjuanI18nRuntime.setLanguage("zh-TW");
+rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"pending","an empty root set cannot acknowledge an applied interface language");
+assert.equal(rafQueue.length,0,"an empty interface must not start an animation-frame polling loop");
+domContext.document.querySelectorAll = originalQueryRoots;
+observerCallback([{type:"childList",addedNodes:[settingsRoot],target:body}]);
+assert.equal(rafQueue.length,1,"mounting a registered root reschedules translation");
+rafQueue.shift()();
+assert.equal(domContext.document.documentElement.dataset.wanjuanLanguageApplied,"zh-TW","the new full pass may acknowledge language only after UI roots appear");
+assert.equal(settingsRoot.children[0].nodeValue,"設定");
 
 const dockSource = fs.readFileSync(path.join(root, "src/renderer/components/canvas-bottom-dock.tsx"), "utf8");
 assert.match(dockSource, /runtime\?\.t\?\.\(text\)/, "canvas dock should translate high-frequency labels directly");
@@ -389,6 +446,9 @@ assert.match(bundleSource, /title: wanjuanCanvasT\(`一键自动排版`\)/, "can
 assert.match(bundleSource, /children: wanjuanCanvasT\(`项目加载中\.\.\.`\)/, "canvas loading text should render directly from appLanguage");
 assert.match(bundleSource, /children: wanjuanT\(`工作空间`\)/, "workspace navigation should render directly from appLanguage");
 const agentSource = fs.readFileSync(path.join(root, "src/renderer/components/WanJuanSettingsSectionA.tsx"), "utf8");
+const assistantSource = fs.readFileSync(path.join(root, "src/renderer/components/assistant-onboarding.tsx"), "utf8");
+assert.match(assistantSource, /<span data-wanjuan-i18n-skip>\{item\.text\}<\/span>/, "model reply text must be excluded from DOM translation");
+assert.match(assistantSource, /<p data-wanjuan-i18n-skip className=\{item\.role/, "user message text must be excluded from DOM translation");
 assert.match(agentSource, /"data-wanjuan-i18n-skip": true,[\s\S]*?children: message\.content/, "agent message text must be excluded from DOM translation");
 assert.match(agentSource, /"data-message-id": message\.id/, "agent message wrappers should expose stable message identity");
 assert.match(agentSource, /useLayoutEffect\(\(\) => \{[\s\S]*?translateTree\?\.\(agentPageRef\.current\)/, "agent UI should be translated after React navigation and config rerenders");

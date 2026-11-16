@@ -1,6 +1,18 @@
 /** 配置管家错误诊断助手浮层。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import { useSyncExternalStore } from "react";
+import { localButlerDiagnosisView } from "../lib/local-butler-diagnosis";
 declare const chrome: any;
+
+const i18nRuntime = () => (globalThis as any).wanjuanI18nRuntime;
+const subscribeI18n = (listener:() => void) => i18nRuntime()?.subscribe?.(listener) || (() => {});
+const getLanguage = () => i18nRuntime()?.getLanguage?.() || "zh-CN";
+const labels:Record<string,Record<string,string>> = {
+  "zh-TW": {"配置管家错误查询":"設定管家錯誤查詢","最新失败诊断结果":"本機排查結果","最小化":"最小化","关闭":"關閉","原因不确定":"原因不確定","问题字段":"問題欄位","刷新字段":"重新整理欄位","修复记录":"修復紀錄","稍后处理":"稍後處理","打开当前失败模型的创建、查询和获取结果协议字段":"開啟目前失敗模型的建立、查詢及結果協定欄位"},
+  "en-US": {"配置管家错误查询":"Config Butler error check","最新失败诊断结果":"Local diagnosis","最小化":"Minimize","关闭":"Close","原因不确定":"Cause unknown","问题字段":"Problem fields","刷新字段":"Refresh fields","修复记录":"Repair history","稍后处理":"Dismiss","打开当前失败模型的创建、查询和获取结果协议字段":"Open create, poll, and result protocol fields for the failed model"},
+};
+Object.assign(labels["zh-TW"], {"收起":"收合","创建":"建立","查询":"查詢","获取结果":"取得結果","协议名称":"協定名稱","应用手动修复":"套用手動修復","当前配置":"目前設定","已撤回":"已撤回","撤回":"撤回","还没有配置管家修复记录":"尚無設定管家修復紀錄","创建主要改 requestType、submitPath、fieldMapping、fieldValueTypes、extraBody 和 responseMapping。":"建立主要修改 requestType、submitPath、fieldMapping、fieldValueTypes、extraBody 和 responseMapping。","查询主要改 pollPath、responseMapping、状态字段和任务 ID 占位符 {taskId}。":"查詢主要修改 pollPath、responseMapping、狀態欄位及任務 ID 佔位符 {taskId}。","获取结果主要改 contentPath、responseMapping 里视频/图片/音频结果地址的解析字段。":"取得結果主要修改 contentPath、responseMapping 中影片／圖片／音訊結果位址的解析欄位。"});
+Object.assign(labels["en-US"], {"收起":"Collapse","创建":"Create","查询":"Poll","获取结果":"Get result","协议名称":"Protocol name","应用手动修复":"Apply manual fix","当前配置":"Current configuration","已撤回":"Reverted","撤回":"Revert","还没有配置管家修复记录":"No Config Butler repairs yet","创建主要改 requestType、submitPath、fieldMapping、fieldValueTypes、extraBody 和 responseMapping。":"Create settings include requestType, submitPath, fieldMapping, fieldValueTypes, extraBody and responseMapping.","查询主要改 pollPath、responseMapping、状态字段和任务 ID 占位符 {taskId}。":"Poll settings include pollPath, responseMapping, status fields and the {taskId} placeholder.","获取结果主要改 contentPath、responseMapping 里视频/图片/音频结果地址的解析字段。":"Result settings include contentPath and video, image or audio URL fields in responseMapping."});
 
 export function WanJuanConfigButlerErrorAssistant({
   applyConfigButlerErrorAssistantFix,
@@ -23,6 +35,10 @@ export function WanJuanConfigButlerErrorAssistant({
   setConfigButlerManualProtocolText,
   setConfigButlerRepairHistoryOpen,
 }: any) {
+  const language = useSyncExternalStore(subscribeI18n, getLanguage, () => "zh-CN");
+  const t = (text:string) => labels[language]?.[text] || text;
+  const localView = configButlerErrorAssistant.localOnly ? localButlerDiagnosisView(configButlerErrorAssistant, language) : null;
+  const diagnosis = localView?.diagnosis || configButlerErrorAssistant.diagnosis;
   return jsxs(`div`, {
 	                  className: `fixed right-4 top-[132px] z-[90] w-[360px] max-w-[calc(100vw-32px)] rounded-lg border overflow-hidden wanjuan-config-error-assistant`,
                   style: {
@@ -60,7 +76,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.textPrimary,
                                 WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                               },
-                              children: `配置管家错误查询`,
+                              children: t(`配置管家错误查询`),
                             }),
                             jsx(`div`, {
                               className: `text-[10px] text-gray-400`,
@@ -74,7 +90,7 @@ export function WanJuanConfigButlerErrorAssistant({
 	                                `正在对照文档和协议配置` :
 	                                configButlerErrorAssistant.status === `applied` ?
 	                                `修复已应用` :
-	                                `最新失败诊断结果`,
+	                                t(`最新失败诊断结果`),
                             }),
                           ],
                         }),
@@ -93,8 +109,8 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.buttonText,
                                 WebkitTextFillColor: configErrorAssistantTheme.buttonText,
                               },
-                              title: `最小化`,
-                              children: `最小化`,
+                              title: t(`最小化`),
+                              children: t(`最小化`),
                             }),
                             jsx(`div`, {
                               onClick: () => {
@@ -111,8 +127,8 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.buttonText,
                                 WebkitTextFillColor: configErrorAssistantTheme.buttonText,
                               },
-                              title: `关闭`,
-                              children: `关闭`,
+                              title: t(`关闭`),
+                              children: t(`关闭`),
                             }),
                           ],
                         }),
@@ -141,8 +157,8 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.textPrimary,
                                 WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                               },
-                              title: configButlerErrorAssistant.task?.modelName || ``,
-                              children: configButlerErrorAssistant.task?.modelName || `未知模型`,
+                              title: configButlerErrorAssistant.localOnly ? `` : configButlerErrorAssistant.task?.modelName || ``,
+                              children: localView ? localView.title : configButlerErrorAssistant.task?.modelName || `未知模型`,
                             }),
                             jsx(`div`, {
                               className: `mt-1 text-red-300 break-words`,
@@ -150,7 +166,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.dangerText,
                                 WebkitTextFillColor: configErrorAssistantTheme.dangerText,
                               },
-                              children: configButlerErrorAssistant.task?.errorMsg || `未知错误`,
+                              children: localView ? localView.message : configButlerErrorAssistant.task?.errorMsg || `未知错误`,
                             }),
                           ],
                         }),
@@ -186,9 +202,9 @@ export function WanJuanConfigButlerErrorAssistant({
                                     `请求配置问题` :
                                     configButlerErrorAssistant.diagnosis.classification === `model_code` ?
                                     `代码适配问题` :
-                                    `原因不确定`,
+                                    t(`原因不确定`),
                                 }),
-                                jsx(`span`, {
+                                !configButlerErrorAssistant.localOnly && jsx(`span`, {
                                   className: `text-[10px] text-gray-500`,
                                   style: {
                                     color: configErrorAssistantTheme.textMuted,
@@ -204,9 +220,9 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.textPrimary,
                                 WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                               },
-                              children: configButlerErrorAssistant.diagnosis.summary || `诊断完成`,
+                              children: diagnosis.summary || `诊断完成`,
                             }),
-                            configButlerErrorAssistant.diagnosis.evidence?.length > 0 &&
+                            diagnosis.evidence?.length > 0 &&
                             jsx(`div`, {
                               className: `max-h-24 overflow-y-auto rounded border border-white/10 bg-black/20 p-2 text-[11px] text-gray-400 custom-scrollbar`,
                               style: {
@@ -215,14 +231,14 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.textSecondary,
                                 WebkitTextFillColor: configErrorAssistantTheme.textSecondary,
                               },
-                              children: configButlerErrorAssistant.diagnosis.evidence.slice(0, 4).map((props, evidenceIndex) =>
+                              children: diagnosis.evidence.slice(0, 4).map((props, evidenceIndex) =>
                                 jsx(`div`, {
                                   className: `break-words`,
                                   children: `· ${props}`,
                                 }, evidenceIndex),
                               ),
                             }),
-                            configButlerErrorAssistant.diagnosis.suggestedFix &&
+                            diagnosis.suggestedFix &&
                             jsx(`div`, {
                               className: `rounded border border-white/10 bg-[#10151c] p-2 text-[11px] leading-relaxed text-gray-300`,
                               style: {
@@ -231,7 +247,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.textPrimary,
                                 WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                               },
-                              children: configButlerErrorAssistant.diagnosis.suggestedFix,
+                              children: diagnosis.suggestedFix,
                             }),
                             configButlerErrorAssistant.status === `applied` &&
                             jsx(`div`, {
@@ -263,7 +279,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                         color: configErrorAssistantTheme.textPrimary,
                                         WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                                       },
-                                      children: `问题字段`,
+                                      children: t(`问题字段`),
                                     }),
                                     jsx(`div`, {
                                       onClick: () => setConfigButlerManualProtocolOpen(false),
@@ -276,7 +292,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                         color: configErrorAssistantTheme.buttonText,
                                         WebkitTextFillColor: configErrorAssistantTheme.buttonText,
                                       },
-                                      children: `收起`,
+                                      children: t(`收起`),
                                     }),
                                   ],
                                 }),
@@ -298,7 +314,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                         color: configButlerManualProblemPart === entry[0] ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                                         WebkitTextFillColor: configButlerManualProblemPart === entry[0] ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                                       },
-                                      children: entry[1],
+                                      children: t(entry[1]),
                                     }, entry[0]),
                                   ),
                                 }),
@@ -309,11 +325,11 @@ export function WanJuanConfigButlerErrorAssistant({
                                     color: configErrorAssistantTheme.textMuted,
                                     WebkitTextFillColor: configErrorAssistantTheme.textMuted,
                                   },
-                                  children: configButlerManualProblemPart === `submit` ?
+                                  children: t(configButlerManualProblemPart === `submit` ?
                                     `创建主要改 requestType、submitPath、fieldMapping、fieldValueTypes、extraBody 和 responseMapping。` :
                                     configButlerManualProblemPart === `poll` ?
                                     `查询主要改 pollPath、responseMapping、状态字段和任务 ID 占位符 {taskId}。` :
-                                    `获取结果主要改 contentPath、responseMapping 里视频/图片/音频结果地址的解析字段。`,
+                                    `获取结果主要改 contentPath、responseMapping 里视频/图片/音频结果地址的解析字段。`),
                                 }),
                                 jsx(`input`, {
                                   value: configButlerManualProtocolName,
@@ -325,7 +341,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                     color: configErrorAssistantTheme.textPrimary,
                                     WebkitTextFillColor: configErrorAssistantTheme.textPrimary,
                                   },
-                                  placeholder: `协议名称`,
+                                  placeholder: t(`协议名称`),
                                 }),
                                 jsx(`textarea`, {
                                   value: configButlerManualProtocolText,
@@ -350,7 +366,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                     color: configErrorAssistantTheme.primaryText,
                                     WebkitTextFillColor: configErrorAssistantTheme.primaryText,
                                   },
-                                  children: `应用手动修复`,
+                                  children: t(`应用手动修复`),
                                 }),
                               ],
                             }),
@@ -385,7 +401,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                         }),
                                         jsx(`div`, {
                                           className: `truncate`,
-                                          children: `${model.globalConfigName || `当前配置`} · ${model.category || `unknown`} · ${model.rolledBackAt ? `已撤回` : new Date(model.createdAt || Date.now()).toLocaleString()}`,
+                                          children: `${model.globalConfigName || t(`当前配置`)} · ${model.category || `unknown`} · ${model.rolledBackAt ? t(`已撤回`) : new Date(model.createdAt || Date.now()).toLocaleString()}`,
                                         }),
                                       ],
                                     }),
@@ -396,7 +412,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                         color: configErrorAssistantTheme.textMuted,
                                         WebkitTextFillColor: configErrorAssistantTheme.textMuted,
                                       },
-                                      children: `已撤回`,
+                                      children: t(`已撤回`),
                                     }) :
                                     jsx(`div`, {
                                       onClick: () => rollbackConfigButlerRepair(model.id),
@@ -409,13 +425,13 @@ export function WanJuanConfigButlerErrorAssistant({
                                         color: configErrorAssistantTheme.buttonText,
                                         WebkitTextFillColor: configErrorAssistantTheme.buttonText,
                                       },
-                                      children: `撤回`,
+                                      children: t(`撤回`),
                                     }),
                                   ],
                                 }, model.id),
                               ) :
                               jsx(`div`, {
-	                                children: `还没有配置管家修复记录`,
+	                                children: t(`还没有配置管家修复记录`),
                               }),
                             }),
                           ],
@@ -436,8 +452,8 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configButlerManualProtocolOpen ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                                 WebkitTextFillColor: configButlerManualProtocolOpen ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                               },
-                              title: `打开当前失败模型的创建、查询和获取结果协议字段`,
-                              children: configButlerManualProtocolOpen ? `刷新字段` : `问题字段`,
+                              title: t(`打开当前失败模型的创建、查询和获取结果协议字段`),
+                              children: t(configButlerManualProtocolOpen ? `刷新字段` : `问题字段`),
                             }),
                             jsx(`div`, {
                               onClick: () => setConfigButlerRepairHistoryOpen(!configButlerRepairHistoryOpen),
@@ -450,7 +466,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configButlerRepairHistoryOpen ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                                 WebkitTextFillColor: configButlerRepairHistoryOpen ? configErrorAssistantTheme.accentText : configErrorAssistantTheme.buttonText,
                               },
-                              children: `修复记录`,
+                              children: t(`修复记录`),
                             }),
                             jsx(`div`, {
                               onClick: () => setConfigButlerErrorAssistant(null),
@@ -464,7 +480,7 @@ export function WanJuanConfigButlerErrorAssistant({
                                 color: configErrorAssistantTheme.buttonText,
                                 WebkitTextFillColor: configErrorAssistantTheme.buttonText,
                               },
-                              children: `稍后处理`,
+                              children: t(`稍后处理`),
                             }),
                             configButlerErrorAssistant.diagnosis?.shouldApplyPatch === true &&
                             configButlerErrorAssistant.diagnosis?.suggestedProtocol?.config &&

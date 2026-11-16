@@ -15,6 +15,15 @@ const LANGUAGE_ALIASES = {
 const LANGUAGE_PACKS = {
   "zh-CN": {},
   "zh-TW": {
+    "极速性能": "極速效能",
+    "高画质": "高畫質",
+    "低渲染负载，推荐低配电脑或大项目批量生成。": "降低渲染負載，適合低規格電腦或大型專案批次產生。",
+    "默认档位，兼顾稳定和体验。": "預設檔位，兼顧穩定性與使用體驗。",
+    "更完整的预览和动画，适合高性能电脑。": "提供更完整的預覽與動畫，適合高效能電腦。",
+    "保留手动设置的并发和渲染策略。": "保留手動設定的並行與渲染策略。",
+    "输入的描述会发送给所选文本模型，请勿填写密钥或私密内容；已有地址、请求头和请求体不会自动发送。": "輸入的描述會傳送給所選文字模型，請勿填入金鑰或私人內容；現有地址、請求標頭和請求本文不會自動傳送。",
+    "建议已填入空白或默认项，请检查后应用；已有内容保持不变": "建議已填入空白或預設項目，請檢查後套用；現有內容保持不變",
+    "AI 生成失败，请检查模型配置和网络": "AI 產生失敗，請檢查模型設定和網路",
     "计费待确认": "計費待確認",
     "H3 请求格式已适配，但服务器计费仍待确认；为避免按错误时长扣费，暂不可生成": "H3 請求格式已適配，但伺服器計費仍待確認；為避免按錯誤時長扣費，暫不可生成",
     "H3 当前仅开放文生视频；参考图、首尾帧、参考视频和音频尚未部署兼容适配，请移除参考素材后重试": "H3 目前僅適配文生影片；參考圖、首尾幀、參考影片和音訊尚未部署相容適配，請移除參考素材後重試",
@@ -92,6 +101,8 @@ const LANGUAGE_PACKS = {
     "音乐生成": "音樂生成",
     "错误查询": "錯誤查詢",
     "任务清单": "任務清單",
+    "用助手排查此任务": "用助手排查此任務",
+    "排查": "排查",
     "保存设置": "儲存設定",
     "设置已保存": "設定已儲存",
     "生图": "生圖",
@@ -225,6 +236,7 @@ const LANGUAGE_PACKS = {
     "等待激活": "等待啟用",
     "正在运行": "正在執行",
     "已停止": "已停止",
+    "状态未知": "狀態未知",
     "已验证": "已驗證",
     "正在同步": "正在同步",
     "同步本机配置": "同步本機配置",
@@ -417,6 +429,15 @@ const LANGUAGE_PACKS = {
     "企业网关离线，未发送；重连后请重试": "企業網關離線，未傳送；重新連線後請重試",
     },
   "en-US": {
+    "极速性能": "Performance",
+    "高画质": "High Quality",
+    "低渲染负载，推荐低配电脑或大项目批量生成。": "Reduces rendering load for less powerful computers and large batch projects.",
+    "默认档位，兼顾稳定和体验。": "The default, balancing stability and responsiveness.",
+    "更完整的预览和动画，适合高性能电脑。": "Enables richer previews and animation for powerful computers.",
+    "保留手动设置的并发和渲染策略。": "Keeps your manually configured concurrency and rendering settings.",
+    "输入的描述会发送给所选文本模型，请勿填写密钥或私密内容；已有地址、请求头和请求体不会自动发送。": "Your description is sent to the selected text model. Do not enter secrets or private content; existing addresses, headers and bodies are not sent automatically.",
+    "建议已填入空白或默认项，请检查后应用；已有内容保持不变": "Suggestions filled empty or default fields. Review before applying; existing content is unchanged.",
+    "AI 生成失败，请检查模型配置和网络": "AI generation failed. Check the model configuration and network.",
     "计费待确认": "Billing pending",
     "H3 请求格式已适配，但服务器计费仍待确认；为避免按错误时长扣费，暂不可生成": "H3 requests are adapted, but server billing still needs verification. Generation is disabled to prevent incorrect duration charges.",
     "H3 当前仅开放文生视频；参考图、首尾帧、参考视频和音频尚未部署兼容适配，请移除参考素材后重试": "Only H3 text-to-video is adapted. Media support is not deployed yet; remove reference images, frames, videos and audio before retrying.",
@@ -494,6 +515,8 @@ const LANGUAGE_PACKS = {
     "音乐生成": "Music",
     "错误查询": "Errors",
     "任务清单": "Tasks",
+    "用助手排查此任务": "Diagnose this task with assistant",
+    "排查": "Diagnose",
     "保存设置": "Save Settings",
     "设置已保存": "Settings saved",
     "生图": "Image",
@@ -627,6 +650,7 @@ const LANGUAGE_PACKS = {
     "等待激活": "Pending Activation",
     "正在运行": "Running",
     "已停止": "Stopped",
+    "状态未知": "Status unknown",
     "已验证": "Verified",
     "正在同步": "Syncing",
     "同步本机配置": "Sync Local Config",
@@ -990,11 +1014,15 @@ const rebuildTranslationCaches = () => {
 
 rebuildTranslationCaches();
 
-const normalizeLanguage = (language) => {
+// Unlike the display fallback, startup hydration must be able to distinguish a
+// recognized legacy alias from an unknown saved value before changing state.
+const resolveSupportedLanguage = (language) => {
   const raw = String(language || "").trim();
   const key = raw.toLowerCase();
-  return LANGUAGE_ALIASES[key] || (LANGUAGE_PACKS[raw] ? raw : "zh-CN");
+  if (Object.hasOwn(LANGUAGE_ALIASES, key)) return LANGUAGE_ALIASES[key];
+  return Object.hasOwn(LANGUAGE_PACKS, raw) ? raw : null;
 };
+const normalizeLanguage = (language) => resolveSupportedLanguage(language) || "zh-CN";
 
 const getStoredLanguage = () => {
   try {
@@ -1164,7 +1192,14 @@ const flushTranslations = () => {
   if (fullRefreshPending) {
     fullRefreshPending = false;
     pendingRoots.clear();
-    registeredUiRoots().forEach(translateTree);
+    const translatedLanguage = currentLanguage;
+    const roots = registeredUiRoots();
+    roots.forEach(translateTree);
+    // The requested language marker is set before this frame. A separate
+    // acknowledgement is published only after the registered roots finish.
+    if (roots.length && !fullRefreshPending && currentLanguage === translatedLanguage) {
+      try { document.documentElement.dataset.wanjuanLanguageApplied = translatedLanguage; } catch {}
+    }
     return;
   }
   const roots = Array.from(pendingRoots);
@@ -1181,7 +1216,12 @@ const scheduleFrame = () => {
 
 const scheduleTranslate = (root) => {
   addPendingRoot(root);
-  if (pendingRoots.size) scheduleFrame();
+  if (!pendingRoots.size) return;
+  // If a full pass ran before UI roots existed (or failed), a later mounted
+  // root must trigger a new full pass before the language can be confirmed.
+  // Continue to coalesce roots into a single frame; do not poll an empty UI.
+  if (document.documentElement?.dataset?.wanjuanLanguageApplied === "pending") scheduleFullTranslate();
+  else scheduleFrame();
 };
 
 const scheduleFullTranslate = () => {
@@ -1196,6 +1236,7 @@ const setLanguage = (language) => {
   currentLanguage = nextLanguage;
   try {
     document.documentElement.dataset.wanjuanLanguage = nextLanguage;
+    document.documentElement.dataset.wanjuanLanguageApplied = "pending";
   } catch {}
   if (changed) {
     languageListeners.forEach((listener) => {
@@ -1265,6 +1306,7 @@ const install = () => {
 
 globalThis.wanjuanI18nRuntime = {
   languagePacks: LANGUAGE_PACKS,
+  resolveSupportedLanguage,
   normalizeLanguage,
   getLanguage: () => currentLanguage,
   subscribe,

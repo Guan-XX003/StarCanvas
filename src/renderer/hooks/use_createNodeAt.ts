@@ -159,7 +159,10 @@ export function use_createNodeAt(deps: UseCreateNodeAtDeps) {
     videoModelRequestProfiles,
     videoResolutions,
   } = deps;
-  const createNodeAt = (nodeType, position, nodeData: Record<string, any> = {}, connection) => {
+  // Shared, side-effect-free factory: plans can prepare and validate a whole
+  // batch before using the normal canvas setters. Runtime callbacks stay owned
+  // by this hook; model JSON cannot inject handlers or credentials.
+  const prepareNodeAt = (nodeType, position, nodeData: Record<string, any> = {}) => {
       let {
           __nodeId,
           ...cleanNodeData
@@ -331,6 +334,10 @@ export function use_createNodeAt(deps: UseCreateNodeAtDeps) {
 	            addTransitResource: wanjuanNodeHasRuntimeCapability(nodeType, WANJUAN_TRANSIT_RESOURCE_NODE_TYPES) ? addGeneratedAsset : undefined,
           },
         };
+      return newNode;
+    };
+  const createNodeAt = (nodeType, position, nodeData: Record<string, any> = {}, connection?) => {
+      const newNode = prepareNodeAt(nodeType, position, nodeData), newNodeId = newNode.id;
       if ((setNodes((nodes2) => nodes2.concat(newNode)), connection)) {
         let newEdge: any = {
           id: `e-${connection.source}-${newNodeId}`,
@@ -350,5 +357,5 @@ export function use_createNodeAt(deps: UseCreateNodeAtDeps) {
       }
       setMenuPosition(null);
     };
-  return { createNodeAt };
+  return { createNodeAt, prepareNodeAt };
 }

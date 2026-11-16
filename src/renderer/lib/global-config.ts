@@ -1,5 +1,6 @@
 import { normalizeUnifiedApiConfigs } from "./unified-api-config";
 import { WANJUAN_DEFAULT_ARK_TRUSTED_ASSET_CONFIG } from "./ark-trusted-assets";
+import { buildMediaApiUrl } from "./model-binding";
 
 export const WANJUAN_CUSTOM_EMPTY_GLOBAL_CONFIG_ID = `custom-empty`;
 
@@ -115,6 +116,19 @@ export const collectTaskCredentialConfigs = (
 const normalizeApiBaseUrl = (value: unknown) =>
   String(value || ``).replace(/\s+/g, ``).replace(/\/+$/, ``).toLowerCase();
 
+/** A saved task endpoint must not redirect a configured API key to another origin. */
+export const isTaskCredentialUrlAllowed = (baseUrl: unknown, targetUrl: unknown): boolean => {
+  try {
+    const base = new URL(String(baseUrl || ``));
+    const target = new URL(String(targetUrl || ``), base);
+    return (base.protocol === `https:` || base.protocol === `http:`) &&
+      base.origin === target.origin && !base.username && !base.password &&
+      !target.username && !target.password;
+  } catch {
+    return false;
+  }
+};
+
 export const resolveTaskPollUrl = ({
   baseUrl = ``,
   pollPath = ``,
@@ -133,8 +147,14 @@ export const resolveTaskPollUrl = ({
   const stored = replaceTaskId(storedPollUrl, false);
   if (stored) return stored;
   const resolvedPath = replaceTaskId(pollPath || `/v1/videos/{taskId}`, true);
-  if (/^https?:\/\//i.test(resolvedPath)) return resolvedPath;
-  return `${String(baseUrl || ``).replace(/\/$/, ``)}/${resolvedPath.replace(/^\/+/, ``)}`;
+  return buildMediaApiUrl(baseUrl, resolvedPath);
+};
+
+export const resolveSeedanceTaskPollUrl = (baseUrl: unknown, taskId: unknown) => {
+  let officialArk = false;
+  try { officialArk = new URL(String(baseUrl || ``)).hostname.toLowerCase() === `ark.cn-beijing.volces.com`; }
+  catch { /* The existing gateway path remains unchanged. */ }
+  return buildMediaApiUrl(baseUrl, `${officialArk ? `/api/v3` : ``}/contents/generations/tasks/${encodeURIComponent(String(taskId || ``))}`);
 };
 
 export const resolveTaskApiCredential = ({

@@ -34,27 +34,7 @@ import { wanjuanRenderResourcePickerHeader, wanjuanRenderResourcePreview } from 
 declare const chrome: any;
 
 /** 通用视频 provider 的尺寸预设（label 为画幅比例，value 为像素尺寸）。（原 bundle 局部名 Z） */
-const WANJUAN_VIDEO_SIZE_PRESETS = [{
-      label: `16:9`,
-      value: `1280x720`
-    },
-    {
-      label: `9:16`,
-      value: `720x1280`
-    },
-    {
-      label: `3:2`,
-      value: `1080x720`
-    },
-    {
-      label: `2:3`,
-      value: `720x1080`
-    },
-    {
-      label: `1:1`,
-      value: `720x720`
-    },
-  ];
+import { CANVAS_VIDEO_SIZE_PRESETS as WANJUAN_VIDEO_SIZE_PRESETS } from "../lib/canvas-plan-capabilities";
 
 export const WanJuanVideoNode = reactMemo(({
     id: nodeId,

@@ -1,4 +1,5 @@
 // 网络安全校验：阻断本地/私网主机、校验公网 HTTP(S) URL、判断外链协议安全性
+const {assertCandidateQaNetwork}=require('../../shared/isolated-candidate-qa.cjs');
 
 function isBlockedNetworkHost(hostname) {
   const host = String(hostname || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
@@ -22,6 +23,7 @@ function isBlockedNetworkHost(hostname) {
 }
 
 function assertPublicHttpUrl(rawUrl, label = "URL") {
+  assertCandidateQaNetwork(rawUrl);
   let parsed;
   try {
     parsed = new URL(String(rawUrl || ""));

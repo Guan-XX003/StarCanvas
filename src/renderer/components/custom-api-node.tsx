@@ -7,6 +7,7 @@ import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { Position, useReactFlow } from "@xyflow/react";
 import { CircleAlert, Play, Puzzle, RefreshCw, Save, Sparkles, Square, Upload } from "lucide-react";
 import { WanJuanNodeHandle } from "./render-mode";
+import { mergeCustomNodeAiSuggestion } from "../lib/custom-node-ai-privacy";
 
 export const WanJuanCustomApiNode = reactMemo(({
       id: nodeId,
@@ -71,41 +72,15 @@ export const WanJuanCustomApiNode = reactMemo(({
               let aiResponse = await data.onAIAssist(aiPrompt, config);
               try {
                 let parsedConfig = JSON.parse(aiResponse);
-                (setConfig((prevConfig) => ({
-                    ...prevConfig,
-                    apiUrl: parsedConfig.apiUrl || prevConfig.apiUrl,
-                    method: parsedConfig.method || prevConfig.method,
-                    headers: parsedConfig.headers || prevConfig.headers,
-                    body: parsedConfig.body || prevConfig.body,
-                    outputType: parsedConfig.outputType || prevConfig.outputType,
-                    executionMode: parsedConfig.executionMode || prevConfig.executionMode,
-                    resultPath: parsedConfig.resultPath || prevConfig.resultPath,
-                    taskIdPath: parsedConfig.taskIdPath || prevConfig.taskIdPath,
-                    pollingUrl: parsedConfig.pollingUrl || prevConfig.pollingUrl,
-                    pollingMethod: parsedConfig.pollingMethod || prevConfig.pollingMethod,
-                    pollingHeaders: parsedConfig.pollingHeaders || prevConfig.pollingHeaders,
-                    pollingBody: parsedConfig.pollingBody || prevConfig.pollingBody,
-                    pollingResultPath: parsedConfig.pollingResultPath || prevConfig.pollingResultPath,
-                    pollingCompletedValue: parsedConfig.pollingCompletedValue || prevConfig.pollingCompletedValue,
-                    pollingFailedValue: parsedConfig.pollingFailedValue || prevConfig.pollingFailedValue,
-                    pollingErrorPath: parsedConfig.pollingErrorPath || prevConfig.pollingErrorPath,
-                    pollingProgressPath: parsedConfig.pollingProgressPath === void 0 ?
-                      prevConfig.pollingProgressPath :
-                      parsedConfig.pollingProgressPath,
-                    pollingResultDataPath: parsedConfig.pollingResultDataPath === void 0 ?
-                      prevConfig.pollingResultDataPath :
-                      parsedConfig.pollingResultDataPath,
-                    rawTextOutput: parsedConfig.rawTextOutput === void 0 ?
-                      prevConfig.rawTextOutput :
-                      parsedConfig.rawTextOutput,
-                  })),
-                  data.onShowToast?.(`AI 生成配置成功`));
-              } catch (error) {
-                (console.error(`AI 返回的 JSON 解析失败`, error, aiResponse),
+                if (!parsedConfig || typeof parsedConfig !== `object` || Array.isArray(parsedConfig)) throw Error(`INVALID_AI_SUGGESTION`);
+                (setConfig((prevConfig) => mergeCustomNodeAiSuggestion(prevConfig, parsedConfig)),
+                  data.onShowToast?.(`建议已填入空白或默认项，请检查后应用；已有内容保持不变`));
+              } catch {
+                (console.error(`AI 返回的配置格式无效`),
                   data.onShowToast?.(`AI 生成格式错误，请重试`));
               }
-            } catch (error) {
-              data.onShowToast?.(error.message || `AI 生成失败`);
+            } catch {
+              data.onShowToast?.(`AI 生成失败，请检查模型配置和网络`);
             } finally {
               setAiLoading(!1);
             }
@@ -296,6 +271,7 @@ export const WanJuanCustomApiNode = reactMemo(({
                         jsxs(`div`, {
                           className: `flex flex-col gap-2`,
                           children: [
+                            jsx(`p`, {className:`text-[10px] text-gray-400`, children:`输入的描述会发送给所选文本模型，请勿填写密钥或私密内容；已有地址、请求头和请求体不会自动发送。`}),
                             jsx(`textarea`, {
                               className: `flex-1 bg-[#121212] border border-[#333] rounded p-2 text-gray-200 focus:border-blue-500 outline-none custom-scrollbar text-[10px] resize-y nodrag wanjuan-custom-node-field`,
                               placeholder: `输入提示词以开展你的任务`,

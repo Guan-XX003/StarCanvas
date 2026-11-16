@@ -60,6 +60,8 @@ export const WANJUAN_RUNTIME_NODE_DATA_KEYS = new Set([
   `videoModelProtocolBindings`,
   `audioModelApiBindings`,
   `audioModelProtocolBindings`,
+  // Injected from the active global configuration and restored by node sync.
+  `audioApiKey`,
   `videoModelRequestProfiles`,
   `presetPrompts`,
   `tosConfig`,

@@ -46,10 +46,10 @@ function classifyStableFetch(input, init) {
   const host = url.host;
 
   if (method === "POST" && /\/v1beta\/models\/[^/]+:generateContent/i.test(url.pathname)) {
-    return { key: `ai-generate:${host}`, limit: getPerformanceFetchLimit("aiGenerateLimit", 3), retries: 2, label: "gemini-generate-content" };
+    return { key: `ai-generate:${host}`, limit: getPerformanceFetchLimit("aiGenerateLimit", 3), retries: init?.starcanvasNoRetry === true ? 0 : 2, label: "gemini-generate-content" };
   }
   if (method === "POST" && /\/v1\/chat\/completions$/i.test(url.pathname)) {
-    return { key: `ai-chat:${host}`, limit: getPerformanceFetchLimit("aiChatLimit", 2), retries: 1, label: "chat-completion" };
+    return { key: `ai-chat:${host}`, limit: getPerformanceFetchLimit("aiChatLimit", 2), retries: init?.starcanvasNoRetry === true ? 0 : 1, label: "chat-completion" };
   }
   if (method === "POST" && /\/api\/async\/image_gpt$/i.test(url.pathname)) {
     return { key: `ai-submit:${host}`, limit: getPerformanceFetchLimit("aiSubmitLimit", 1), retries: 0, label: "image-task-submit" };
@@ -302,6 +302,7 @@ function installDesktopFetchProxy() {
 
     const payload = await buildDesktopProxyFetchPayload(input, init);
     const signal = getFetchRequestSignal(input, init);
+    if(init?.starcanvasStream===true)return require('./fetch-stream.cjs').invokeDesktopProxyFetchStream(ipcRenderer,payload,signal);
     const result = await invokeDesktopProxyFetchPayload(payload, signal);
     return buildDesktopProxyFetchResponse(result);
   };

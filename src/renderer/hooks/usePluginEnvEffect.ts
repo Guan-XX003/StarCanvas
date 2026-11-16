@@ -7,6 +7,7 @@ import type { ApiBindings, ProtocolBindings, Ref, SetAny, SetState, StoredGlobal
 import { WANJUAN_BUILTIN_AGENT_ITEMS, WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION, WANJUAN_JIXIN_BUILTIN_TIANJI_SEEDANCE_MODELS, WANJUAN_JIXIN_DEFAULT_DOC_URL, wanjuanApplySeedanceOptionDefaults, wanjuanBuildJixinBuiltinBasePatch, wanjuanBuildJixinBuiltinStoredGlobalConfig, wanjuanCloneBuiltinAgentConversations, wanjuanCloneBuiltinAgentItems, wanjuanHasUserAgentConfiguration, wanjuanHasUserModelConfiguration, wanjuanIsLegacyJixinDocUrl, wanjuanMergeModelText, wanjuanMigrateJixinBuiltinCatalog } from "../lib/jixin-catalog";
 import { WanJuanNormalizePerformanceProfile } from "../lib/performance-profile";
 import { compactGlobalTasks } from "../lib/app-root-helpers";
+import { assistantTaskHydrationAvailable, assistantSettingsHydrationAvailable } from "../lib/assistant-local-operations";
 import { normalizeThemeMode } from "../lib/app-utils";
 import { normalizeUnifiedApiConfigs } from "../lib/unified-api-config";
 import { wanjuanCheckForUpdate, wanjuanChildWindowRefs, wanjuanGetOrCreateDeviceId, wanjuanVerifyActivationCode } from "../lib/collaboration";
@@ -54,6 +55,9 @@ interface UsePluginEnvEffectDeps {
   setDownloadDirectory: SetAny;
   setEdges: SetState<WjEdge[]>;
   setGlobalTasks: SetAny;
+  setAssistantTasksAvailable: SetAny;
+  setAssistantSettingsUnavailable: SetAny;
+  setModelConfigurationReady?: SetAny;
   setHasCurrentTab: SetAny;
   setImageApiConfigId: SetAny;
   setImageApiKey: SetAny;
@@ -164,6 +168,9 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
     setDownloadDirectory,
     setEdges,
     setGlobalTasks,
+    setAssistantTasksAvailable,
+    setAssistantSettingsUnavailable,
+    setModelConfigurationReady,
     setHasCurrentTab,
     setImageApiConfigId,
     setImageApiKey,
@@ -293,18 +300,31 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
             });
           }));
         try {
-          chrome.storage.local.get([`users`], (result) => {
-            (chrome.runtime.lastError &&
-              (console.error(chrome.runtime.lastError),
-                alert(
-                  `Storage Error: ` + JSON.stringify(chrome.runtime.lastError),
-                )),
-              result && result.users && result.users.length > 0 ?
-              setUsers(result.users) :
-              (setUsers(wanjuanChildWindowRefs), chrome.storage.local.set({
-                users: wanjuanChildWindowRefs
-              })),
-              chrome.storage.local.get(
+          // The desktop bridge reports whether this particular read reached IndexedDB;
+          // Chrome extension environments retain the standard storage API.
+          const getStartupWithReliability = (keys, callback) => {
+            const storage = chrome.storage.local;
+            if (typeof storage.getWithStatus === `function`) {
+              storage.getWithStatus(keys, (result) => callback(result?.values, result?.reliable === true));
+            } else {
+              storage.get(keys, (result) => callback(result, undefined));
+            }
+          };
+          getStartupWithReliability([`users`], (result, reliable) => {
+            const usersReadable = !chrome.runtime.lastError && reliable !== false && result && typeof result === `object` && !Array.isArray(result)
+              && (result.users === undefined || Array.isArray(result.users));
+            if (!usersReadable) {
+              // An unreadable or malformed list is not an empty list: preserve
+              // the old value, and keep independently readable features alive.
+              console.error(`Local user list unavailable`);
+              const language = globalThis.wanjuanI18nRuntime?.getLanguage?.();
+              showToast2(language === `en-US` ? `The local account list could not be read. Existing account data was not changed.` : language === `zh-TW` ? `無法讀取本機帳號清單，現有帳號資料未更改。` : `无法读取本地账号列表，现有账号数据未更改。`);
+            } else if (result.users?.length) setUsers(result.users);
+            else {
+              setUsers(wanjuanChildWindowRefs);
+              chrome.storage.local.set({users: wanjuanChildWindowRefs});
+            }
+            (chrome.storage.local.get(
                 [`transitResources`, `transitGridCols`],
                 async (result2) => {
                   try {
@@ -323,7 +343,7 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                           (setTransitResources(mergedResources),
                             localforageModule.default
                             .setItem(`transitResources`, mergedResources)
-                            .catch((error) => console.error(error)));
+                            .catch(() => console.error(`Transit resource save failed`)));
                         } else setTransitResources(storedResources);
                       } else setTransitResources(storedResources);
                     else
@@ -334,16 +354,13 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                           result2.transitResources,
                         ));
                   } catch (error) {
-                    (console.error(
-                        `Failed to load transitResources from localforage`,
-                        error,
-                      ),
+                    (console.error(`Failed to load transitResources from localforage`),
                       result2.transitResources && setTransitResources(result2.transitResources));
                   }
                   result2.transitGridCols && setTransitGridCols(result2.transitGridCols);
                 },
               ),
-              chrome.storage.local.get(
+              getStartupWithReliability(
                 [
                   `projects`,
                   `projectGroups`,
@@ -351,7 +368,9 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                   `globalTasks`,
                   `customNodeTemplates`,
                 ],
-                (result2) => {
+                (result2, reliable) => {
+                  setAssistantTasksAvailable(assistantTaskHydrationAvailable(result2, chrome.runtime?.lastError, reliable));
+                  if (!result2 || typeof result2 !== `object` || Array.isArray(result2)) result2 = {};
                   (result2.projects && result2.projects.length > 0 ?
                     (setProjects(result2.projects),
                       Array.isArray(result2.projectGroups) && setProjectGroups(result2.projectGroups),
@@ -373,7 +392,7 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                     result2.customNodeTemplates && setEdges(result2.customNodeTemplates));
                 },
               ),
-              chrome.storage.local.get(
+              getStartupWithReliability(
                 [
                   `apiUrl`,
                   `apiKey`,
@@ -465,7 +484,16 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                   `selectedAgentId`,
                   `agentConversations`,
                 ],
-                (settings) => {
+                (settings, reliable) => {
+                  if (!assistantSettingsHydrationAvailable(settings, chrome.runtime?.lastError, reliable)) {
+                    // Do not seed defaults or enable the existing broad settings
+                    // writers when saved user configuration is unreadable.
+                    settingsHydratedRef.current = false;
+                    setModelConfigurationReady?.(false);
+                    setAssistantSettingsUnavailable(true);
+                    showToast2(`本地设置读取失败，已暂停自动保存以保护原有配置`);
+                    return;
+                  }
                   if (settings.jixinBuiltinBaseConfigVersion !== WANJUAN_JIXIN_BUILTIN_BASE_CONFIG_VERSION) {
                     let hasUserModelConfiguration = wanjuanHasUserModelConfiguration(settings),
                       hasUserAgentConfiguration = wanjuanHasUserAgentConfiguration(settings),
@@ -752,8 +780,15 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                     })),
                     settings.themeMode && setThemeMode(normalizeThemeMode(settings.themeMode)),
                     (settings.appLanguage || settings.uiLanguage) &&
-                    (setAppLanguage(settings.appLanguage || settings.uiLanguage),
-                      globalThis.wanjuanI18nRuntime?.setLanguage?.(settings.appLanguage || settings.uiLanguage)),
+                    (() => {
+                      const saved = settings.appLanguage || settings.uiLanguage;
+                      // The translator accepts legacy aliases (e.g. en or
+                      // zh-HK); keep the settings state in that same canonical
+                      // language without inventing a value for unknown input.
+                      const language = globalThis.wanjuanI18nRuntime?.resolveSupportedLanguage?.(saved) || saved;
+                      setAppLanguage(language);
+                      globalThis.wanjuanI18nRuntime?.setLanguage?.(language);
+                    })(),
                     settings.downloadDirectory &&
                     setDownloadDirectory(settings.downloadDirectory),
                     settings.autoDownloadGeneratedResults !== undefined &&
@@ -831,6 +866,8 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                         chrome.storage.local.remove(`membership`));
                   }
                   settingsHydratedRef.current = true;
+                  setModelConfigurationReady?.(true);
+                  setAssistantSettingsUnavailable(false);
                 },
               ),
               chrome.runtime.onMessage.addListener((message, messageSender, sendResponse) => {
@@ -841,8 +878,8 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
                       return (
                         localforageModule.default
                         .setItem(`transitResources`, updatedResources)
-                        .catch((error) =>
-                          console.error(`localforage save error`, error),
+                        .catch(() =>
+                          console.error(`localforage save error`),
                         ),
                         updatedResources
                       );
@@ -853,16 +890,22 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
               clearTimeout(timeoutId));
           });
         } catch (error) {
-          (console.error(`Storage get error:`, error),
-            (settingsHydratedRef.current = true),
+          (console.error(`Storage get error`),
+            setAssistantTasksAvailable(false),
+            (settingsHydratedRef.current = false),
+            setModelConfigurationReady?.(false),
+            setAssistantSettingsUnavailable(true),
             (projectHydratedRef.current = true),
             setIsLoading(false),
             setIsReady(true),
             clearTimeout(timeoutId));
         }
         }).catch((error) => {
-          console.error(`Backup restore recovery failed; startup writes blocked`, error);
+          console.error(`Backup restore recovery failed; startup writes blocked`);
+          setAssistantTasksAvailable(false);
           settingsHydratedRef.current = false;
+          setModelConfigurationReady?.(false);
+          setAssistantSettingsUnavailable(true);
           projectHydratedRef.current = false;
           setIsLoading(false);
           setIsReady(false);
@@ -870,7 +913,9 @@ export function usePluginEnvEffect(deps: UsePluginEnvEffectDeps) {
           clearTimeout(timeoutId);
         });
       } else
-        ((settingsHydratedRef.current = true),
+        (setAssistantTasksAvailable(true), setAssistantSettingsUnavailable(false),
+          (settingsHydratedRef.current = true),
+          setModelConfigurationReady?.(true),
           (projectHydratedRef.current = true),
           setUsers(wanjuanChildWindowRefs),
           setIsLoading(false),

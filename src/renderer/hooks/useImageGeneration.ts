@@ -6,14 +6,15 @@ import { useCallback } from "react";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, SetAny, SetState, Toast, WjEdge, WjNode } from "../lib/app-types";
 import { buildProjectMediaFileUrl, wanjuanResourceKind, wanjuanResourceMediaUrl } from "../lib/resource";
 import { mediaUrlToDataUrl, wanjuanCollectNodeReferenceMedia, wanjuanNodeTextValue, wanjuanNormalizeReferenceMediaUrl } from "../lib/reference-media";
-import { parseSeedanceList } from "../lib/model-binding";
+import { buildMediaApiUrl, parseSeedanceList } from "../lib/model-binding";
 import { resolveMediaModelContract } from "../lib/media-model-contract";
 import { safeStringifyRequestForLog, serializeErrorPreview, WanJuanIsTransientNetworkError } from "../lib/log-utils";
 import { WanJuanGetPreferredModel } from "../lib/model-favorites";
 import { WanJuanParseModelList } from "../lib/model-id";
 import { wanjuanResetTianjiPortraitBindingForImage } from "../lib/tianji-portrait";
 import { wanjuanAppendImageReferenceFiles, wanjuanBuildOpenAiImageReferencePlan } from "../lib/generation-reference";
-import { wanjuanBuildGeminiImageTransport } from "../lib/gemini-image";
+import { wanjuanBuildGeminiImageTransport, wanjuanExtractGeminiImage } from "../lib/gemini-image";
+import { safeGenerationError } from "../lib/custom-task-error";
 
 interface UseImageGenerationDeps {
   propImageApiKey: any;
@@ -72,7 +73,9 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
     timeoutSeconds,
   } = deps;
   const generateImage = useCallback(
-      async (nodeId, prompt, size = `1024x1024`, modelName, apiBindingId) => {
+      async (nodeId, prompt, size = `1024x1024`, modelName, apiBindingId, execution) => {
+          const submit = execution?.submit || ((send) => send());
+          const upload = execution?.upload || ((send) => send());
           let dailyLimitKey = `daily-limit-${new Date().toISOString().split(`T`)[0]}`,
             dailyGenerationCount = parseInt(
               localStorage.getItem(dailyLimitKey) || `0`,
@@ -123,7 +126,7 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
             /\/api\/v3$/i.test(url) ?
             `ark-image-generation` :
             `vectorengine-image-generation` :
-            `gemini-generate-content`,
+            ``,
 	            selectedImageProtocolName =
 	            imageModelContract.protocolName,
 	            selectedImageProtocolDefinition =
@@ -179,6 +182,10 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
               `当前 API 渠道绑定的图片协议不存在，请在模型设置中重新选择`);
             return;
           }
+          if (!imageRequestProtocol) {
+            showToast(`模型 ${imageModelName} 尚未选择图片请求协议，请在模型设置中为此 API 渠道绑定协议`);
+            return;
+          }
           let imageTaskId = `image-${nodeId}-${Date.now()}`;
 	          (setNodes((nodes2) =>
 	              nodes2.map((node) =>
@@ -213,6 +220,7 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
                   type: `image`,
                   projectId: projectIdRef.current,
                   nodeId: nodeId,
+                  clientSubmissionId: execution?.submissionId,
                   apiBaseUrl: imageApiBaseUrl,
                   apiConfigId: imageConfig?.id,
                   modelName: imageModelName,
@@ -346,7 +354,7 @@ export function useImageGeneration(deps: UseImageGenerationDeps) {
                     diff < minDiff && ((minDiff = diff), (bestRatio = ratio));
                   }
                   ((resolvedRatio = bestRatio), showToast(`自动匹配参考图比例: ${resolvedRatio}`));
-                } else if (combinedPrompt.trim()) {
+                } else if (combinedPrompt.trim() && !execution) {
                   showToast(`正在根据提示词分析最佳比例...`);
                   let baseUrl = propTextApiUrl.replace(/\/$/, ``),
                     modelName2 = textModel
@@ -393,11 +401,11 @@ ${combinedPrompt}`,
                       ((resolvedRatio = ratioMatch[1]), showToast(`AI分析提示词得出比例: ${resolvedRatio}`)) :
                       showToast(`大模型未提供明确比例，将使用其原生默认画幅`);
                   } else
-                    console.warn(`Auto aspect ratio API failed`, await response.text());
+                    console.warn(`Auto aspect ratio API failed.`);
                 }
                 aspectRatio = resolvedRatio;
               } catch (error) {
-                (console.error(`Auto aspect ratio failed`, error), (aspectRatio = `Auto`));
+                (console.error(`Auto aspect ratio failed.`), (aspectRatio = `Auto`));
               }
             }
 		            let requestParams = {};
@@ -669,18 +677,8 @@ ${combinedPrompt}`,
 		                    imagePresetSizeValue() :
 		                    imageAspectRatioValue();
 		                },
-		                buildImageProtocolUrl = (pathOrUrl, fallbackUrl) => {
-		                  let path = String(pathOrUrl || ``).trim();
-		                  if (!path) return fallbackUrl;
-		                  if (/^https?:\/\//i.test(path)) return path;
-		                  let baseUrl = String(seedreamBaseUrl || ``).replace(/\/$/, ``);
-		                  return (
-		                    /\/v1$/i.test(baseUrl) &&
-		                    /^\/v1\//i.test(path) &&
-		                    (path = path.replace(/^\/v1/i, ``)),
-		                    `${baseUrl}${path.startsWith(`/`) ? `` : `/`}${path}`
-		                  );
-		                },
+		                buildImageProtocolUrl = (pathOrUrl, fallbackPath) =>
+		                  buildMediaApiUrl(seedreamBaseUrl, pathOrUrl || fallbackPath),
 			                seedreamAspectHint =
 	                !isImageResolutionMode && requestParams.aspectRatio && !vectorengineOpenAiCompatAspectRatio ?
 	                `\n请生成宽高比为 ${requestParams.aspectRatio} 的画面，并让构图自然适配该比例。` :
@@ -690,12 +688,12 @@ ${combinedPrompt}`,
 	                seedreamEndpoint = buildImageProtocolUrl(
 	                  imageProtocolProfile.submitPath,
 	                  imageRequestProtocol === `openai-images` ?
-	                  `${seedreamBaseUrl}/v1/images/generations` :
+	                  `/v1/images/generations` :
 	                  imageRequestProtocol === `vectorengine-image-generation` ?
-	                  `${seedreamBaseUrl}/v1/images/generations` :
+	                  `/v1/images/generations` :
 	                  /\/api\/v3$/i.test(seedreamBaseUrl) ?
-	                  `${seedreamBaseUrl}/images/generations` :
-	                  `${seedreamBaseUrl}/api/v3/images/generations`,
+	                  `/images/generations` :
+	                  `/api/v3/images/generations`,
 	                ),
 		                seedreamController = new AbortController(),
                 seedreamReferenceImages = [],
@@ -710,13 +708,13 @@ ${combinedPrompt}`,
                     typeof window.wanjuanDesktop.uploadPublicMedia == `function`
                   ) {
                     showToast(`正在上传参考图...`);
-                    let uploadResult = await window.wanjuanDesktop.uploadPublicMedia({
+                    let uploadResult = await upload(() => window.wanjuanDesktop.uploadPublicMedia({
                       url: dataUrl,
                       kind: `image`,
                       filename: `image-reference-${Date.now()}.png`,
-                    });
+                    }));
                     if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
-                    console.warn(`Failed to upload reference image for provider compatibility`, uploadResult);
+                    console.warn(`Failed to upload reference image for provider compatibility.`);
                   }
                   return dataUrl;
                 };
@@ -812,7 +810,7 @@ ${combinedPrompt}`,
 	                    }),
 		                    (seedreamEndpoint = buildImageProtocolUrl(
 		                      openAiImageReferencePlan.editPath,
-		                      `${seedreamBaseUrl}/v1/images/edits`,
+		                      `/v1/images/edits`,
 		                    ))) :
                   (seedreamRequestInit = undefined);
 	              } else {
@@ -842,6 +840,7 @@ ${combinedPrompt}`,
 		                        getProtocolImageAspectRatioValue(),
 		                      ),
 		                      imageProtocolFieldMapping.responseFormat &&
+		                      !(imageApiHost.toLowerCase() === `api.openai.com` && /^gpt-image/i.test(imageModelName)) &&
 		                      putImageProtocolField(
 		                        imageProtocolFieldMapping.responseFormat,
 		                        requestBody2,
@@ -867,7 +866,7 @@ ${combinedPrompt}`,
 	                  {
                     model: imageModelName,
                     prompt: seedreamPrompt || ` `,
-                    ...(vectorengineOpenAiCompatRequest ? {} : { response_format: `b64_json` }),
+                    ...(vectorengineOpenAiCompatRequest || (imageApiHost.toLowerCase() === `api.openai.com` && /^gpt-image/i.test(imageModelName)) ? {} : { response_format: `b64_json` }),
                     size: vectorengineOpenAiCompatRequest ?
                       vectorengineOpenAiCompatSize :
                       openAiImageSize,
@@ -920,7 +919,7 @@ ${combinedPrompt}`,
                 let requestBody = {
                   model: imageModelName,
                   prompt: seedreamPrompt || ` `,
-                  ...(vectorengineOpenAiCompatRequest ? {} : { response_format: `b64_json` }),
+                  ...(vectorengineOpenAiCompatRequest || (imageApiHost.toLowerCase() === `api.openai.com` && /^gpt-image/i.test(imageModelName)) ? {} : { response_format: `b64_json` }),
                   size: vectorengineOpenAiCompatRequest ?
                     vectorengineOpenAiCompatSize :
                     openAiImageSize,
@@ -941,19 +940,19 @@ ${combinedPrompt}`,
                 };
                 seedreamEndpoint = `${seedreamBaseUrl}/v1/images/generations`;
               }
-              let seedreamResponse = await fetch(
+              let seedreamResponse = await submit(() => fetch(
                 seedreamEndpoint,
                 seedreamRequestInit,
-              );
+              ));
               if ((abortControllersRef.current.delete(nodeId), !seedreamResponse.ok)) {
                 let errorMessage = `API 请求失败: ${seedreamResponse.status} ${seedreamResponse.statusText}`;
                 try {
                   let errorData = await seedreamResponse.json();
                   errorMessage =
                     errorData.error && errorData.error.message ?
-                    `API 请求失败: ${errorData.error.message}` :
+                    `API 请求失败: ${seedreamResponse.status} - ${errorData.error.message}` :
                     errorData.message ?
-                    `API 请求失败: ${errorData.message}` :
+                    `API 请求失败: ${seedreamResponse.status} - ${errorData.message}` :
                     `API 请求失败: ${seedreamResponse.status} - ${serializeErrorPreview(errorData)}`;
                 } catch {
                   try {
@@ -1171,7 +1170,7 @@ ${combinedPrompt}`,
 	                      ));
 	                  }
 	                } catch (seedreamPersistError) {
-	                  console.warn(`Seedream result persist skipped`, seedreamPersistError);
+	                  console.warn(`Seedream result persist skipped.`);
 	                }
 	              let image = new Image();
 	              ((image.onload = () => {
@@ -1310,11 +1309,11 @@ ${combinedPrompt}`,
                     )
                       throw Error(`GPT-Image-2 参考图需要公网 URL，请使用网络图片或启用桌面上传服务`);
                     showToast(`正在上传 GPT-Image-2 参考图到公网临时链接...`);
-                    let uploadResult = await window.wanjuanDesktop.uploadPublicMedia({
+                    let uploadResult = await upload(() => window.wanjuanDesktop.uploadPublicMedia({
                       url: trimmedUrl,
                       kind: `image`,
                       filename: `gpt-image-2-reference-${Date.now()}.png`,
-                    });
+                    }));
                     if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                     throw Error(uploadResult?.error || `参考图上传失败`);
                   },
@@ -1341,7 +1340,7 @@ ${combinedPrompt}`,
                 `${suChuangBaseUrl}/api/async/detail`,
                 suChuangSubmitUrl = `${suChuangSubmitEndpoint}?key=${encodeURIComponent(imageApiKey)}`,
                 suChuangSubmitTask = async () => {
-                  let response = await fetch(suChuangSubmitUrl, {
+                  let response = await submit(() => fetch(suChuangSubmitUrl, {
                     method: `POST`,
                     headers: {
                       Authorization: imageApiKey,
@@ -1353,7 +1352,7 @@ ${combinedPrompt}`,
                       urls: suChuangUrls,
                     }),
                     signal: suChuangController.signal,
-                  });
+                  }));
                   if (!response.ok) {
                     let errorText = await response.text().catch(() => ``);
                     throw Error(`GPT-Image-2 提交失败: ${response.status} ${errorText}`);
@@ -1533,7 +1532,7 @@ ${combinedPrompt}`,
                     throw error;
                   if (!WanJuanIsTransientNetworkError(error)) throw error;
                   (suChuangNetworkErrorCount++,
-                    console.warn(`GPT-Image-2 polling transient network error:`, error),
+                    console.warn(`GPT-Image-2 polling transient network error.`),
                     suChuangNetworkErrorCount === 3 &&
                     showToast(`GPT-Image-2 状态查询遇到临时网络错误，仍会继续重试...`));
                   continue;
@@ -1543,7 +1542,7 @@ ${combinedPrompt}`,
                 if (status === 3) {
                   let message = pollResult.data?.message || pollResult.msg || `GPT-Image-2 生成失败`;
                   if (
-                    suChuangRetryCount < 2 &&
+                    !execution && suChuangRetryCount < 2 &&
                     /(excessive system load|system load|overload|busy|timeout|temporar|系统繁忙|负载|过载|超时)/i.test(
                       message,
                     )
@@ -1689,21 +1688,21 @@ ${combinedPrompt}`,
               console.log(`Sending request:`, safeStringifyRequestForLog(requestBody)));
             let abortController = new AbortController();
             abortControllersRef.current.set(nodeId, abortController);
-            let response = await fetch(geminiImageTransport.requestUrl, {
+            let response = await submit(() => fetch(geminiImageTransport.requestUrl, {
               method: `POST`,
               headers: geminiImageTransport.headers,
               body: JSON.stringify(requestBody),
               signal: abortController.signal,
-            });
+            }));
             if ((abortControllersRef.current.delete(nodeId), !response.ok)) {
               let errorMessage = `API 请求失败: ${response.status} ${response.statusText}`;
               try {
                 let errorData = await response.json();
                 errorMessage =
                   errorData.error && errorData.error.message ?
-                  `API 请求失败: ${errorData.error.message}` :
+                  `API 请求失败: ${response.status} - ${errorData.error.message}` :
                   errorData.message ?
-                  `API 请求失败: ${errorData.message}` :
+                  `API 请求失败: ${response.status} - ${errorData.message}` :
                   `API 请求失败: ${response.status} - ${serializeErrorPreview(errorData)}`;
               } catch {}
               throw Error(errorMessage);
@@ -1712,12 +1711,10 @@ ${combinedPrompt}`,
             (localStorage.setItem(apiBindingId, (audioApiKey + 1).toString()), setDailyGenerationCount(audioApiKey + 1));
             let candidate = responseData.candidates?.[0];
             if (!candidate) throw Error(`API 返回格式错误：找不到 candidates`);
-            let imagePart = candidate.content?.parts?.find((part) => part.inlineData),
-              textPart = candidate.content?.parts?.find((part) => part.text),
-              imageDataUrl = ``;
-            if (imagePart && imagePart.inlineData)
-              imageDataUrl = `data:${imagePart.inlineData.mimeType || `image/png`};base64,${imagePart.inlineData.data}`;
-            else if (textPart && textPart.text) {
+            let extractedImage = wanjuanExtractGeminiImage(responseData),
+              textPart = extractedImage.text ? { text: extractedImage.text } : null,
+              imageDataUrl = extractedImage.imageUrl;
+            if (!imageDataUrl && textPart && textPart.text) {
               let imageMatch = textPart.text.match(
                 /!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/,
               );
@@ -1728,11 +1725,11 @@ ${combinedPrompt}`,
               }
               if (!imageDataUrl)
                 throw (
-                  console.warn(`Model returned text:`, textPart.text),
-                  showToast(`API返回文本: ${textPart.text.substring(0, 100)}...`),
+                  console.warn(`Image model returned text instead of an image.`),
+                  showToast(`接口返回文本而非图片，请检查提示词或模型设置。`),
                   Error(`未生成图片，请检查提示词或模型设置`)
                 );
-            } else throw Error(`未生成图片`);
+            } else if (!imageDataUrl) throw Error(`未生成图片`);
             if (imageDataUrl) {
               let image = new Image();
               ((image.onload = () => {
@@ -1920,10 +1917,11 @@ ${combinedPrompt}`,
 	              return;
 	            }
 	            if (WanJuanIsTransientNetworkError(error)) {
-	              (console.error(error),
+	              (console.error(`Image status polling encountered a transient network error.`),
 	                markImageTaskNeedsManualRecovery(`图片状态查询遇到临时网络错误，可能仍在中转站生成；可稍后在任务清单手动刷新拉回结果`));
 	              return;
 	            }
+	            let safeError = safeGenerationError(error, "media");
 	            (updateGlobalTaskList &&
 	              updateGlobalTaskList((nodes2) =>
                 nodes2.map((node) =>
@@ -1931,13 +1929,13 @@ ${combinedPrompt}`,
                   {
                     ...node,
                     status: `failed`,
-                    errorMsg: error.message
+                    errorMsg: safeError
                   } :
                   node,
                 ),
               ),
-              console.error(error),
-              showToast(`生成失败: ${error.message}`),
+              console.error(`Image generation failed.`),
+              showToast(`生成失败: ${safeError}`),
               setNodes((nodes2) =>
                 nodes2.map((node) =>
 	                  node.id === nodeId && node.data?.taskId === imageTaskId ?
@@ -1946,7 +1944,7 @@ ${combinedPrompt}`,
                     data: {
                       ...node.data,
                       loading: false,
-                      errorMessage: error.message
+                      errorMessage: safeError
                     },
                   } :
                   node,

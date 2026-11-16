@@ -37,13 +37,14 @@ export function use_collectSelectedLocalforageBackup(deps: UseCollectSelectedLoc
                       let mirrorSource = backupOptions || {};
                       for (let projectId of projectIds) {
                         let storageKey = getProjectCanvasStorageKey(projectId),
-                          canvasState = null;
+                          canvasState = null, readFailed = false;
                         try {
                           canvasState = await localforageModule.default.getItem(storageKey);
-                        } catch {}
+                        } catch { readFailed = true; }
                         if (!canvasState && Object.prototype.hasOwnProperty.call(mirrorSource, getDesktopProjectMirrorStorageKey(projectId))) {
                           canvasState = mirrorSource[getDesktopProjectMirrorStorageKey(projectId)];
                         }
+                        if (readFailed && (!canvasState || typeof canvasState !== `object` || Array.isArray(canvasState) || !Array.isArray(canvasState.nodes))) throw Object.assign(new Error(`PROJECT_BACKUP_READ_UNAVAILABLE`), {code:`PROJECT_BACKUP_READ_UNAVAILABLE`});
                         if (!canvasState) continue;
                         (canvasStates[storageKey] = canvasState,
                           extractProjectAssetRefs(canvasState).forEach((assetRef) => assetRefs.add(assetRef)),

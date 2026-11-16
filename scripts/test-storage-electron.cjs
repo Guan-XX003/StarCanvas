@@ -12,6 +12,8 @@ app.whenReady().then(async () => {
     persistProjectAsset,
     diagnoseProjectAssets,
     copyExternalProjectAssetFiles,
+    loadProjectAssetManifests,
+    findAssetFromManifests,
     resolveExternalAssetManifestFile,
     removeProjectAssets
   } = require("../electron/main/assets/project-assets.cjs");
@@ -241,6 +243,24 @@ app.whenReady().then(async () => {
   assert.equal(bundle.manifest.files[0].filename, bundle.manifest.files[1].filename);
   assert.equal(bundle.manifest.files[1].deduplicated, true);
   assert.equal(fs.readdirSync(bundle.folderPath).filter((name) => name !== "wanjuan-external-assets-manifest.json").length, 1);
+  const portableManifestFile = path.join(bundle.folderPath, "wanjuan-external-assets-manifest.json");
+  const portableManifestText = fs.readFileSync(portableManifestFile, "utf8");
+  const portableManifest = JSON.parse(portableManifestText);
+  assert.equal(portableManifestText.includes(image.localPath), false, "backup manifest must not reveal the original local path");
+  assert.ok(portableManifest.files.every(entry => !Object.hasOwn(entry, "sourcePath")));
+  const reloadedManifests = loadProjectAssetManifests([portableManifestFile]);
+  const restoredPath = findAssetFromManifests({nodeId:"image-a",field:"imageUrl"}, reloadedManifests);
+  assert.equal(restoredPath, path.join(bundle.folderPath, portableManifest.files[0].filename));
+  assert.deepEqual(fs.readFileSync(restoredPath), png, "portable restore still resolves the original bytes");
+  assert.equal(bundle.manifest.files[0].sourcePath, image.localPath, "in-memory diagnostics remain available to the caller");
+  const oldManifestDir = path.join(root, "legacy-backup-assets");
+  fs.mkdirSync(oldManifestDir);
+  fs.writeFileSync(path.join(oldManifestDir, "legacy.png"), png);
+  const oldManifestFile = path.join(oldManifestDir, "wanjuan-external-assets-manifest.json");
+  fs.writeFileSync(oldManifestFile, JSON.stringify({version:2, files:[{nodeId:"old-node", field:"imageUrl", filename:"legacy.png", sourcePath:"/synthetic/old/path.png", size:png.length}]}));
+  const oldMatch = findAssetFromManifests({nodeId:"old-node",field:"imageUrl"},loadProjectAssetManifests([oldManifestFile]));
+  assert.equal(oldMatch, path.join(oldManifestDir, "legacy.png"), "older manifests containing sourcePath stay readable");
+  assert.deepEqual(fs.readFileSync(oldMatch), png);
 
   const sentinelFolder = path.join(root, "backup-assets");
   fs.mkdirSync(sentinelFolder, { recursive: true });
@@ -249,6 +269,7 @@ app.whenReady().then(async () => {
     { projectId: "project-a", nodeId: "missing", field: "imageUrl", assetId: "missing", kind: "image", path: path.join(root, "does-not-exist.png") }
   ], "backup-assets");
   assert.equal(failedBundle.failed, 1);
+  assert.equal(failedBundle.manifest.files[0].sourcePath, path.join(root, "does-not-exist.png"), "failed source remains available for the local warning");
   assert.equal(fs.readFileSync(path.join(sentinelFolder, "sentinel.txt"), "utf8"), "keep");
 
   const manifestDir = path.join(root, "manifest-check");

@@ -8,6 +8,7 @@ import { NodeResizer, Position, useNodeConnections, useNodesData, useReactFlow }
 import { CircleAlert, CirclePlay, Copy, Film, Image, RefreshCw, Settings2, Upload } from "lucide-react";
 import { WanJuanNodeHandle, WanJuanUseThrottledNodeDataUpdate } from "./render-mode";
 import { buildProjectMediaFileUrl } from "../lib/resource";
+import { noteManualMediaReplacement } from "../lib/manual-media-replacement";
 
 export const WanJuanVideoExtractNode = reactMemo(({
       id: nodeId,
@@ -92,6 +93,7 @@ export const WanJuanVideoExtractNode = reactMemo(({
               } catch {
                 videoName = videoUrl;
               }
+            noteManualMediaReplacement(nodeId, videoUrl);
             updateNodeData(nodeId, {
               videoUrl: videoUrl,
               videoName: videoName,
@@ -116,6 +118,7 @@ export const WanJuanVideoExtractNode = reactMemo(({
           if (!file) return;
           setUploadedFile(file);
           let objectUrl = URL.createObjectURL(file);
+          noteManualMediaReplacement(nodeId, objectUrl);
           ((nodeData.videoUrl = objectUrl),
             (nodeData.videoName = file.name),
             updateNodeData(nodeId, {

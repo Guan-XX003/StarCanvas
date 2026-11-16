@@ -1,7 +1,6 @@
 /**
  * runManualConfigButlerErrorQuery。自 bundle 抽出，逐字搬运、行为不变。
  */
-import { useCallback, useMemo } from "react";
 import type { SetAny, Toast } from "../lib/app-types";
 
 interface UseRunManualConfigButlerErrorQueryDeps {
@@ -46,7 +45,7 @@ export function use_runManualConfigButlerErrorQuery(deps: UseRunManualConfigButl
 		                triggeredAt: Date.now(),
 		                diagnosis: null,
 		              });
-		              window.setTimeout(() => {
+		              {
 		                let triggerResult = maybeTriggerConfigButlerErrorDiagnosis(globalTasks, [], {
 		                  manual: true,
 		                });
@@ -54,14 +53,16 @@ export function use_runManualConfigButlerErrorQuery(deps: UseRunManualConfigButl
 		                  setConfigButlerErrorAssistant((prevAssistant) =>
 		                    prevAssistant?.id === scanId ? {
 		                      ...prevAssistant,
-			                      status: `ready`,
+		                      status: `ready`,
+		                      localOnly: true,
+		                      noFailure: true,
 			                      task: {
 			                        modelName: `最近任务扫描`,
 			                        errorMsg: `未找到可诊断的失败任务记录`,
 			                      },
 			                      diagnosis: {
 			                        classification: `unknown`,
-			                        confidence: 1,
+		                        confidence: null,
 			                        summary: `最近任务记录里没有发现可诊断的失败任务。`,
 			                        evidence: [
 			                          `已扫描任务清单中的失败记录。`,
@@ -72,7 +73,7 @@ export function use_runManualConfigButlerErrorQuery(deps: UseRunManualConfigButl
 		                      },
 		                    } : prevAssistant,
 		                  );
-		              }, 800);
+		              }
 		            };
   return { runManualConfigButlerErrorQuery };
 }

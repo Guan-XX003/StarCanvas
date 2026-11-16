@@ -1,6 +1,8 @@
 /** 全局任务面板。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
 import { RefreshCw, Trash, X } from "lucide-react";
+import { classifyAssistantTaskStatus } from "../lib/assistant-local-operations";
+import { requestAssistantTaskInspection } from "../lib/assistant-task-inspection";
 declare const chrome: any;
 
 export function WanJuanGlobalTasksPanel({
@@ -8,11 +10,24 @@ export function WanJuanGlobalTasksPanel({
   canManuallyRefreshGlobalTask,
   globalTasks,
   handleManualRecoverImageTask,
+  onInspectTask,
   refreshGlobalTask,
   setIsOpen,
   updateGlobalTasks,
 }: any) {
   const taskT = (text: string) => (globalThis as any).wanjuanI18nRuntime?.t?.(text) || text;
+  const statusClass = (task:unknown) => {
+    const status = classifyAssistantTaskStatus(task);
+    return status === "completed" ? "is-completed bg-green-500/20 text-green-400" : status === "failed" ? "is-failed bg-red-500/20 text-red-400" : status === "stopped" ? "is-stopped text-gray-400" : status === "unknown" ? "is-unknown text-gray-400" : "is-running bg-blue-500/20 text-blue-400";
+  };
+  const statusText = (task:any) => {
+    const status = classifyAssistantTaskStatus(task);
+    if (status === "completed") return taskT(`已完成`);
+    if (status === "failed") return taskT(`失败`);
+    if (status === "stopped") return taskT(`已停止`);
+    if (status === "unknown") return taskT(`状态未知`);
+    return !task.progress || task.progress === 0 ? taskT(status === "queued" ? `排队中` : `生成中`) : `${task.progress}%`;
+  };
   return jsxs(`div`, {
 	                      className: `absolute top-full right-0 w-80 bg-[#1c1c1c] border-l border-[#333] shadow-2xl z-50 flex flex-col h-[calc(100vh-112px)] max-h-[calc(100vh-112px)] min-h-0 animate-slide-left wanjuan-task-drawer`,
                       children: [
@@ -67,14 +82,25 @@ export function WanJuanGlobalTasksPanel({
                                     jsxs(`div`, {
                                       className: `flex justify-between items-start`,
                                       children: [
-                                        jsx(`div`, {
+                                        jsxs(`div`, {
                                           className: `text-xs font-bold text-gray-200 truncate pr-4 wanjuan-task-card-title`,
-                                          title: task.prompt || taskT(`未命名任务`),
-                                          children: `${taskT(String(task.provider || ``).toLowerCase() === `seedance` || String(task.modelName || ``).toLowerCase().includes(`seedance`) ? `即梦` : String(task.provider || ``).toLowerCase() === `tongyi-wanxiang` || String(task.modelName || ``).toLowerCase().includes(`wan2.`) || String(task.modelName || ``).toLowerCase().includes(`wanx`) ? `通义` : String(task.type || task.customOutputType || ``).toLowerCase() === `image` || task.customOutputType === `image` ? `图像` : String(task.type || task.customOutputType || ``).toLowerCase() === `video` || task.customOutputType === `video` ? `视频` : String(task.type || task.customOutputType || ``).toLowerCase() === `audio` || task.customOutputType === `audio` ? `音频` : String(task.type || task.customOutputType || ``).toLowerCase() === `text` || task.customOutputType === `text` ? `文本` : `任务`)} · ${task.prompt ? task.prompt : taskT(`任务: ${task.id.substring(0, 8)}...`)}`,
+                                          children: [
+                                            `${taskT(String(task.provider || ``).toLowerCase() === `seedance` || String(task.modelName || ``).toLowerCase().includes(`seedance`) ? `即梦` : String(task.provider || ``).toLowerCase() === `tongyi-wanxiang` || String(task.modelName || ``).toLowerCase().includes(`wan2.`) || String(task.modelName || ``).toLowerCase().includes(`wanx`) ? `通义` : String(task.type || task.customOutputType || ``).toLowerCase() === `image` || task.customOutputType === `image` ? `图像` : String(task.type || task.customOutputType || ``).toLowerCase() === `video` || task.customOutputType === `video` ? `视频` : String(task.type || task.customOutputType || ``).toLowerCase() === `audio` || task.customOutputType === `audio` ? `音频` : String(task.type || task.customOutputType || ``).toLowerCase() === `text` || task.customOutputType === `text` ? `文本` : `任务`)} · `,
+                                            jsx(`span`, {"data-wanjuan-i18n-skip": true, title: typeof task.prompt === "string" && task.prompt ? task.prompt : taskT(`未命名任务`), children: typeof task.prompt === "string" && task.prompt ? task.prompt : typeof task.id === "string" ? `${taskT(`任务`)}: ${task.id.substring(0, 8)}...` : taskT(`未命名任务`)}),
+                                          ],
                                         }),
                                         jsxs(`div`, {
 	                                          className: `flex items-center gap-1`,
 	                                          children: [
+	                                            typeof task.id === "string" && task.id.trim() && task.id.length <= 1024 && classifyAssistantTaskStatus(task) === "failed" ?
+	                                            jsx(`button`, {
+	                                              type: `button`,
+	                                              onClick: () => { if (typeof onInspectTask === "function") onInspectTask(task.id); else if (requestAssistantTaskInspection(task.id)) setIsOpen(false); },
+	                                              className: `text-[10px] text-gray-300 hover:text-white rounded px-1.5 py-0.5 whitespace-nowrap wanjuan-task-card-icon-action is-inspect`,
+	                                              title: taskT(`用助手排查此任务`),
+	                                              "aria-label": taskT(`用助手排查此任务`),
+	                                              children: taskT(`排查`),
+	                                            }) : null,
 		                                            canManualRecoverImageTask(task) &&
 			                                            jsx(`button`, {
 			                                              onClick: () => handleManualRecoverImageTask(task),
@@ -130,24 +156,18 @@ export function WanJuanGlobalTasksPanel({
                                           ).toLocaleTimeString(),
                                         }),
                                         jsx(`span`, {
-                                          className: `px-1.5 rounded wanjuan-task-status ${task.status === `completed` ? `is-completed bg-green-500/20 text-green-400` : task.status === `failed` ? `is-failed bg-red-500/20 text-red-400` : `is-running bg-blue-500/20 text-blue-400`}`,
-                                          children: task.status === `completed` ?
-                                            taskT(`已完成`) :
-	                                            task.status ===
-	                                            `failed` ?
-	                                            taskT(`失败`) :
-		                                            !task.progress || task.progress === 0 ?
-		                                            (task.status === `pending` ? taskT(`排队中`) : taskT(`生成中`)) :
-		                                            `${task.progress}%`,
+	                                          className: `px-1.5 rounded wanjuan-task-status ${statusClass(task)}`,
+	                                          children: statusText(task),
 	                                        }),
                                       ],
                                     }),
-                                    task.errorMsg &&
+                                    typeof task.errorMsg === "string" && task.errorMsg &&
                                     jsx(`div`, {
                                       className: `text-[10px] text-red-400 break-words wanjuan-task-error`,
+                                      "data-wanjuan-i18n-skip": true,
                                       children: task.errorMsg,
                                     }),
-                                    task.status === `completed` &&
+                                    task.status === `completed` && classifyAssistantTaskStatus(task) === "completed" &&
                                     jsxs(`div`, {
                                       className: `mt-1 flex items-center gap-2 rounded border border-green-500/20 bg-green-500/10 px-2 py-2 text-[11px] text-green-300 wanjuan-task-complete-note`,
                                       children: [

@@ -77,6 +77,8 @@ export const updateTaskRunningProgress = (task: GlobalTask, progress: number) =>
   };
 };
 
+/** Legacy explicit terminal-failure helper. Never use for a failed status
+ * lookup: authentication/network errors do not prove generation failed. */
 export const failGlobalTaskRefresh = (
   tasks: GlobalTask[],
   taskId: string,

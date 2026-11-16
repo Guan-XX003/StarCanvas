@@ -7,6 +7,8 @@ import type { SetAny, Toast } from "../lib/app-types";
 import { getAgentOptionList } from "../lib/agent";
 import { getProjectOptionList } from "../lib/app-root-helpers";
 import { assertSafeBackupProjects } from "../lib/project-normalize";
+import { decryptPortableBackup, isEncryptedPortableBackup } from "../lib/portable-backup-crypto";
+import { backupImportFailureMessage } from "../lib/backup-export-errors";
 
 interface UseHandleBackupImportFileDeps {
   applyExternalAssetBundleToBackupPayload: any;
@@ -30,6 +32,28 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
     showToast2,
     projects,
   } = deps;
+  const cancelled = Symbol(`backup-password-cancelled`);
+  const language = () => globalThis.wanjuanI18nRuntime?.getLanguage?.() || `zh-CN`;
+  const unlock = async (payload) => {
+    if (!isEncryptedPortableBackup(payload)) return payload;
+    const open = window.wanjuanDesktop?.showInputDialog;
+    if (typeof open !== `function`) throw Object.assign(Error(`BACKUP_PASSWORD_UI_UNAVAILABLE`),{code:`BACKUP_PASSWORD_UI_UNAVAILABLE`});
+    const lang=language();
+    let password;
+    try { password = await open({password:true,
+      title:lang===`en-US`?`Unlock encrypted backup`:lang===`zh-TW`?`解鎖加密備份`:`解锁加密备份`,
+      message:lang===`en-US`?`Enter the password used to encrypt this backup.`:lang===`zh-TW`?`請輸入加密此備份時設定的密碼。`:`请输入加密此备份时设置的密码。`,
+      cancelLabel:lang===`en-US`?`Cancel`:lang===`zh-TW`?`取消`:`取消`,
+      confirmLabel:lang===`en-US`?`Unlock`:lang===`zh-TW`?`解鎖`:`解锁`}); }
+    catch { throw Object.assign(Error(`BACKUP_PASSWORD_UI_UNAVAILABLE`),{code:`BACKUP_PASSWORD_UI_UNAVAILABLE`}); }
+    if (password === null) return cancelled;
+    return decryptPortableBackup(payload,password);
+  };
+  const reportReadFailure = error => {
+    console.error(`Backup file read failed`);
+    let code=``;try {if(error && typeof error === `object` && typeof error.code === `string`) code=error.code;} catch {}
+    showToast2(typeof code === `string` && code.startsWith(`BACKUP_`) ? backupImportFailureMessage(error,language()) : `导入失败：文件格式不正确`);
+  };
   const handleBackupImportFile = async (event) => {
                                   if (window.wanjuanDesktop?.chooseBackupFile) {
                                     try {
@@ -38,8 +62,10 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                       });
                                       if (backupFileResult?.canceled) return;
                                       if (!backupFileResult?.ok) throw Error(backupFileResult?.error || `读取备份文件失败`);
+                                      const unlocked = await unlock(JSON.parse(backupFileResult.content || `{}`));
+                                      if (unlocked === cancelled) return;
                                       let backupPayload = applyExternalAssetBundleToBackupPayload(
-                                          JSON.parse(backupFileResult.content || `{}`),
+                                          unlocked,
                                           backupFileResult.externalAssetBundle,
                                         ),
                                         availableModules = getAvailableBackupModules(backupPayload).filter((module) => [`settings`, `projects`, `agents`].includes(module));
@@ -73,7 +99,7 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                           availableAgents: agentOptions,
                                         });
                                     } catch (error) {
-                                      (console.error(error), showToast2(`导入失败：文件格式不正确`));
+                                      reportReadFailure(error);
                                     } finally {
                                       event?.target && (event.target.value = ``);
                                     }
@@ -84,7 +110,9 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                   let reader = new FileReader();
                                   ((reader.onload = async (event2) => {
                                       try {
-                                        let parsedBackup = JSON.parse(event2.target?.result || `{}`),
+                                        let parsedBackup = await unlock(JSON.parse(event2.target?.result || `{}`));
+                                        if (parsedBackup === cancelled) return;
+                                        let
                                           availableModules = getAvailableBackupModules(parsedBackup).filter((module) => [`settings`, `projects`, `agents`].includes(module));
                                         if (!availableModules.length) {
                                           showToast2(`导入失败：未识别到可导入内容`);
@@ -116,7 +144,7 @@ export function use_handleBackupImportFile(deps: UseHandleBackupImportFileDeps) 
                                             availableAgents: agentList,
                                           });
                                       } catch (error) {
-                                        (console.error(error), showToast2(`导入失败：文件格式不正确`));
+                                        reportReadFailure(error);
                                       }
                                     }),
                                     reader.readAsText(selectedFile),

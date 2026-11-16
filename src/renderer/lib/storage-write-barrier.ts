@@ -75,7 +75,9 @@ const createController = (localforage: any, chromeStorage: any, chromeRuntime: a
             callbackLastError = null;
           }
         }
-        console.error(`Storage write blocked`, error);
+        // A storage failure may carry a key, path or serialized value. Keep
+        // the callback's existing error semantics without logging it.
+        console.error(`Storage write blocked`);
       });
       return undefined;
     }

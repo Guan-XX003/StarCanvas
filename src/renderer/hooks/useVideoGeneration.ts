@@ -5,8 +5,11 @@
 import { useCallback } from "react";
 import { validateJixinH3Input } from "../lib/jixin-h3";
 import type { ApiBindings, ApiConfig, ProtocolBindings, ProtocolRegistry, Ref, SetAny, SetState, Toast, WjEdge, WjNode } from "../lib/app-types";
-import { buildApiUrl, extractVideoTaskErrorHelper } from "../lib/model-binding";
+import { buildMediaApiUrl, extractVideoTaskErrorHelper } from "../lib/model-binding";
 import { resolveMediaModelContract } from "../lib/media-model-contract";
+import { resolveVideoRequestProfile } from "../lib/video-request-profile";
+import {normalizeVideoRequestProfile,createVideoParameterContext} from "../lib/video-request-parameters";
+import {createVideoBaseRequest,finalizeVideoJsonRequest,VIDEO_FIELD_DEFAULTS} from "../lib/video-request-body";
 import { mediaUrlToDataUrl, wanjuanCollectNodeReferenceMedia, wanjuanNormalizeReferenceMediaUrl } from "../lib/reference-media";
 import { WANJUAN_TIANJI_PORTRAIT_SYNC_ERROR, wanjuanHasTianjiPortraitClaim, wanjuanRecoverTianjiPortraitNodeData, wanjuanResolveTianjiGenerationCanvasSnapshot } from "../lib/tianji-portrait";
 import { wanjuanCollectTianjiManualPortraitInputs, wanjuanFilterTianjiPortraitPreviews } from "../lib/tianji-manual-reference";
@@ -22,6 +25,12 @@ import { wanjuanTianjiResolvePortraitAssetForNodeData } from "../lib/tianji-asse
 import { wanjuanBuildReferenceMediaEntries } from "../lib/video-task";
 import { applyRunScopedStateUpdate, supersedeActiveNodeTasks, updateTaskRunningProgress } from "../lib/global-tasks";
 import { wanjuanResolveArkTrustedAssetReference } from "../lib/ark-trusted-assets";
+import { safeGenerationError } from "../lib/custom-task-error";
+
+const isProviderVideoCancellation = (status) => [`cancelled`, `canceled`].includes(String(status || ``).trim().toLowerCase());
+class ProviderVideoCancelled extends Error {
+  constructor() { super(`服务商报告视频任务已取消`); this.name = `ProviderVideoCancelled`; }
+}
 
 interface UseVideoGenerationDeps {
   videoApiKey: any;
@@ -94,7 +103,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
     updateTaskList: updateTaskListRaw,
   } = deps;
   const generateVideo = useCallback(
-      async (nodeId, prompt, resolution = `1280x720`, modelName2, duration, apiBindingId, aspectRatioOverride) => {
+      async (nodeId, prompt, resolution = `1280x720`, modelName2, duration, apiBindingId, aspectRatioOverride, execution) => {
+          const submit = execution?.submit || ((send) => send());
+          const upload = execution?.upload || ((send) => send());
           let previousController = abortControllersRef.current.get(nodeId);
           if (previousController && !previousController.signal?.aborted) previousController.abort();
           abortControllersRef.current.delete(nodeId);
@@ -161,6 +172,11 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 return videoBaseUrl;
               }
             })(),
+            isDirectArk = (() => {
+              try { return new URL(videoBaseUrl).hostname.toLowerCase() === `ark.cn-beijing.volces.com`; }
+              catch { return false; }
+            })(),
+            isSeedance25 = /^doubao-seedance-2-5(?:-|$)/i.test(modelName),
             isXpclawMiniMax23 =
             /^MiniMax-Hailuo-2\.3$/i.test(modelName) &&
             /xpclaw\.ai/i.test(videoBaseUrl),
@@ -170,13 +186,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             projectIdAtStart = projectIdRef.current,
             persistVideoNodeState = async (styleUpdates = {}, dataUpdates = {}, options = {}) => {
               try {
+                if (!isCurrentVideoRun()) return;
                 let storageKey = `${canvasStateKeyPrefix}${projectIdAtStart}`,
                   projectData = await localforageModule.default.getItem(storageKey);
+                if (!isCurrentVideoRun()) return;
                 projectData?.nodes &&
                   ((projectData = {
                       ...projectData,
                       nodes: projectData.nodes.map((node) => {
                         if (node.id !== nodeId) return node;
+                        if (options.onlyIfActiveTaskId && (node.data?.loading !== true || node.data?.manuallyStopped || ![node.data?.taskId, node.data?.seedanceTaskId, node.data?.tianjiExecuteId].includes(options.onlyIfActiveTaskId))) return node;
                         let baseData = wanjuanClearProjectAssetBindingsFromData(
                           node.data,
                           options.clearProjectAssetBindings || [],
@@ -198,85 +217,23 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     }),
                     await localforageModule.default.setItem(storageKey, projectData));
               } catch (error) {
-                console.warn(`Failed to persist background video node`, error);
+                console.warn(`Failed to persist background video node.`);
               }
             };
 		          let isSeedanceNode =
 		            seedanceSourceNode?.type === `seedanceNode` ||
-		            /^(?:doubao-)?seedance(?:-2(?:\.|-)?0|-2-0)/i.test(modelName),
+		            /^(?:doubao-)?seedance(?:-2(?:\.|-)?0|-2-0)/i.test(modelName) ||
+                    (isSeedance25 && isDirectArk && !videoModelContract.protocol),
 		            selectedVideoProtocolName =
 		            videoModelContract.protocolName,
 		            modelProtocolDefinition =
 		            videoModelContract.protocol,
-            parseVideoModelRequestProfiles = (value) => {
-              if (!value) return {};
-              if (typeof value == `object`) return value;
-              if (typeof value != `string`) return {};
-              try {
-                let parsed = JSON.parse(value);
-                return parsed && typeof parsed == `object` ? parsed : {};
-              } catch (error) {
-                return (
-                  console.warn(`Invalid video model request profiles JSON`, error), {}
-                );
-              }
-            },
-            videoModelRequestProfile =
-            (modelProtocolDefinition &&
-              typeof modelProtocolDefinition == `object` &&
-              modelProtocolDefinition.category === `video` ?
-              modelProtocolDefinition :
-              null) ||
-            parseVideoModelRequestProfiles(
-              seedanceSourceNode?.data?.videoModelRequestProfiles,
-            )?.[modelName] ||
-            (isXpclawMiniMax23 ?
-              {
-                requestType: `openai-video`,
-                submitPath: `${apiOrigin}/v1/video/generations`,
-                pollPath: `${apiOrigin}/v1/video/generations/{taskId}`,
-                fieldMapping: {
-                  prompt: `prompt`,
-                  resolution: `size`,
-                  duration: `duration`,
-                  referenceImage: `first_frame_image`,
-                },
-              } :
-              isXpclawSoraCompatTask ?
-              {
-                requestType: `multipart-video`,
-                submitPath: `${apiOrigin}/v1/videos`,
-                pollPath: `${apiOrigin}/v1/videos/{taskId}`,
-                contentPath: `${apiOrigin}/v1/videos/{taskId}/content`,
-                fieldMapping: {
-                  duration: `seconds`,
-                  resolution: `size`,
-                  referenceImage: `input_reference`,
-                },
-              } :
-              /^MiniMax-Hailuo-2\.3$/i.test(modelName) ?
-              {
-                requestType: `json-video`,
-                submitPath: `${apiOrigin}/v1/video_generation`,
-                pollPath: `${apiOrigin}/v1/query/video_generation?task_id={taskId}`,
-                fieldMapping: {
-                  duration: `duration`,
-                  resolution: `resolution`,
-                  referenceImage: `first_frame_image`,
-                },
-              } :
-              {}),
-            videoBuildApiUrl = (baseUrl, path) => {
-              let normalizedBaseUrl = String(baseUrl || ``)
-                .replace(/\s+/g, ``)
-                .replace(/\/$/, ``),
-                trimmedPath = String(path || ``).trim();
-              return trimmedPath ?
-                /^https?:\/\//i.test(trimmedPath) ?
-                trimmedPath :
-                `${normalizedBaseUrl}/${trimmedPath.replace(/^\/+/, ``)}` :
-                normalizedBaseUrl;
-            },
+            videoModelRequestProfile = resolveVideoRequestProfile({
+              modelName,baseUrl:videoBaseUrl,protocol:modelProtocolDefinition,
+              profiles:seedanceSourceNode?.data?.videoModelRequestProfiles,
+              onInvalid:()=>console.warn(`Invalid video model request profiles JSON.`),
+            }),
+            videoBuildApiUrl = buildMediaApiUrl,
             replaceTaskPath = (pathTemplate, taskId) => {
               let template = String(pathTemplate || `/v1/videos/{taskId}`);
               return /\{(?:taskId|task_id|video_id|id)\}/.test(template) ?
@@ -295,8 +252,10 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             isSeedanceNode &&
             !videoConfig
           ) {
-            videoBaseUrl = normalizeApiBase(arkConfig?.url || ``);
+            videoBaseUrl = normalizeApiBase(arkConfig?.url || videoBaseUrl);
             videoKey = arkConfig?.key || videoKey;
+            try { isDirectArk = new URL(videoBaseUrl).hostname.toLowerCase() === `ark.cn-beijing.volces.com`; }
+            catch { isDirectArk = false; }
           }
           if (!videoKey && !(isSeedanceNode && seedanceSourceNode?.data?.seedanceMode === `tianji`)) {
             showToast(`请先在设置中配置视频大模型 API Key`);
@@ -314,6 +273,22 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             showToast(videoModelRequestProfile.blockedReason);
             videoRunTokens.delete(nodeId);
             return;
+          }
+          if (!isSeedanceNode && seedanceSourceNode?.type !== `tongyiWanxiangNode` &&
+              !videoModelRequestProfile?.requestType &&
+              !(videoConfig?.protocolFormat && videoConfig.protocolFormat !== `auto`)) {
+            showToast(`模型 ${modelName} 尚未选择视频请求协议，请在模型设置中为此 API 渠道绑定协议`);
+            videoRunTokens.delete(nodeId);
+            return;
+          }
+          if (isSeedanceNode && isSeedance25 && isDirectArk) {
+            let seconds = Number(duration || seedanceSourceNode?.data?.selectedSeconds ||
+              seedanceSourceNode?.data?.videoDurations?.split(/[\s,，、]+/)[0]?.trim() || 10);
+            if (!Number.isInteger(seconds) || (seconds !== -1 && (seconds < 4 || seconds > 30))) {
+              showToast(`Seedance 2.5 视频时长须为 4–30 秒，或选择自动时长`);
+              videoRunTokens.delete(nodeId);
+              return;
+            }
           }
           (setNodes((nodes2) =>
               nodes2.map((node) =>
@@ -734,7 +709,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   for (let strategy of uploadStrategies)
                     try {
                       showToast(`正在上传通义万相参考${mediaKind === `video` ? `视频` : mediaKind === `audio` ? `音频` : `图片`}到${strategy.label}...`);
-                      let uploadResult = await strategy.run();
+                      let uploadResult = await upload(() => strategy.run());
                       if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                       errors.push(`${strategy.label}: ${uploadResult?.error || `上传失败`}`);
                     } catch (error) {
@@ -830,7 +805,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 abortController = new AbortController();
               abortControllersRef.current.set(nodeId, abortController);
               console.info(
-                `Sending Tongyi Wanxiang request: ${JSON.stringify({
+                `Sending Tongyi Wanxiang request: ${safeStringifyRequestForLog({
                   modelName: modelName,
                   mode: tongyiMode,
                   submitUrl: apiUrl,
@@ -838,23 +813,23 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   seconds: tongyiDuration,
                 })}`,
               );
-              let response = await fetch(apiUrl, {
+              let response = await submit(() => fetch(apiUrl, {
                 method: `POST`,
                 headers: {
                   Authorization: `Bearer ${videoKey}`
                 },
                 body: formData,
                 signal: abortController.signal,
-              });
+              }));
               if (!response.ok) {
                 let errorMessage = `API 请求失败: ${response.status} ${response.statusText}`;
                 try {
                   let errorData = await response.json();
                   errorMessage =
                     errorData.error && errorData.error.message ?
-                    `API 请求失败: ${errorData.error.message}` :
+                    `API 请求失败: ${response.status} - ${errorData.error.message}` :
                     errorData.message ?
-                    `API 请求失败: ${errorData.message}` :
+                    `API 请求失败: ${response.status} - ${errorData.message}` :
                     `API 请求失败: ${response.status} - ${serializeErrorPreview(errorData)}`;
                 } catch {
                   try {
@@ -887,6 +862,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     modelName: modelName,
                     projectId: projectIdAtStart,
                     nodeId: nodeId,
+                    clientSubmissionId: execution?.submissionId,
                     status: `pending`,
                     progress: 0,
                     createdAt: Date.now(),
@@ -962,6 +938,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     pollData.data?.progress !== undefined && pollData.data?.progress !== null ?
                     parseInt(pollData.data.progress) :
                     Math.min(99, pollCount * 2);
+                  if (isProviderVideoCancellation(status)) throw new ProviderVideoCancelled();
+                  if ([`failed`, `failure`, `error`, `fail`, `rejected`].includes(status)) throw Error(`[TONGYI_TASK_FAILED]${extractVideoTaskErrorHelper(pollData)}`);
                   if (
                     ((errorCount = 0),
                       [`completed`, `success`, `succeeded`, `done`].includes(
@@ -1051,12 +1029,6 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       showToast(`通义万相视频生成成功！`));
                     break;
                   }
-                  if (
-                    [`failed`, `error`, `fail`, `canceled`, `cancelled`, `rejected`].includes(
-                      status,
-                    )
-                  )
-                    throw Error(`[TONGYI_TASK_FAILED]${extractVideoTaskErrorHelper(pollData)}`);
                   tongyiProgress = Math.min(
                     99,
                     Math.max(0, isNaN(tongyiProgress) ? pollCount * 2 : tongyiProgress),
@@ -1083,8 +1055,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       ),
                     ));
                 } catch (error) {
+                  if (error instanceof ProviderVideoCancelled) throw error;
                   if (
-                    (console.warn(`Tongyi Wanxiang polling error:`, error),
+                    (console.warn(`Tongyi Wanxiang polling error.`),
                       error?.message &&
                       error.message.startsWith(`[TONGYI_TASK_FAILED]`))
                   )
@@ -1099,6 +1072,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
             if (isSeedanceNode) {
               if (seedanceSourceNode?.data?.seedanceMode === `tianji`) {
                 await wanjuanRunTianjiSeedanceVideo({
+                  execution,
                   nodeId: nodeId,
                   prompt: prompt,
                   extraPrompts: promptParts,
@@ -1159,17 +1133,13 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     `1080p` :
                     `720p`;
                 })(resolution),
-                seedanceDuration =
-                parseInt(
-                  String(
-                    seedanceSourceNode?.data?.selectedSeconds ||
-                    seedanceSourceNode?.data?.videoDurations
-                    ?.split(/[\s,，、]+/)[0]
-                    ?.trim() ||
-                    10,
-                  ),
-                  10,
-                ) || 10,
+                seedanceDurationInput =
+                  (isSeedance25 && isDirectArk ? duration : undefined) ||
+                  seedanceSourceNode?.data?.selectedSeconds ||
+                  seedanceSourceNode?.data?.videoDurations
+                  ?.split(/[\s,，、]+/)[0]?.trim() || 10,
+                seedanceDuration = isSeedance25 && isDirectArk ?
+                  Number(seedanceDurationInput) : parseInt(String(seedanceDurationInput), 10) || 10,
                 seedanceContent = [];
 		              let seedanceMentionMap = new Map(),
 		                seedanceUsedUrls = new Set(),
@@ -1299,16 +1269,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     )
                       try {
                         showToast(`正在上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}到火山 TOS...`);
-                        let uploadResult = await window.wanjuanDesktop.uploadTosMedia({
+                        let uploadResult = await upload(() => window.wanjuanDesktop.uploadTosMedia({
                           url: url,
                           kind: kind,
                           filename: `seedance-reference-${Date.now()}`,
                           tos: tosConfig2,
-                        });
+                        }));
                         if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                         throw Error(uploadResult?.error || `上传失败`);
                       } catch (error) {
-                        console.error(`Seedance TOS media upload failed:`, error);
+                        console.error(`Seedance TOS media upload failed.`);
                         showToast(`火山 TOS 上传失败，正在改用公网临时链接...`);
                       }
                     if (
@@ -1319,16 +1289,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     )
                       try {
                         showToast(`正在上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}到七牛云...`);
-                        let uploadResult = await window.wanjuanDesktop.uploadQiniuMedia({
+                        let uploadResult = await upload(() => window.wanjuanDesktop.uploadQiniuMedia({
                           url: url,
                           kind: kind,
                           filename: `seedance-reference-${Date.now()}`,
                           qiniu: qiniuUploadConfig,
-                        });
+                        }));
                         if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                         throw Error(uploadResult?.error || `上传失败`);
                       } catch (error) {
-                        console.error(`Seedance Qiniu media upload failed:`, error);
+                        console.error(`Seedance Qiniu media upload failed.`);
                         showToast(`七牛云上传失败，正在改用公网临时链接...`);
                       }
                     if (
@@ -1338,16 +1308,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     )
                       try {
                         showToast(`正在上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}到自定义公网直链...`);
-                        let uploadResult = await window.wanjuanDesktop.uploadCustomPublicMedia({
+                        let uploadResult = await upload(() => window.wanjuanDesktop.uploadCustomPublicMedia({
                           url: url,
                           kind: kind,
                           filename: `seedance-reference-${Date.now()}`,
                           customUpload: seedanceSourceNode?.data?.customPublicUploadConfig || {},
-                        });
+                        }));
                         if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                         throw Error(uploadResult?.error || `上传失败`);
                       } catch (error) {
-                        console.error(`Seedance custom media upload failed:`, error);
+                        console.error(`Seedance custom media upload failed.`);
                         if (
                           hasTosConfig &&
                           window.wanjuanDesktop &&
@@ -1355,16 +1325,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         )
                           try {
                             showToast(`自定义公网直链失败，正在改用火山 TOS 上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}...`);
-                            let uploadResult = await window.wanjuanDesktop.uploadTosMedia({
+                            let uploadResult = await upload(() => window.wanjuanDesktop.uploadTosMedia({
                               url: url,
                               kind: kind,
                               filename: `seedance-reference-${Date.now()}`,
                               tos: tosConfig2,
-                            });
+                            }));
                             if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                             throw Error(uploadResult?.error || `上传失败`);
                           } catch (error2) {
-                            console.error(`Seedance custom->TOS fallback failed:`, error2);
+                            console.error(`Seedance custom->TOS fallback failed.`);
                             throw Error(
                               `Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}上传失败：自定义公网直链失败（${serializeErrorPreview(error?.message || error, 180)}）；火山 TOS 兜底失败（${serializeErrorPreview(error2?.message || error2, 180)}）`,
                             );
@@ -1379,16 +1349,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     )
                       try {
                         showToast(`正在上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}到火山 TOS...`);
-                        let uploadResult = await window.wanjuanDesktop.uploadTosMedia({
+                        let uploadResult = await upload(() => window.wanjuanDesktop.uploadTosMedia({
                           url: url,
                           kind: kind,
                           filename: `seedance-reference-${Date.now()}`,
                           tos: tosConfig2,
-                        });
+                        }));
                         if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                         throw Error(uploadResult?.error || `上传失败`);
                       } catch (error) {
-                        console.error(`Seedance default->TOS upload failed:`, error);
+                        console.error(`Seedance default->TOS upload failed.`);
                       }
                     if (
                       !window.wanjuanDesktop ||
@@ -1397,15 +1367,15 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       return ``;
                     try {
                       showToast(`正在上传 Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}到公网临时链接...`);
-                      let uploadResult = await window.wanjuanDesktop.uploadPublicMedia({
+                      let uploadResult = await upload(() => window.wanjuanDesktop.uploadPublicMedia({
                         url: url,
                         kind: kind,
                         filename: `seedance-reference-${Date.now()}`,
-                      });
+                      }));
                       if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                       throw Error(uploadResult?.error || `上传失败`);
                     } catch (error) {
-                      console.error(`Seedance public media upload failed:`, error);
+                      console.error(`Seedance public media upload failed.`);
                       throw Error(`Seedance 参考${kind === `audio` ? `音频` : kind === `image` ? `图片` : `视频`}上传公网链接失败：${error?.message || error}`);
                     }
                   },
@@ -1437,7 +1407,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       if (!url || !seedanceIsArkMediaRef(url))
                         return (
                           seedanceSkippedMedia[kind] = (seedanceSkippedMedia[kind] || 0) + 1,
-                          console.warn(`Seedance skipped non-public ${kind} URL:`, source),
+                          console.warn(`Seedance skipped a non-public media URL.`),
                           ``
                         );
                       return url;
@@ -1564,7 +1534,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   part?.type === `image_url` ||
                   part?.type === `video_url`,
                 );
-              if (seedanceHasAudioReference && !seedanceHasVisualReference)
+              if (seedanceHasAudioReference && !seedanceHasVisualReference && !(isSeedance25 && isDirectArk))
                 throw Error(`Seedance 音频参考不能单独使用；请同时连接至少一张参考图片或一个参考视频`);
               let seedanceInvalidReference = seedanceContent.find(
                 (part) =>
@@ -1586,6 +1556,12 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 watermark: seedanceSourceNode?.data?.watermark === true,
                 return_last_frame: true,
 	              };
+              if (isDirectArk) delete requestBody.prompt;
+              if (isSeedance25 && isDirectArk) {
+                if (seedanceContent.some((part) => part?.role === `first_frame` || part?.role === `last_frame`))
+                  requestBody.ratio = `adaptive`;
+                delete requestBody.return_last_frame;
+              }
 	              seedanceSourceNode?.data?.enableWebSearch &&
 	                seedanceConnectedImageRefs.length === 0 &&
 	                seedanceConnectedVideoRefs.length === 0 &&
@@ -1593,10 +1569,10 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 	                (requestBody.tools = [{
 	                  type: `web_search`
 	                }]);
-              let apiUrl = `${videoBaseUrl}/contents/generations/tasks`,
+              let apiUrl = buildMediaApiUrl(videoBaseUrl, isDirectArk ? `/api/v3/contents/generations/tasks` : `/contents/generations/tasks`),
                 abortController = new AbortController();
               abortControllersRef.current.set(nodeId, abortController);
-              let response = await fetch(apiUrl, {
+              let response = await submit(() => fetch(apiUrl, {
                 method: `POST`,
                 headers: {
                   Authorization: `Bearer ${videoKey}`,
@@ -1604,16 +1580,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 },
                 body: JSON.stringify(requestBody),
                 signal: abortController.signal,
-              });
+              }));
               if (!response.ok) {
                 let errorMessage = `API 请求失败: ${response.status} ${response.statusText}`;
                 try {
                   let errorData = await response.json();
                   errorMessage =
                     errorData.error && errorData.error.message ?
-                    `API 请求失败: ${errorData.error.message}` :
+                    `API 请求失败: ${response.status} - ${errorData.error.message}` :
                     errorData.message ?
-                    `API 请求失败: ${errorData.message}` :
+                    `API 请求失败: ${response.status} - ${errorData.message}` :
                     `API 请求失败: ${response.status} - ${serializeErrorPreview(errorData)}`;
                 } catch {
                   try {
@@ -1646,6 +1622,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     modelName: modelName,
                     projectId: projectIdAtStart,
                     nodeId: nodeId,
+                    clientSubmissionId: execution?.submissionId,
                     status: `pending`,
                     progress: 0,
                     createdAt: Date.now(),
@@ -1695,7 +1672,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   pollCount < maxPolls &&
                   showToast(`Seedance 视频生成仍在进行中，请耐心等待...`));
                 try {
-                  let response2 = await fetch(`${videoBaseUrl}/contents/generations/tasks/${taskId}`, {
+                  let response2 = await fetch(buildMediaApiUrl(videoBaseUrl, `${isDirectArk ? `/api/v3` : ``}/contents/generations/tasks/${encodeURIComponent(taskId)}`), {
                     headers: {
                       Authorization: `Bearer ${videoKey}`
                     },
@@ -1785,6 +1762,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         responseData.thumbnail_url ||
                         responseData.cover_url,
                       );
+                    if (isProviderVideoCancellation(seedanceStatus)) throw new ProviderVideoCancelled();
+                    if ([`failed`, `failure`, `fail`, `error`, `expired`, `rejected`].includes(seedanceStatus)) throw Error(`[SEEDANCE_TASK_FAILED]${seedanceItemErrorMessage || seedanceItem?.message || responseData.error?.message || responseData.data?.error?.message || responseData.message || responseData.error?.code || `视频生成失败`}`);
                     if (
                       !seedanceVideoUrl &&
                       [
@@ -1836,7 +1815,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                           }
                         }
                       } catch (error) {
-                        console.warn(`Failed to query Sora-compatible Seedance status`, error);
+                        console.warn(`Failed to query Sora-compatible Seedance status.`);
                       }
                     if (
                       !seedanceVideoUrl &&
@@ -1872,7 +1851,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                           }
                         }
                       } catch (error) {
-                        console.warn(`Failed to fetch Seedance video content`, error);
+                        console.warn(`Failed to fetch Seedance video content.`);
                       }
                     if (
                       ((errorCount = 0),
@@ -1977,26 +1956,6 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         addGeneratedAsset && videoUrl && addGeneratedAsset(videoUrl, `video`, `generated`),
                         showToast(`Seedance 视频生成成功！`));
                       break;
-                    } else if (
-                      [
-	                        `failed`,
-	                        `fail`,
-	                        `error`,
-                        `expired`,
-                        `canceled`,
-                        `cancelled`,
-                        `rejected`,
-                      ].includes(seedanceStatus)
-	                    ) {
-	                      let errorMessage =
-	                        seedanceItemErrorMessage ||
-	                        seedanceItem?.message ||
-	                        responseData.error?.message ||
-	                        responseData.data?.error?.message ||
-	                        responseData.message ||
-                        responseData.error?.code ||
-                        (seedanceStatus === `expired` ? `任务超时` : `视频生成失败`);
-                      throw Error(`[SEEDANCE_TASK_FAILED]${errorMessage}`);
                     } else {
 	                      let progress =
 	                        seedanceItem?.progress !== undefined &&
@@ -2036,12 +1995,13 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     }
                   } else errorCount++;
                 } catch (error) {
+                  if (error instanceof ProviderVideoCancelled) throw error;
                   if (
                     error?.message &&
                     error.message.startsWith(`[SEEDANCE_TASK_FAILED]`)
                   )
                     throw Error(error.message.replace(`[SEEDANCE_TASK_FAILED]`, ``));
-                  (console.warn(`Seedance polling error:`, error),
+                  (console.warn(`Seedance polling error.`),
                     errorCount++,
                     errorCount === 11 &&
                     showToast(`Seedance 状态查询暂时失败，仍会继续重试...`));
@@ -2061,169 +2021,12 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 	              (/\bgrok[-_]?videos\b/i.test(String(modelName || ``)) &&
 	                !isVectorEngineGrokVideo3),
               baseUrl = videoBaseUrl,
-              multipartFieldMapping = {
-                model: `model`,
-                prompt: `prompt`,
-                resolution: `size`,
-                aspectRatio: `aspect_ratio`,
-                duration: `seconds`,
-                referenceImage: `input_reference`,
-                referenceVideo: `input_video`,
-                referenceAudio: ``,
-              },
+              multipartFieldMapping = VIDEO_FIELD_DEFAULTS,
               normalizedFieldMapping = {
                 ...multipartFieldMapping,
                 ...(videoModelRequestProfile?.fieldMapping || {}),
               },
-              effectiveVideoRequestProfile = ((input, modelConfig = {}) => {
-                let requestProfile = input && typeof input == `object` ? {
-                    ...input
-                  } : {},
-                  modelName3 = String(modelConfig.modelName || ``).trim().toLowerCase(),
-                  apiUrl = String(modelConfig.apiUrl || ``).trim().toLowerCase(),
-                  requestType2 = String(requestProfile.requestType || ``).trim().toLowerCase();
-                return (
-                  requestProfile.fieldValueTypes &&
-                  typeof requestProfile.fieldValueTypes == `object` &&
-                  (requestProfile.fieldValueTypes = {
-                    ...requestProfile.fieldValueTypes
-                  }),
-                  modelConfig.category === `video` &&
-                  (requestType2 === `openai-video` || requestType2 === `json-video`) &&
-                  (/^wan/i.test(modelName3) || /aigc\.x-see\.cn|x-see\.cn/.test(apiUrl)) &&
-                  (requestProfile.fieldValueTypes = {
-                    ...(requestProfile.fieldValueTypes || {}),
-                    seconds: `string`,
-                    duration: `string`,
-                  }),
-                  requestType2 === `openai-video` &&
-                  !requestProfile.submitPath &&
-                  !/(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl) &&
-                  ((requestProfile.submitPath = `/v1/videos`),
-                    (requestProfile.pollPath = requestProfile.pollPath || `/v1/videos/{taskId}`),
-                    requestProfile.contentPath === undefined &&
-                    (requestProfile.contentPath = `/v1/videos/{taskId}/content`)),
-                  modelConfig.category === `video` &&
-                  /^veo/i.test(String(modelConfig.modelName || ``)) &&
-                  /aigc\.x-see\.cn|x-see\.cn/i.test(apiUrl) &&
-                  /(?:^|[-_])(portrait|landscape|fl|frame|reverse|gif|hd|4k|pro)(?:[-_]|$)/i.test(String(modelConfig.modelName || ``)) &&
-                  ((requestProfile.requestType = `multipart-video`),
-                    (requestProfile.submitPath = `/v1/videos`),
-                    (requestProfile.pollPath = `/v1/videos/{taskId}`),
-	                    delete requestProfile.contentPath,
-	                    delete requestProfile.referenceImageMode,
-	                    delete requestProfile.referenceImageAsArray,
-	                    delete requestProfile.referenceImageItemShape,
-	                    (requestProfile.requiresReferenceImage = true),
-                    (requestProfile.omitDuration = true),
-                    (requestProfile.fieldMapping = {
-                      ...(requestProfile.fieldMapping || {}),
-                      prompt: `prompt`,
-                      resolution: `size`,
-                      duration: ``,
-                      referenceImage: `input_reference`,
-                      aspectRatio: ``,
-                    }),
-                    (requestProfile.fieldValueTypes = {
-                      ...(requestProfile.fieldValueTypes || {}),
-                      size: `string`,
-                    })),
-                  modelConfig.category === `video` &&
-                  /^veo/i.test(String(modelConfig.modelName || ``)) &&
-                  /(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl) &&
-	                  ((requestProfile.requestType = `multipart-video`),
-	                    (requestProfile.submitPath = `/v1/videos`),
-	                    (requestProfile.pollPath = `/v1/videos/{taskId}`),
-	                    delete requestProfile.contentPath,
-	                    (requestProfile.fieldMapping = {
-	                      ...(requestProfile.fieldMapping || {}),
-	                      prompt: `prompt`,
-	                      resolution: `size`,
-	                      duration: `seconds`,
-	                      referenceImage: `input_reference`,
-	                      aspectRatio: ``,
-	                    }),
-	                    (requestProfile.fieldValueTypes = {
-	                      ...(requestProfile.fieldValueTypes || {}),
-	                      size: `string`,
-	                      seconds: `number`,
-	                    })),
-		                  modelConfig.category === `video` &&
-		                  /^grok-(?:video|imagine)/i.test(String(modelConfig.modelName || ``)) &&
-	                  (/^https?:\/\/jixing\.guancn\.uk/i.test(apiUrl) ||
-		                    /(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl)) &&
-		                  ((requestProfile.requestType = `multipart-video`),
-	          (requestProfile.submitPath = `/v1/videos`),
-	          (requestProfile.pollPath = `/v1/videos/{taskId}`),
-	          delete requestProfile.contentPath,
-	          delete requestProfile.referenceImageMode,
-	          delete requestProfile.referenceImageAsArray,
-	          delete requestProfile.referenceImageItemShape,
-                    (requestProfile.fieldMapping = {
-                      ...(requestProfile.fieldMapping || {}),
-                      prompt: `prompt`,
-                      resolution: `size`,
-                      duration: `seconds`,
-                      referenceImage: `input_reference`,
-                      aspectRatio: ``,
-                    }),
-                    (requestProfile.fieldValueTypes = {
-                      ...(requestProfile.fieldValueTypes || {}),
-                      size: `string`,
-                      seconds: `number`,
-                    })),
-                  modelConfig.category === `video` &&
-                  /^grok-imagine-video$/i.test(String(modelConfig.modelName || ``)) &&
-                  ((requestProfile.requestType = `openai-video`),
-                    (requestProfile.submitPath = `/v1/videos`),
-                    (requestProfile.pollPath = `/v1/videos/{taskId}`),
-                    (requestProfile.referenceImageMode = `url`),
-                    (requestProfile.referenceImageAsArray = true),
-                    (requestProfile.referenceImageItemShape = `image_url_object`),
-                    (requestProfile.fieldMapping = {
-                      ...(requestProfile.fieldMapping || {}),
-                      resolution: `size`,
-                      duration: `seconds`,
-                      referenceImage: `input_references`,
-                      aspectRatio: ``,
-                    }),
-                    (requestProfile.extraBody = {
-                      ...(requestProfile.extraBody || {}),
-                      quality: `standard`,
-                    }),
-                    (requestProfile.fieldValueTypes = {
-                      ...(requestProfile.fieldValueTypes || {}),
-                      size: `string`,
-                      seconds: `string`,
-                    })),
-                  modelConfig.category === `video` &&
-                  modelName3 === `grok-video-3` &&
-                  /api\.vectorengine\.ai/i.test(apiUrl) &&
-                  ((requestProfile.requestType = `json-video`),
-                    (requestProfile.submitPath = `/v1/video/create`),
-                    (requestProfile.pollPath = `/v1/video/query?id={taskId}`),
-                    (requestProfile.omitDuration = true),
-                    (requestProfile.requiresReferenceImage = true),
-                    (requestProfile.referenceImageMode = `url`),
-                    (requestProfile.referenceImageAsArray = true),
-                    (requestProfile.fieldMapping = {
-                      ...(requestProfile.fieldMapping || {}),
-                      resolution: `size`,
-                      aspectRatio: `aspect_ratio`,
-                      referenceImage: `images`,
-                    }),
-                    (requestProfile.fieldValueTypes = {
-                      ...(requestProfile.fieldValueTypes || {}),
-                      size: `string`,
-                      aspect_ratio: `string`,
-                    })),
-                  requestProfile
-                );
-              })(videoModelRequestProfile, {
-                modelName: modelName,
-                apiUrl: videoBaseUrl,
-                category: `video`,
-              }),
+              effectiveVideoRequestProfile = normalizeVideoRequestProfile(videoModelRequestProfile,{modelName,apiUrl:videoBaseUrl,category:"video"}),
 	              effectiveFieldMapping = {
                 ...multipartFieldMapping,
                 ...(effectiveVideoRequestProfile?.fieldMapping || {}),
@@ -2252,7 +2055,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 : null,
               requestType =
               videoGatewayFormatOverride ||
-              effectiveVideoRequestProfile?.requestType || `multipart-video`,
+              effectiveVideoRequestProfile?.requestType || ``,
               submitPath =
               effectiveVideoRequestProfile?.submitPath || `/v1/videos`,
               pollPathTemplate =
@@ -2335,7 +2138,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   for (let uploader of uploaders)
                     try {
                       showToast(`正在上传 ${modelName} 参考${mediaKind === `video` ? `视频` : `图片`}到${uploader.label}...`);
-                      let uploadResult = await uploader.run();
+                      let uploadResult = await upload(() => uploader.run());
                       if (uploadResult?.ok && uploadResult.url) return uploadResult.url;
                       errors.push(`${uploader.label}: ${uploadResult?.error || `上传失败`}`);
                     } catch (error) {
@@ -2349,6 +2152,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 },
                 submitUrl = videoBuildApiUrl(baseUrl, submitPath),
                 abortController = new AbortController();
+            if (!requestType)
+              throw Error(`模型 ${modelName} 尚未选择视频请求协议，请在模型设置中为此 API 渠道绑定协议`);
             if (
               requestType !== `multipart-video` &&
               requestType !== `multipart` &&
@@ -2371,140 +2176,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
               `${promptParts.join(`
 		`)}\n${prompt}` :
               prompt,
-              getFieldValue = (fieldName, value) => {
-                let fieldName2 = String(fieldName || ``).trim(),
-                  valueType =
-                  effectiveVideoRequestProfile?.fieldValueTypes &&
-                  typeof effectiveVideoRequestProfile.fieldValueTypes == `object` &&
-                  effectiveVideoRequestProfile.fieldValueTypes[fieldName2] ?
-                  String(effectiveVideoRequestProfile.fieldValueTypes[fieldName2]).trim().toLowerCase() :
-                  ``;
-                return valueType === `string` ?
-                  String(value ?? ``) :
-                  valueType === `number` ?
-                  Number(value) :
-                  value;
-              },
-              videoSizeValue = ((sizeValue) => {
-                let resolutionMatch = String(selectedVideoSizeValue || ``).trim().match(/^(\d{3,4})\s*p$/i);
-                if (resolutionMatch) return `${resolutionMatch[1]}P`;
-                if (!sizeValue) return `720P`;
-                let [width, height] = String(sizeValue)
-                  .split(`x`)
-                  .map((part) => parseInt(part, 10));
-                return !isNaN(width) && !isNaN(height) && Math.max(width, height) >= 1920 ?
-                  `1080P` :
-                  `720P`;
-              })(normalizedVideoSize),
-              aspectRatio = normalizeVideoAspectRatioValue(
-                aspectRatioOverride ||
-                seedanceSourceNode?.data?.selectedAspectRatio ||
-                ``,
-                normalizedVideoSize,
-              ),
-              requestAspectRatioValue = ((aspectRatioValue, sizeValue) => {
-                if (!isVectorEngineGrokVideo3) return aspectRatioValue;
-                if ([`2:3`, `3:2`, `1:1`].includes(aspectRatioValue)) return aspectRatioValue;
-                let ratioMatch =
-                  String(aspectRatioValue || ``).match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/) ||
-                  String(sizeValue || ``).match(/^(\d+)\s*x\s*(\d+)$/i),
-                  ratio = ratioMatch ? Number(ratioMatch[1]) / Number(ratioMatch[2]) : 1;
-                return ratio > 1.05 ? `3:2` : ratio < 0.95 ? `2:3` : `1:1`;
-              })(aspectRatio, normalizedVideoSize),
-              videoParameterAdapter =
-              effectiveVideoRequestProfile?.parameterAdapter &&
-              typeof effectiveVideoRequestProfile.parameterAdapter == `object` ?
-              effectiveVideoRequestProfile.parameterAdapter :
-              {},
-              mapVideoProtocolParameterValue = (key, mapping = {}) => {
-                let key2 = String(key || ``).trim(),
-                  mapping2 = mapping && typeof mapping == `object` ? mapping : {};
-                return Object.prototype.hasOwnProperty.call(mapping2, key2) ? mapping2[key2] : key2;
-              },
-              applyVideoProtocolParameterCase = (value, caseMode) => {
-                let value2 = String(value || ``);
-                return caseMode === `lower` ?
-                  value2.toLowerCase() :
-                  caseMode === `upper` ?
-                  value2.toUpperCase() :
-                  value2;
-              },
-              getVideoResolutionAdapterValue = (resolutionValue) => {
-                let resolutionMode = String(
-                  effectiveVideoRequestProfile?.resolutionValueMode ||
-                  videoParameterAdapter.resolutionValueMode ||
-                  ``,
-                ).trim().toLowerCase();
-                return resolutionMode === `none` || resolutionMode === `omit` ?
-                  `` :
-                  resolutionMode === `dimension` || resolutionMode === `dimensions` || resolutionMode === `width-height` ?
-                  normalizedVideoSize :
-                  resolutionMode === `quality` || resolutionMode === `quality-preset` || resolutionMode === `preset` ?
-                  applyVideoProtocolParameterCase(
-                    mapVideoProtocolParameterValue(
-                      videoSizeValue,
-                      effectiveVideoRequestProfile?.resolutionValueMap ||
-                      videoParameterAdapter.resolutionValueMap,
-                    ),
-                    effectiveVideoRequestProfile?.resolutionValueCase ||
-                    videoParameterAdapter.resolutionValueCase,
-                  ) :
-                  resolutionMode === `aspect-ratio` || resolutionMode === `ratio` ?
-                  requestAspectRatioValue :
-                  resolutionMode === `aspect-ratio-x` || resolutionMode === `ratio-x` ?
-                  String(requestAspectRatioValue || ``).replace(`:`, `x`) :
-                  resolutionValue;
-              },
-              getVideoAspectRatioAdapterValue = () => {
-                let aspectRatioMode = String(
-                  effectiveVideoRequestProfile?.aspectRatioValueMode ||
-                  videoParameterAdapter.aspectRatioValueMode ||
-                  ``,
-                ).trim().toLowerCase();
-                return aspectRatioMode === `none` || aspectRatioMode === `omit` ?
-                  `` :
-                  aspectRatioMode === `dimension` || aspectRatioMode === `dimensions` || aspectRatioMode === `width-height` ?
-                  normalizedVideoSize :
-                  aspectRatioMode === `quality` || aspectRatioMode === `quality-preset` || aspectRatioMode === `preset` ?
-                  videoSizeValue :
-                  aspectRatioMode === `aspect-ratio-x` || aspectRatioMode === `ratio-x` ?
-                  String(requestAspectRatioValue || ``).replace(`:`, `x`) :
-                  applyVideoProtocolParameterCase(
-                    mapVideoProtocolParameterValue(
-                      requestAspectRatioValue,
-                      effectiveVideoRequestProfile?.aspectRatioValueMap ||
-                      videoParameterAdapter.aspectRatioValueMap,
-                    ),
-                    effectiveVideoRequestProfile?.aspectRatioValueCase ||
-                    videoParameterAdapter.aspectRatioValueCase,
-                  );
-              },
-	              durationValue =
-	              duration ||
-	              (videoDurations || `10`)
-	              .split(
-	                `
-		`,
-	              )[0]
-	              .trim();
-	            const normalizeGrokVideoDuration = (model, value) => {
-	              let modelText = String(model || ``).trim().toLowerCase();
-	              if (!/^grok-(?:video|imagine)/i.test(modelText)) return value;
-	              if (modelText === `grok-video-3`) return `6`;
-	              if (modelText === `grok-video-3-pro`) return `10`;
-	              if (modelText === `grok-video-3-max`) {
-	                let numericValue = Number(value);
-	                return Number.isFinite(numericValue) && numericValue > 0 ?
-	                  String(Math.round(numericValue)) :
-	                  `10`;
-	              }
-	              if (/grok-imagine-video-1\.5-preview/i.test(modelText)) return `15`;
-	              let numericValue = Number(value);
-	              return Number.isFinite(numericValue) && numericValue > 0 ?
-	                String(Math.round(numericValue)) :
-	                value;
-	            };
-	            durationValue = normalizeGrokVideoDuration(modelName, durationValue);
+              parameterContext=createVideoParameterContext({profile:effectiveVideoRequestProfile,modelName,baseUrl:videoBaseUrl,resolution,duration,videoDurations,aspectRatio:aspectRatioOverride,nodeAspectRatio:seedanceSourceNode?.data?.selectedAspectRatio}),
+              {getFieldValue,videoSizeValue,aspectRatio,requestAspectRatioValue,getVideoResolutionAdapterValue,getVideoAspectRatioAdapterValue,durationValue}=parameterContext;
             validateJixinH3Input(selectedVideoProtocolName, {
               prompt: prompt2,
               duration: durationValue,
@@ -2515,47 +2188,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
               audioCount: seedanceAudioRefs.length,
             });
 	            if (requestType === `json-video` || requestType === `openai-video`) {
-              let isVeoModel = /^veo/i.test(modelName) && !isLconaiVideoApi,
-                jsonBody = {
-                  model: modelName,
-                  prompt: prompt2,
-                },
-                resolutionValue =
-                getVideoResolutionAdapterValue(
-                isVectorEngineGrokVideo3 ?
-                videoSizeValue :
-                modelUsesDimensionSize || requestType === `openai-video` ?
-                normalizedVideoSize :
-                effectiveFieldMapping.resolution === `resolution` ?
-                requestAspectRatioValue || videoSizeValue :
-                videoSizeValue);
-              if (effectiveVideoRequestProfile?.omitDuration !== true && effectiveFieldMapping.duration !== ``) {
-                let durationField = effectiveFieldMapping.duration || `duration`;
-                jsonBody[durationField] = getFieldValue(durationField, Number(durationValue) || durationValue);
-              }!isVeoModel &&
-                effectiveFieldMapping.resolution !== `` &&
-                resolutionValue &&
-                (() => {
-                  let resolutionField = effectiveFieldMapping.resolution || `resolution`;
-                  jsonBody[resolutionField] = getFieldValue(resolutionField, resolutionValue);
-                })();
-              requestAspectRatioValue &&
-                effectiveFieldMapping.aspectRatio &&
-                effectiveFieldMapping.aspectRatio !== effectiveFieldMapping.resolution &&
-                (() => {
-                  let aspectRatioValue = getVideoAspectRatioAdapterValue();
-                  aspectRatioValue !== `` &&
-                    (jsonBody[effectiveFieldMapping.aspectRatio] = getFieldValue(
-                      effectiveFieldMapping.aspectRatio,
-                      aspectRatioValue,
-                    ));
-                })();
-              effectiveVideoRequestProfile?.extraBody &&
-                typeof effectiveVideoRequestProfile.extraBody == `object` &&
-                (jsonBody = {
-                  ...jsonBody,
-                  ...effectiveVideoRequestProfile.extraBody,
-                });
+              let jsonBody=createVideoBaseRequest({model:modelName,prompt:prompt2,requestType,profile:effectiveVideoRequestProfile,context:parameterContext}).body;
               if (imageReferences.length > 0) {
                 let referenceImageField = effectiveFieldMapping.referenceImage || `first_frame_image`;
                 if (referenceImagesAsArray) {
@@ -2588,28 +2221,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   } : imageUrl;
                 }
               }
-              if (/^grok-imagine-video$/i.test(String(modelName || ``))) {
-                let referenceImageField = effectiveFieldMapping.referenceImage || `first_frame_image`,
-                  referenceImages = jsonBody[referenceImageField];
-                jsonBody.resolution_name ||
-                  (jsonBody.resolution_name = String(videoSizeValue || `720P`)
-                    .trim()
-                    .toLowerCase());
-                jsonBody.preset || (jsonBody.preset = `custom`);
-                aspectRatio &&
-                  jsonBody.aspect_ratio === undefined &&
-                  (jsonBody.aspect_ratio = aspectRatio);
-                if (Array.isArray(referenceImages)) {
-                  let imageReferences2 = referenceImages
-                    .map((item) =>
-                      item && typeof item == `object` && item.image_url ? item.image_url : item,
-                    )
-                    .filter(Boolean);
-                  imageReferences2.length > 0 &&
-                    jsonBody.image_references === undefined &&
-                    (jsonBody.image_references = imageReferences2);
-                }
-              }
+              jsonBody=finalizeVideoJsonRequest(jsonBody,{model:modelName,profile:effectiveVideoRequestProfile,context:parameterContext});
               console.info(
                 `Sending Video API request info: ${safeStringifyRequestForLog({
 			                modelName: modelName,
@@ -2620,7 +2232,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 			                body: jsonBody,
 			              })}`,
               );
-              let submitResponse = await fetch(submitUrl, {
+              let submitResponse = await submit(() => fetch(submitUrl, {
                 method: `POST`,
                 headers: {
                   Authorization: `Bearer ${videoKey}`,
@@ -2628,16 +2240,16 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 },
                 body: JSON.stringify(jsonBody),
                 signal: abortController.signal,
-              });
+              }));
               if (!submitResponse.ok) {
                 let errorMessage = `API 请求失败: ${submitResponse.status} ${submitResponse.statusText}`;
                 try {
                   let errorData = await submitResponse.json();
                   errorMessage =
                     errorData.error && errorData.error.message ?
-                    `API 请求失败: ${errorData.error.message}` :
+                    `API 请求失败: ${submitResponse.status} - ${errorData.error.message}` :
                     errorData.message ?
-                    `API 请求失败: ${errorData.message}` :
+                    `API 请求失败: ${submitResponse.status} - ${errorData.message}` :
                     `API 请求失败: ${submitResponse.status} - ${serializeErrorPreview(errorData)}`;
                 } catch {
                   try {
@@ -2692,6 +2304,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     },
                     projectId: projectIdAtStart,
                     nodeId: nodeId,
+                    clientSubmissionId: execution?.submissionId,
                     status: `pending`,
                     progress: 0,
                     createdAt: Date.now(),
@@ -2747,7 +2360,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     videoUrl: ``,
                     thumbnailUrl: ``
                   };
-                  let apiUrl = buildApiUrl(
+                  let apiUrl = buildMediaApiUrl(
                       isXpclawMiniMax23 ? apiOrigin : baseUrl,
                       `/v1/files/retrieve`,
                     ),
@@ -2775,7 +2388,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   pollCount++,
                   pollCount % 120 == 0 && pollCount < maxPolls && showToast(`视频生成仍在进行中，请耐心等待...`));
                 try {
-                  let pollUrl = buildApiUrl(baseUrl, replaceTaskPath(pollPathTemplate, taskId)),
+                  let pollUrl = buildMediaApiUrl(baseUrl, replaceTaskPath(pollPathTemplate, taskId)),
                     response = await fetch(pollUrl, {
                       headers: {
                         Authorization: `Bearer ${videoKey}`
@@ -2807,6 +2420,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     data.artifact?.video?.url ||
                     data.artifact?.video_raw?.url;
                   if (failedStatuses.has(status)) {
+                    if (isProviderVideoCancellation(status)) throw new ProviderVideoCancelled();
                     throw Error(`[VIDEO_TASK_FAILED]${extractVideoTaskErrorHelper(data)}`);
                   }
                   if (
@@ -2912,8 +2526,6 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       addGeneratedAsset && videoUrl && addGeneratedAsset(videoUrl, `video`, `generated`),
                       showToast(`视频生成成功！`));
                     break;
-                  } else if (failedStatuses.has(status)) {
-                    throw Error(`[VIDEO_TASK_FAILED]${extractVideoTaskErrorHelper(data)}`);
                   } else {
                     let progress =
                       data.progress !== undefined && data.progress !== null ?
@@ -2944,21 +2556,17 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       ));
                   }
                 } catch (error) {
+                  if (error instanceof ProviderVideoCancelled) throw error;
                   if (done || abortController.signal.aborted || error?.message?.startsWith(`[VIDEO_TASK_FAILED]`))
                     throw Error(String(error?.message || error).replace(`[VIDEO_TASK_FAILED]`, ``));
-                  (console.warn(`Polling error:`, error),
+                  (console.warn(`Video polling error.`),
                     errorCount++,
                     errorCount === 5 && showToast(`视频状态查询暂时失败，仍会继续重试...`));
                 }
               }
               return;
             }
-            let multipartResolutionValue = getVideoResolutionAdapterValue(modelUsesDimensionSize ?
-              normalizedVideoSize :
-              useAspectRatioAsSize ?
-              (requestAspectRatioValue ? requestAspectRatioValue.replace(`:`, `x`) : `16x9`) :
-              videoSizeValue),
-              fetchVideoContentUrlByTaskId = async (taskId2, contentPathTemplate2 = contentPathTemplate) => {
+            let fetchVideoContentUrlByTaskId = async (taskId2, contentPathTemplate2 = contentPathTemplate) => {
                 if (!taskId2 || !contentPathTemplate2) return ``;
                 let apiUrl = videoBuildApiUrl(baseUrl, replaceTaskPath(contentPathTemplate2, taskId2)),
                   response = await fetch(apiUrl, {
@@ -2972,27 +2580,8 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 let videoBlob = await response.blob();
                 return URL.createObjectURL(videoBlob);
               };
-            let formData = new FormData();
-            formData.append(effectiveFieldMapping.model || `model`, modelName);
-            formData.append(effectiveFieldMapping.prompt || `prompt`, prompt2);
-            let isVeoModel = /^veo/i.test(modelName) && !isLconaiVideoApi;
-            isVeoModel ||
-              effectiveFieldMapping.resolution === `` ||
-              formData.append(
-                effectiveFieldMapping.resolution || `size`,
-                multipartResolutionValue,
-              );
-            requestAspectRatioValue &&
-              !useAspectRatioAsSize &&
-              effectiveFieldMapping.aspectRatio !== `` &&
-              (() => {
-                let aspectRatioValue = getVideoAspectRatioAdapterValue();
-                aspectRatioValue !== `` &&
-                  formData.append(
-                    effectiveFieldMapping.aspectRatio || `aspect_ratio`,
-                    aspectRatioValue,
-                  );
-		              })();
+            let formData = new FormData(),baseRequest=createVideoBaseRequest({model:modelName,prompt:prompt2,requestType,profile:effectiveVideoRequestProfile,context:parameterContext});
+            for(const [name,value]of baseRequest.multipartFields)formData.append(name,value);
 		            let referencesHandledByAggregation = false;
 		            if (referenceMediaAggregation === `comma-separated`) {
 		              let orderedEntries = wanjuanBuildReferenceMediaEntries(imageReferences, videoReferences, { kinds: referenceMediaKinds, order: referenceMediaOrder }),
@@ -3005,12 +2594,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
 		              referencesHandledByAggregation = true;
 		            }
 		            if (
-		              (effectiveVideoRequestProfile?.omitDuration === true ||
-	                effectiveFieldMapping.duration === `` ||
-	                (() => {
-	                  let durationField = effectiveFieldMapping.duration || `seconds`;
-	                  formData.append(durationField, getFieldValue(durationField, durationValue));
-	                })(),
+		              (baseRequest.multipartDuration && formData.append(...baseRequest.multipartDuration),
 		                !referencesHandledByAggregation && imageReferences.length > 0)
 	            )
               if (referenceImagesAsUrls) {
@@ -3047,7 +2631,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         `reference_${index + 1}.${fileExtension}`,
                       ));
                   } catch (error) {
-                    console.error(`Error processing reference image:`, error);
+                    console.error(`Error processing reference image.`);
                     let imageBlob = await (await fetch(dataUrl)).blob();
                     formData.append(
                       effectiveFieldMapping.referenceImage ||
@@ -3089,7 +2673,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                         `reference_video_${index + 1}.${fileExtension}`,
                       ));
                   } catch (error) {
-                    console.error(`Error processing reference video:`, error);
+                    console.error(`Error processing reference video.`);
                     let videoBlob = await (await fetch(dataUrl)).blob();
                     formData.append(
                       effectiveFieldMapping.referenceVideo || `input_video`,
@@ -3115,23 +2699,23 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                 referenceVideoCount: videoReferences.length,
               })}`,
             );
-            let response = await fetch(submitUrl, {
+            let response = await submit(() => fetch(submitUrl, {
               method: `POST`,
               headers: {
                 Authorization: `Bearer ${videoKey}`
               },
               body: formData,
               signal: abortController.signal,
-            });
+            }));
             if (!response.ok) {
               let errorMessage = `API 请求失败: ${response.status} ${response.statusText}`;
               try {
                 let errorData = await response.json();
                 errorMessage =
                   errorData.error && errorData.error.message ?
-                  `API 请求失败: ${errorData.error.message}` :
+                  `API 请求失败: ${response.status} - ${errorData.error.message}` :
                   errorData.message ?
-                  `API 请求失败: ${errorData.message}` :
+                  `API 请求失败: ${response.status} - ${errorData.message}` :
                   `API 请求失败: ${response.status} - ${serializeErrorPreview(errorData)}`;
               } catch {
                 try {
@@ -3148,7 +2732,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   videoUrl: ``,
                   thumbnailUrl: ``
                 };
-                let retrieveUrl = buildApiUrl(baseUrl, `/v1/files/retrieve`),
+                let retrieveUrl = buildMediaApiUrl(baseUrl, `/v1/files/retrieve`),
                   requestUrl = new URL(retrieveUrl);
                 requestUrl.searchParams.set(`file_id`, fileId);
                 let response2 = await fetch(requestUrl.toString(), {
@@ -3240,6 +2824,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   },
                   projectId: projectIdAtStart,
                   nodeId: nodeId,
+                  clientSubmissionId: execution?.submissionId,
                   status: `pending`,
                   progress: 0,
                   createdAt: Date.now(),
@@ -3325,6 +2910,13 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     completedValuesSpec = Array.isArray(completedValuesSpec) ? completedValuesSpec.map((item) => normalizeGenericStatus(item)).filter(Boolean) : [];
                     return completedValuesSpec.length ? completedValuesSpec : [`completed`, `complete`, `success`, `succeeded`, `done`, `finished`, `ready`, `succeed`];
                   })();
+                  const failedValueSet = (() => {
+                    const mapping = effectiveVideoRequestProfile?.responseMapping;
+                    const configured = mapping && typeof mapping === `object` ? (mapping.failedValues || mapping.failed) : null;
+                    return [...(Array.isArray(configured) ? configured : []), `failed`, `failure`, `error`, `fail`, `expired`, `rejected`].map(normalizeGenericStatus);
+                  })();
+                  if (isProviderVideoCancellation(status)) throw new ProviderVideoCancelled();
+                  if (failedValueSet.includes(status)) throw Error(`[TASK_FAILED]${typeof pollResult.error === `string` ? pollResult.error : extractVideoTaskErrorHelper(pollResult)}`);
                   if (((failureCount = 0), completedValueSet.includes(status) || genericDirectVideoUrl)) {
                     isCompleted = true;
                     let {
@@ -3406,34 +2998,6 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       addGeneratedAsset && videoUrl && addGeneratedAsset(videoUrl, `video`, `generated`),
                       showToast(`视频生成成功！`));
                     break;
-                  } else if (((() => {
-                    let videoResponseMapping = effectiveVideoRequestProfile?.responseMapping;
-                    let failedValuesSpec = videoResponseMapping && typeof videoResponseMapping == `object` ? (videoResponseMapping.failedValues || videoResponseMapping.failed) : null;
-                    failedValuesSpec = Array.isArray(failedValuesSpec) ? failedValuesSpec.map((item) => normalizeGenericStatus(item)).filter(Boolean) : [];
-                    return (failedValuesSpec.length ? failedValuesSpec : [`failed`, `failure`, `error`, `fail`, `expired`, `canceled`, `cancelled`, `rejected`]).includes(status);
-                  })())) {
-                    let taskError = extractVideoTaskErrorHelper(pollResult);
-                    throw (
-                      pollResult.error &&
-                      (typeof pollResult.error == `string` ?
-                        (taskError = pollResult.error) :
-                        typeof pollResult.error == `object` &&
-                        pollResult.error.message &&
-                        (taskError = pollResult.error.message)),
-                      updateTaskList &&
-                      updateTaskList((nodes3) =>
-                        nodes3.map((node) =>
-                          node.id === taskId ?
-                          {
-                            ...node,
-                            status: `failed`,
-                            errorMsg: taskError
-                          } :
-                          node,
-                        ),
-                      ),
-                      Error(`[TASK_FAILED]${taskError}`)
-                    );
                   } else {
                     let progress =
                       pollResult.progress !== undefined && pollResult.progress !== null ?
@@ -3467,8 +3031,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   }
                 } else throw Error(`Polling failed: ${pollResponse.status}`);
               } catch (error) {
+                if (error instanceof ProviderVideoCancelled) throw error;
                 if (
-                  (console.warn(`Polling error:`, error),
+                  (console.warn(`Video polling error.`),
                     error.message && error.message.startsWith(`[TASK_FAILED]`))
                 )
                   throw Error(error.message.replace(`[TASK_FAILED]`, ``));
@@ -3485,9 +3050,11 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                   node.id === nodeId &&
                   (node.data?.seedanceTaskId === createdVideoTaskId || node.data?.taskId === createdVideoTaskId),
               ));
-            (console.error(error),
+            let providerCancelled = error instanceof ProviderVideoCancelled;
+            let safeError = providerCancelled ? `服务商报告视频任务已取消` : safeGenerationError(error, "media");
+            (console.error(providerCancelled ? `Video task cancelled by provider.` : `Video generation failed.`),
               error.name !== `AbortError` &&
-              (showToast(error.message || `生成失败，请检查网络或配置`),
+              (showToast(safeError),
                 updateTaskList &&
                 updateTaskList((nodes2) =>
                   createdVideoTaskId ?
@@ -3495,9 +3062,9 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                     node.id === createdVideoTaskId ?
                     {
                       ...node,
-                      status: `failed`,
+                      status: providerCancelled ? `cancelled` : `failed`,
                       progress: 0,
-                      errorMsg: error.message || `生成失败，请检查网络或配置`,
+                      errorMsg: safeError,
                     } :
                     node,
                   ) :
@@ -3519,18 +3086,19 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       },
                       projectId: projectIdAtStart,
                       nodeId: nodeId,
-                      status: `failed`,
+                      clientSubmissionId: execution?.submissionId,
+                      status: providerCancelled ? `cancelled` : `failed`,
                       progress: 0,
                       createdAt: Date.now(),
                       prompt: videoTaskPromptForDiagnostics || `视频生成任务`,
-                      errorMsg: error.message || `生成失败，请检查网络或配置`,
+                      errorMsg: safeError,
                     },
                   ],
                 ),
                 shouldApplyVideoError &&
                 (await persistVideoNodeState({}, {
                   loading: false,
-                  errorMessage: error.message,
+                  errorMessage: safeError,
                 }, ),
                 setNodes((nodes2) =>
                   nodes2.map((node) =>
@@ -3543,7 +3111,7 @@ export function useVideoGeneration(deps: UseVideoGenerationDeps) {
                       data: {
                         ...node.data,
                         loading: false,
-                        errorMessage: error.message,
+                        errorMessage: safeError,
                       },
                     } :
                     node,

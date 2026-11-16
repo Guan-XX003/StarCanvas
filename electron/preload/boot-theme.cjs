@@ -1,6 +1,7 @@
 // 职责：启动主题解析与开机启动画面(boot splash)样式注入及主题镜像。
-const { inspectRendererStartupDocument, isRendererBaseReady } = require("../shared/startup-readiness.cjs");
+const { clearConfirmedReadySplash, inspectRendererStartupDocument, isRendererBaseReady } = require("../shared/startup-readiness.cjs");
 const { fs, os, path } = require("./runtime.cjs");
+const {isolatedCandidatePaths}=require('../shared/isolated-candidate-qa.cjs');
 const {
   LEGACY_THEME_STORAGE_KEYS,
   BOOT_THEME_MIRROR_KEY,
@@ -41,14 +42,20 @@ function flushRendererDebugLog() {
   const lines = rendererDebugLogState.buffer.join("");
   rendererDebugLogState.buffer = [];
   try {
-    const logPath = path.join(os.tmpdir(), "wanjuan-renderer-debug.log");
+    const logPath = isolatedCandidatePaths()?.rendererLog || path.join(os.tmpdir(), "wanjuan-renderer-debug.log");
     fs.appendFile(logPath, lines, () => {});
   } catch {}
 }
 
 function appendRendererDebugLog(type, payload) {
   try {
-    const dedupeKey = `${type}\0${String(payload?.message || "")}`;
+    // Renderer exceptions can include prompts, credentials, media URLs, and
+    // local paths. Only fixed event types and bounded numeric positions may
+    // enter the diagnostic file, even for direct callers of this helper.
+    const safeType = type === "error" || type === "unhandledrejection" ? type : "other";
+    const position = value => Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000 ? value : 0;
+    const safePayload = safeType === "error" ? {line: position(payload?.lineno), column: position(payload?.colno)} : {};
+    const dedupeKey = `${safeType}\0${safePayload.line || 0}\0${safePayload.column || 0}`;
     const now = Date.now();
     const lastSeen = rendererDebugLogState.recent.get(dedupeKey);
     if (lastSeen && now - lastSeen < 60000) return;
@@ -59,7 +66,7 @@ function appendRendererDebugLog(type, payload) {
       }
     }
     rendererDebugLogState.buffer.push(
-      `${JSON.stringify({ time: new Date().toISOString(), type, payload })}\n`
+      `${JSON.stringify({ time: new Date().toISOString(), type: safeType, payload: safePayload })}\n`
     );
     if (!rendererDebugLogState.flushTimer) {
       rendererDebugLogState.flushTimer = setTimeout(flushRendererDebugLog, 1000);
@@ -164,18 +171,12 @@ function buildBootParticleMarkup(className, count, seedOffset = 0) {
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event) => {
     appendRendererDebugLog("error", {
-      message: event?.message || "",
-      filename: event?.filename || "",
       lineno: event?.lineno || 0,
-      colno: event?.colno || 0,
-      stack: event?.error?.stack || ""
+      colno: event?.colno || 0
     });
   });
-  window.addEventListener("unhandledrejection", (event) => {
-    appendRendererDebugLog("unhandledrejection", {
-      reason: String(event?.reason?.message || event?.reason || ""),
-      stack: event?.reason?.stack || ""
-    });
+  window.addEventListener("unhandledrejection", () => {
+    appendRendererDebugLog("unhandledrejection", {});
   });
 }
 
@@ -196,6 +197,7 @@ function installBootStabilityStyle() {
     } catch {}
   };
   window.addEventListener("wanjuan:boot-failed", (event) => {
+    if (clearConfirmedReadySplash(document)) return;
     showBootRecoveryError(event?.detail?.message || "创作空间初始化超时");
   });
   const ensureSplash = async () => {
@@ -328,6 +330,7 @@ function installBootStabilityStyle() {
       root.classList.add("wanjuan-booting");
       const releaseBootingFallback = () => {
         try {
+          if (clearConfirmedReadySplash(document)) return;
           const status = inspectRendererStartupDocument(document, window);
           const desktopBridgeReady = Object.values(status.desktopBridge || {}).every(Boolean);
           const hasStableShell = isRendererBaseReady(status) && desktopBridgeReady;

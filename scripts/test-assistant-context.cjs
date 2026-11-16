@@ -1,0 +1,18 @@
+const assert = require('node:assert/strict');
+const {buildAssistantChatPrompt: build,buildAssistantAnalysisPrompt: analysis} = require('../electron/main/assistant-context.cjs');
+const allowed = build('how do I configure this?', {view:'settings',settingsTab:'api',projectName:'PRIVATE_PROJECT',apiKey:'SECRET_KEY'});
+assert.match(allowed, /UI location: settings \/ API configuration/);
+assert.equal(allowed.includes('PRIVATE_PROJECT'), false);
+assert.equal(allowed.includes('SECRET_KEY'), false);
+assert.equal(build('hello', {view:'canvas',settingsTab:'api'}).includes('API configuration'), false);
+assert.equal(build('hello', {view:'__proto__',settingsTab:'api'}), 'hello');
+assert.equal(build('hello', {view:'settings',settingsTab:'[injected]'}).includes('[injected]'), false);
+assert.match(build('hello', {view:'settings',settingsTab:'basic'}), /appearance and preferences/);
+assert.equal(build('x'.repeat(16000), {view:'canvas'}).length <= 16512, true);
+assert.throws(() => build('x'.repeat(16001), {view:'canvas'}), {code:'ASSISTANT_INVALID_MESSAGE'});
+assert.throws(() => build('  ', null), {code:'ASSISTANT_INVALID_MESSAGE'});
+for (const text of ['  ', 'x'.repeat(512001), null]) assert.throws(()=>analysis(text),{code:'ASSISTANT_INVALID_MESSAGE'});
+for (const text of ['sk-abcdefghijklmnop','AIza'+'a'.repeat(20),'ghp_'+'a'.repeat(20),'AKIA'+'A'.repeat(16),'https://user:secret@example.com','https://example.com/?key=short','Authorization: Basic eA==','https://example.com/%253Ftoken%253Dshort']) assert.throws(()=>analysis(text),{code:'ASSISTANT_SENSITIVE_INPUT'});
+for (const text of ['Authorization: [REDACTED]\nhttps://[REDACTED]@example.com/?key=[REDACTED]&view=public','api_key: [REDACTED]\n[REDACTED_API_KEY]']) assert.equal(analysis(text),text,'ordinary redacted documentation remains usable');
+assert.throws(()=>analysis('https://example.com/?key=[REDACTED]secret'),{code:'ASSISTANT_SENSITIVE_INPUT'},'a redaction marker cannot conceal an appended credential');
+console.log('PASS_ASSISTANT_CONTEXT_ALLOWLIST');

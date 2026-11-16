@@ -3,6 +3,7 @@ const { ipcRenderer } = require("./runtime.cjs");
 const { PERFORMANCE_PROFILE_STORAGE_KEY, PERFORMANCE_PROFILE_PRESETS } = require("./constants.cjs");
 const { showWanjuanInputDialog } = require("./input-dialog.cjs");
 const { createCloudPromptWorkspaceController } = require("./cloud-prompt-workspace.cjs");
+const { createAutoDownloadSyncGuard } = require("./auto-download-sync.cjs");
 const {
   emptyEnterpriseTeamCache,
   enterpriseTeamScopeKey,
@@ -162,8 +163,8 @@ function installDesktopPatches() {
   const installSettingsUpdateButton = () => true;
 
   const getProjectControls = () => {
-    const nameButton = document.querySelector("button[title='双击重命名项目'], button[title='点击重命名项目']");
-    const select = document.querySelector("select[title='切换项目']");
+    const nameButton = document.querySelector("button[data-wanjuan-project-control='rename'], button[title='双击重命名项目'], button[title='点击重命名项目']");
+    const select = document.querySelector("select[data-wanjuan-project-control='switcher'], select[title='切换项目']");
     if (!(nameButton instanceof HTMLButtonElement) || !(select instanceof HTMLSelectElement)) {
       return null;
     }
@@ -241,16 +242,16 @@ function installDesktopPatches() {
   };
 
   const markCanvasModelToolbar = () => {
-    const select = document.querySelector("select[title='切换项目']");
+    const select = document.querySelector("select[data-wanjuan-project-control='switcher'], select[title='切换项目']");
     if (!(select instanceof HTMLSelectElement)) return;
 
     const leftGroup = select.parentElement;
     const toolbar = leftGroup?.parentElement;
     if (!(leftGroup instanceof HTMLElement) || !(toolbar instanceof HTMLElement)) return;
 
-    const projectButton = leftGroup.querySelector("button[title='双击重命名项目'], button[title='点击重命名项目']");
-    const addButton = leftGroup.querySelector("button[title='新建项目']");
-    const deleteButton = leftGroup.querySelector("button[title='删除当前项目']");
+    const projectButton = leftGroup.querySelector("button[data-wanjuan-project-control='rename'], button[title='双击重命名项目'], button[title='点击重命名项目']");
+    const addButton = leftGroup.querySelector("button[data-wanjuan-project-control='create'], button[title='新建项目']");
+    const deleteButton = leftGroup.querySelector("button[data-wanjuan-project-control='delete'], button[title='删除当前项目']");
     const taskButton = Array.from(toolbar.querySelectorAll("button")).find((button) =>
       (button.textContent || "").replace(/\s+/g, " ").trim().includes("任务清单")
     );
@@ -476,7 +477,7 @@ function installDesktopPatches() {
       canvasPressureRuntime.longTaskMs *= 0.62;
     }, 1200);
 
-    window.addEventListener("beforeunload", () => {
+    window.addEventListener("pagehide", () => {
       if (canvasPressureFrameRaf) window.cancelAnimationFrame(canvasPressureFrameRaf);
       if (canvasPressureFrameTimer) window.clearTimeout(canvasPressureFrameTimer);
     }, { once: true });
@@ -603,7 +604,7 @@ function installDesktopPatches() {
     if (!canvasPressureMeterInstalled) {
       canvasPressureMeterInstalled = true;
       canvasPressureMeterTimer = window.setInterval(queueCanvasPressureMeterUpdate, 1200);
-      window.addEventListener("beforeunload", () => {
+      window.addEventListener("pagehide", () => {
         if (canvasPressureMeterTimer) window.clearInterval(canvasPressureMeterTimer);
       }, { once: true });
     }
@@ -884,16 +885,23 @@ function installDesktopPatches() {
 
   const AUTO_DOWNLOAD_KEY = "autoDownloadGeneratedResults";
   const autoDownloadSeenResults = new Set();
+  // Node-local, in-memory hints for known manual inputs arriving during a run.
+  let autoDownloadManualFingerprints = new WeakMap();
   let autoDownloadEnabled = false;
   let autoDownloadBaselineReady = false;
   let autoDownloadScanTimer = 0;
   let autoDownloadObserverInstalled = false;
   let autoDownloadObserver = null;
+  let autoDownloadObserverRoot = null;
+  const autoDownloadSyncGuard = createAutoDownloadSyncGuard();
+  // A non-sensitive UI signal, not a security boundary or persistence receipt.
+  const publishAutoDownloadListenerState = () => {
+    const applied = autoDownloadEnabled ? autoDownloadBaselineReady && autoDownloadObserverInstalled && autoDownloadObserverRoot?.isConnected === true : true;
+    const state = applied ? (autoDownloadEnabled ? "on" : "off") : "unknown";
+    if (document.documentElement.dataset.wanjuanAutoDownloadListener !== state) document.documentElement.dataset.wanjuanAutoDownloadListener = state;
+  };
 
   const isAutoDownloadEnabledValue = (value) => value === true || value === "true" || value === 1;
-  const AUTO_DOWNLOAD_ACTIVE_TEXT_RE =
-    /生成中|排队中|请求中|正在处理|处理中|等待中|正在生成|提交中|上传中|loading|queued|queue|pending|waiting|submitted|running|processing|generating|in[_ -]?progress/i;
-
   const inferGeneratedResultMime = (element, url) => {
     const raw = String(url || "");
     const dataMime = raw.match(/^data:([^;,]+)/i)?.[1] || "";
@@ -925,11 +933,97 @@ function installDesktopPatches() {
   };
 
   const markGeneratingNodes = () => {
-    for (const node of document.querySelectorAll(".react-flow__node")) {
-      const text = (node.textContent || "").replace(/\s+/g, " ");
-      if (AUTO_DOWNLOAD_ACTIVE_TEXT_RE.test(text)) {
-        node.dataset.wanjuanWasGenerating = "true";
+    for (const node of document.querySelectorAll('.react-flow__node[data-wanjuan-generating="true"]')) node.dataset.wanjuanWasGenerating = "true";
+  };
+
+  // A finished node may later be reused for a local upload. Its old generation
+  // marker must not authorize downloading the user's replacement. Do not
+  // discard an active run here: the eventual result may still legitimately
+  // arrive, and loading-time replacements need stronger provenance tracking.
+  const disarmFinishedNodeForManualMedia = (node) => {
+    if (!autoDownloadEnabled) return;
+    if (node?.dataset?.wanjuanGenerating !== "true" && node?.dataset?.wanjuanWasGenerating === "true") {
+      delete node.dataset.wanjuanWasGenerating;
+      node.dataset.wanjuanManualBaselinePending = "true";
+    }
+  };
+  const disarmFinishedNodeForManualFile = (event) => {
+    if (!autoDownloadEnabled) return;
+    const target = event?.target;
+    const files = event?.type === "change" && target instanceof HTMLInputElement && target.type === "file"
+      ? target.files
+      : event?.type === "drop" ? event.dataTransfer?.files : event?.type === "paste" ? event.clipboardData?.files : null;
+    if (!files?.length) return;
+    disarmFinishedNodeForManualMedia(target?.closest?.(".react-flow__node"));
+  };
+  const manualMediaFingerprint = (value) => {
+    if (typeof value !== "string" || !value) return "";
+    const sample = value.slice(0, 192) + value.slice(-192);
+    let a = 2166136261, b = 2246822519;
+    for (let i = 0; i < sample.length; i++) { const c = sample.charCodeAt(i); a = Math.imul(a ^ c, 16777619); b = Math.imul(b ^ c, 3266489917); }
+    return `v1:${value.length}:${a >>> 0}:${b >>> 0}`;
+  };
+  for (const type of ["change", "drop", "paste"]) document.addEventListener(type, disarmFinishedNodeForManualFile, true);
+  window.addEventListener("wanjuan:manual-media-replacement", (event) => {
+    const nodeId = event?.detail?.nodeId;
+    if (!autoDownloadEnabled || typeof nodeId !== "string" || !nodeId || nodeId.length > 1024) return;
+    let match = null;
+    for (const node of document.querySelectorAll(".react-flow__node[data-id]")) {
+      if (node.getAttribute("data-id") !== nodeId) continue;
+      if (match) return; // Ambiguous node IDs must not affect another node.
+      match = node;
+    }
+    const fingerprint = event?.detail?.fingerprint;
+    if (match?.dataset?.wanjuanGenerating === "true" && typeof fingerprint === "string" && /^v1:\d{1,12}:\d{1,10}:\d{1,10}$/.test(fingerprint)) {
+      const fingerprints = autoDownloadManualFingerprints.get(match) || new Set();
+      fingerprints.add(fingerprint); autoDownloadManualFingerprints.set(match, fingerprints);
+    }
+    disarmFinishedNodeForManualMedia(match);
+  });
+
+  // Capture short-lived in-progress states at the mutation boundary, rather
+  // than waiting for the debounced media scan. Inspect only affected nodes.
+  const markGeneratingNodesInMutations = (mutations) => {
+    const affected = new Set();
+    const started = new Set();
+    const changedMedia = new Set();
+    const collect = (item, descendants) => {
+      const element = item?.nodeType === 1 ? item : item?.parentElement;
+      if (!element) return;
+      const owner = element.closest?.(".react-flow__node");
+      if (owner) affected.add(owner);
+      if (descendants && item?.nodeType === 1) for (const node of element.querySelectorAll?.(".react-flow__node") || []) affected.add(node);
+    };
+    for (const mutation of mutations) {
+      collect(mutation.target, false);
+      for (const item of mutation.addedNodes || []) {
+        collect(item, true);
+        if (item?.nodeType !== 1) continue;
+        if (item.matches?.("img, video, audio, source")) changedMedia.add(item);
+        for (const media of item.querySelectorAll?.("img, video, audio, source") || []) changedMedia.add(media);
       }
+      if (mutation.type === "attributes" && mutation.attributeName === "src") {
+        changedMedia.add(mutation.target);
+        if (mutation.target?.tagName === "SOURCE" && mutation.target.parentElement) changedMedia.add(mutation.target.parentElement);
+      }
+      // An active state may appear and disappear before this batch runs. The
+      // old attribute value preserves that observed transition without reading
+      // prompts or other user-controlled node text.
+      if (mutation.type === "attributes" && mutation.attributeName === "data-wanjuan-generating" && mutation.oldValue === "true") {
+        const owner = mutation.target?.closest?.(".react-flow__node");
+        if (owner) started.add(owner);
+      }
+    }
+    for (const node of affected) {
+      const generating = node.getAttribute("data-wanjuan-generating") === "true" || started.has(node);
+      if (node.dataset.wanjuanManualBaselinePending === "true") {
+        // While idle, a selected file can arrive asynchronously. Record it as
+        // existing content immediately; on a later run exclude media changed
+        // in this batch so a quick new result is not mistaken for that file.
+        baselineManualReplacement(node, generating ? changedMedia : null);
+        if (generating) delete node.dataset.wanjuanManualBaselinePending;
+      }
+      if (generating) node.dataset.wanjuanWasGenerating = "true";
     }
   };
 
@@ -957,6 +1051,15 @@ function installDesktopPatches() {
       ".react-flow__node img[src], .react-flow__node video, .react-flow__node audio, .react-flow__node source[src]"
     ));
 
+  const baselineManualReplacement = (node, changedMedia) => {
+    for (const element of node.querySelectorAll("img[src], video, audio, source[src]")) {
+      const mediaElement = autoDownloadMediaElementFor(element);
+      if (changedMedia?.has(element) || changedMedia?.has(mediaElement)) continue;
+      const url = autoDownloadUrlFor(element);
+      if (url) autoDownloadSeenResults.add(autoDownloadResultKey(element, node, url));
+    }
+  };
+
   const seedAutoDownloadBaseline = () => {
     markGeneratingNodes();
     for (const element of getAutoDownloadMediaElements()) {
@@ -979,8 +1082,13 @@ function installDesktopPatches() {
   };
 
   const autoDownloadGeneratedResult = async (element, url) => {
-    const store = await getDesktopStorageItems(["downloadDirectory", AUTO_DOWNLOAD_KEY]);
-    if (!isAutoDownloadEnabledValue(store[AUTO_DOWNLOAD_KEY])) return;
+    // The live listener is authoritative for this session. A persisted value may
+    // still be the previous choice while React's debounced save is in flight.
+    const downloadRevision = autoDownloadSyncGuard.beginRead();
+    const stillEnabled = () => autoDownloadSyncGuard.isCurrentEnabled(downloadRevision, autoDownloadEnabled);
+    if (!stillEnabled()) return;
+    const store = await getDesktopStorageItems(["downloadDirectory"]);
+    if (!stillEnabled()) return;
 
     let nextUrl = url;
     let mime = inferGeneratedResultMime(element, nextUrl);
@@ -989,6 +1097,9 @@ function installDesktopPatches() {
       nextUrl = converted.dataUrl;
       mime = converted.mime || mime;
     }
+    // Turning the setting off (including off/on while preparing a blob) must
+    // invalidate work queued under the earlier setting before invoking IPC.
+    if (!stillEnabled()) return;
 
     const payload = {
       mime,
@@ -1020,15 +1131,34 @@ function installDesktopPatches() {
       const url = autoDownloadUrlFor(element);
       if (!url) continue;
       const key = autoDownloadResultKey(element, node, url);
+      const manual = node && autoDownloadManualFingerprints.get(node);
+      const fingerprint = manual?.size ? manualMediaFingerprint(url) : "";
+      if (fingerprint && manual.has(fingerprint)) {
+        manual.delete(fingerprint);
+        autoDownloadSeenResults.add(key);
+        continue;
+      }
       if (autoDownloadSeenResults.has(key)) continue;
       if (!autoDownloadBaselineReady || !autoDownloadEnabled) continue;
       if (!shouldAutoDownloadMedia(mediaElement, node, url)) continue;
       autoDownloadSeenResults.add(key);
-      if (autoDownloadSeenResults.size > 2000) autoDownloadSeenResults.clear();
-      autoDownloadGeneratedResult(mediaElement, url).catch((error) => {
+      autoDownloadGeneratedResult(mediaElement, url).catch(() => {
         autoDownloadSeenResults.delete(key);
-        console.warn("auto download generated result skipped", error);
+        // Download errors may contain media URLs, credentials or local paths.
+        console.warn("auto download generated result skipped");
       });
+    }
+    // Never clear the entire dedup baseline: a large canvas can have more
+    // than 2,000 visible results, and clearing would save those old results
+    // again on the next mutation. Bound detached history while retaining all
+    // currently visible keys, even if the live canvas itself exceeds 2,000.
+    if (autoDownloadSeenResults.size > 2000 + mediaElements.length) {
+      const currentKeys = new Set();
+      for (const element of mediaElements) {
+        const url = autoDownloadUrlFor(element);
+        if (url) currentKeys.add(autoDownloadResultKey(element, element.closest(".react-flow__node"), url));
+      }
+      for (const key of autoDownloadSeenResults) if (!currentKeys.has(key)) autoDownloadSeenResults.delete(key);
     }
     autoDownloadBaselineReady = true;
   };
@@ -1043,16 +1173,41 @@ function installDesktopPatches() {
 
   const installAutoDownloadObserver = () => {
     if (autoDownloadObserverInstalled) return;
-    autoDownloadObserverInstalled = true;
-    // 尽量收窄观察范围到画布容器；不监听 characterData（自动下载只关心节点/ src 变化）。
-    const observeRoot = document.querySelector(".react-flow") || document.body || document.documentElement;
-    autoDownloadObserver = new MutationObserver(queueAutoDownloadScan);
-    autoDownloadObserver.observe(observeRoot, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["src"]
-    });
+    // Observe text as well as media changes, scoped to the canvas when present.
+    let observer = null;
+    try {
+      const observeRoot = document.querySelector(".react-flow") || document.body || document.documentElement;
+      observer = new MutationObserver((mutations) => {
+        try {
+          markGeneratingNodesInMutations(mutations);
+          queueAutoDownloadScan();
+        } catch {
+          disconnectAutoDownloadObserver();
+          publishAutoDownloadListenerState();
+          console.warn("auto download observer update failed");
+        }
+      });
+      observer.observe(observeRoot, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["src", "data-wanjuan-generating"],
+        attributeOldValue: true
+      });
+      // Publish installation only after observe succeeds. A failed observer
+      // must remain retryable and must never be acknowledged as active.
+      autoDownloadObserver = observer;
+      autoDownloadObserverRoot = observeRoot;
+      autoDownloadObserverInstalled = true;
+    } catch (error) {
+      try { observer?.disconnect(); } catch {}
+      autoDownloadObserver = null;
+      autoDownloadObserverRoot = null;
+      autoDownloadObserverInstalled = false;
+      publishAutoDownloadListenerState();
+      throw error;
+    }
   };
 
   const disconnectAutoDownloadObserver = () => {
@@ -1060,6 +1215,7 @@ function installDesktopPatches() {
       autoDownloadObserver.disconnect();
       autoDownloadObserver = null;
     }
+    autoDownloadObserverRoot = null;
     autoDownloadObserverInstalled = false;
     if (autoDownloadScanTimer) {
       window.clearTimeout(autoDownloadScanTimer);
@@ -1067,8 +1223,31 @@ function installDesktopPatches() {
     }
   };
 
+  // A React canvas may be replaced while auto-download remains enabled. The
+  // old MutationObserver then watches a detached tree, so rebind to the new
+  // canvas (or a stable body fallback) without resetting the dedup baseline.
+  const repairDetachedAutoDownloadObserver = () => {
+    if (!autoDownloadEnabled || !autoDownloadObserverInstalled || autoDownloadObserverRoot?.isConnected === true) return;
+    disconnectAutoDownloadObserver();
+    publishAutoDownloadListenerState();
+    try {
+      installAutoDownloadObserver();
+      // A newly mounted node may finish before the delayed scan. Capture its
+      // in-progress state now, without resetting already-seen result keys.
+      markGeneratingNodes();
+      queueAutoDownloadScan();
+      publishAutoDownloadListenerState();
+    } catch {
+      disconnectAutoDownloadObserver();
+      publishAutoDownloadListenerState();
+      // Underlying exceptions may contain user paths or media URLs.
+      console.warn("auto download observer rebind failed");
+    }
+  };
+
   const setAutoDownloadEnabled = async (enabled) => {
     autoDownloadEnabled = Boolean(enabled);
+    autoDownloadSyncGuard.localChange(autoDownloadEnabled);
     await setDesktopStorageItems({ [AUTO_DOWNLOAD_KEY]: autoDownloadEnabled });
     updateAutoDownloadControls();
     if (autoDownloadEnabled) {
@@ -1077,12 +1256,15 @@ function installDesktopPatches() {
       installAutoDownloadObserver();
       queueAutoDownloadScan();
     } else {
+      autoDownloadManualFingerprints = new WeakMap();
       disconnectAutoDownloadObserver();
     }
+    publishAutoDownloadListenerState();
   };
 
   window.addEventListener("wanjuan:auto-download-setting-changed", (event) => {
     autoDownloadEnabled = isAutoDownloadEnabledValue(event?.detail?.enabled);
+    autoDownloadSyncGuard.localChange(autoDownloadEnabled);
     updateAutoDownloadControls();
     if (autoDownloadEnabled) {
       autoDownloadSeenResults.clear();
@@ -1090,8 +1272,10 @@ function installDesktopPatches() {
       installAutoDownloadObserver();
       queueAutoDownloadScan();
     } else {
+      autoDownloadManualFingerprints = new WeakMap();
       disconnectAutoDownloadObserver();
     }
+    publishAutoDownloadListenerState();
   });
 
   const updateAutoDownloadControls = () => {
@@ -1105,18 +1289,27 @@ function installDesktopPatches() {
   };
 
   const hydrateAutoDownloadState = async () => {
+    const readTicket = autoDownloadSyncGuard.beginHydrationRead();
     const store = await getDesktopStorageItems([AUTO_DOWNLOAD_KEY]);
-    autoDownloadEnabled = isAutoDownloadEnabledValue(store[AUTO_DOWNLOAD_KEY]);
+    const storedEnabled = isAutoDownloadEnabledValue(store[AUTO_DOWNLOAD_KEY]);
+    if (!autoDownloadSyncGuard.acceptHydrationRead(readTicket, storedEnabled)) return;
+    if (storedEnabled !== autoDownloadEnabled) autoDownloadSyncGuard.externalChange();
+    autoDownloadEnabled = storedEnabled;
     if (autoDownloadEnabled && !autoDownloadObserverInstalled) {
       seedAutoDownloadBaseline();
       installAutoDownloadObserver();
       queueAutoDownloadScan();
+    } else if (!autoDownloadEnabled && autoDownloadObserverInstalled) {
+      autoDownloadManualFingerprints = new WeakMap();
+      disconnectAutoDownloadObserver();
     }
     updateAutoDownloadControls();
+    publishAutoDownloadListenerState();
   };
 
   const installAutoDownloadSettingRow = () => {
-    hydrateAutoDownloadState().catch((error) => console.warn("auto download state hydrate failed", error));
+    // Storage and observer errors can carry private file paths or URLs.
+    hydrateAutoDownloadState().catch(() => console.warn("auto download state hydrate failed"));
   };
 
   document.addEventListener("dblclick", (event) => {
@@ -1263,7 +1456,7 @@ function installDesktopPatches() {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) pauseCanvasVideos();
     }, true);
-    window.addEventListener("beforeunload", () => {
+    window.addEventListener("pagehide", () => {
       mediaMutationObserver.disconnect();
       observer?.disconnect();
       window.clearInterval(mediaBudgetTimer);
@@ -4242,6 +4435,11 @@ function installDesktopPatches() {
   const desktopPatchMutationIsRelevant = (mutation) => {
     const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
     if (!target || target.closest?.("head, .react-flow, .wanjuan-workspace-page")) return false;
+    // React updates the backing select/options and rename text independently
+    // of the merged desktop control. Track those narrow source nodes across
+    // locales, but ignore our own label/menu writes to prevent a refresh loop.
+    if (target.closest?.(".wanjuan-project-combo")) return false;
+    if (target.closest?.("[data-wanjuan-project-control='switcher'], [data-wanjuan-project-control='rename']")) return true;
     const changedNodes = [...Array.from(mutation.addedNodes || []), ...Array.from(mutation.removedNodes || [])];
     if (!changedNodes.length) return false;
     return changedNodes.some((node) => {
@@ -4255,11 +4453,12 @@ function installDesktopPatches() {
     });
   };
   const mo = new MutationObserver((mutations) => {
+    repairDetachedAutoDownloadObserver();
     if (mutations.some(desktopPatchMutationIsRelevant)) queueDesktopPatchRefresh();
   });
   const patchObserveRoot = document.getElementById("root") || document.body;
-  patchObserveRoot && mo.observe(patchObserveRoot, { subtree: true, childList: true });
-  window.addEventListener("beforeunload", () => mo.disconnect(), { once: true });
+  patchObserveRoot && mo.observe(patchObserveRoot, { subtree: true, childList: true, characterData: true });
+  window.addEventListener("pagehide", () => mo.disconnect(), { once: true });
 
   let seedreamIconPatchQueued = false;
   const seedreamIconObserver = new MutationObserver((mutations) => {
@@ -4275,7 +4474,7 @@ function installDesktopPatches() {
     }, 800);
   });
   patchObserveRoot && seedreamIconObserver.observe(patchObserveRoot, { subtree: true, childList: true });
-  window.addEventListener("beforeunload", () => seedreamIconObserver.disconnect(), { once: true });
+  window.addEventListener("pagehide", () => seedreamIconObserver.disconnect(), { once: true });
 
   const timer = window.setInterval(() => {
     if (autoClicked) {

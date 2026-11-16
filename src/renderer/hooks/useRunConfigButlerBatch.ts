@@ -4,12 +4,12 @@
  */
 import { useCallback, useMemo } from "react";
 import type { SetAny, Toast } from "../lib/app-types";
-import { buildConfigButlerToolContext, configButlerCategoryOptions, formatConfigButlerToolContext, inferButlerCategoryFromModelName, normalizeButlerBatchItems, normalizeModelCategory, probeButlerProtocol, scanButlerTargetModels, specializeConfigButlerToolContext } from "../lib/config-butler";
+import { buildConfigButlerToolContext, configButlerCategoryOptions, formatConfigButlerToolContext, inferButlerCategoryFromModelName, normalizeButlerBatchItems, normalizeModelCategory, scanButlerTargetModels, specializeConfigButlerToolContext } from "../lib/config-butler";
 import { extractJsonBlock } from "../lib/app-utils";
 import { fetchDocAsPlainText } from "../lib/app-root-helpers";
 
 interface UseRunConfigButlerBatchDeps {
-  applyConfigButlerBatchResults: any;
+  appLanguage?: string;
   callConfigButlerModel: any;
   configButlerDocUrl: any;
   getSelectedButlerTargetApiConfig: any;
@@ -23,7 +23,7 @@ interface UseRunConfigButlerBatchDeps {
 
 export function useRunConfigButlerBatch(deps: UseRunConfigButlerBatchDeps) {
   const {
-    applyConfigButlerBatchResults,
+    appLanguage = "zh-CN",
     callConfigButlerModel,
     configButlerDocUrl,
     getSelectedButlerTargetApiConfig,
@@ -35,12 +35,14 @@ export function useRunConfigButlerBatch(deps: UseRunConfigButlerBatchDeps) {
     showToast2,
   } = deps;
   const runConfigButlerBatch = async (options = {}) => {
+	          const safeErrors = new WeakSet();
+	          const safeError = message => { const error = new Error(message); safeErrors.add(error); return error; };
 	          try {
 	            let docUrlForBatch = String(options.docUrl || configButlerDocUrl || ``).trim();
-	            if (!docUrlForBatch) throw Error(`请填写 API 文档链接`);
+	            if (!docUrlForBatch) throw safeError(`请填写 API 文档链接`);
 	            let targetApiConfig = options.apiConfig || getSelectedButlerTargetApiConfig();
 	            if (!targetApiConfig || !String(targetApiConfig.url || ``).trim() || !String(targetApiConfig.key || ``).trim())
-	              throw Error(`请先选择一个已填写 base URL 和 API Key 的统一 API 配置`);
+	              throw safeError(`请先选择一个已填写 base URL 和 API Key 的统一 API 配置`);
 	            setConfigButlerBatchLoading(true);
 	            let scannedModels = Array.isArray(options.models) && options.models.length ?
 	              options.models :
@@ -144,11 +146,11 @@ ${batchDocText}`));
 	                  result: batchResult,
 	                });
 	              } catch (error) {
-	                console.warn(`Config butler batch chunk failed`, batchIndex + 1, error);
+	                console.warn(`Config butler batch chunk failed`, batchIndex + 1);
 	                batchFailedChunks.push({
 	                  batch: batchIndex + 1,
 	                  models: chunkModels,
-	                  error: error?.message || String(error),
+	                  error: `该批次分析未完成，请检查配置及网络后重试。`,
 	                });
 	                batchResult = {
 	                  models: []
@@ -168,62 +170,10 @@ ${batchDocText}`));
 	                apiUrl: String(targetApiConfig.url || ``).trim(),
 	                toolContext: toolContext,
 	              });
-	            if (!normalizedBatchItems.length) throw Error(`未识别到可导入的模型配置`);
-	            // 真实探活校验 + 自动修协议：对同步类(text/image)按 requestType+submitPath 去重，每组探一个代表，
-	            // 探到参数不被接受就把该组所有模型协议 fieldMapping 里的坏参数设空 → 数据驱动修复，无需代码硬编码。
-	            try {
-	              let probeApiUrl = String(targetApiConfig.url || ``).trim(),
-	                probeApiKey = String(targetApiConfig.key || ``).trim(),
-	                probeGroups = new Map();
-	              for (let item of normalizedBatchItems) {
-	                let cat = normalizeModelCategory(item.category);
-	                if (cat !== `text` && cat !== `image`) continue;
-	                let cfg = item.protocol?.config || {}, groupKey = `${cat}|${cfg.requestType || ``}|${cfg.submitPath || ``}`;
-	                if (!probeGroups.has(groupKey)) probeGroups.set(groupKey, []);
-	                probeGroups.get(groupKey).push(item);
-	              }
-	              if (probeGroups.size && probeApiUrl && probeApiKey) {
-	                showToast2(`配置管家正在真实探活校验 ${probeGroups.size} 组接口…`);
-	                let fixedCount = 0;
-	                for (let [, groupItems] of probeGroups) {
-	                  let rep = groupItems[0];
-	                  let probeResult = await probeButlerProtocol(rep.protocol?.config || {}, { modelName: rep.modelName, category: rep.category }, probeApiUrl, probeApiKey).catch(() => null);
-	                  if (probeResult?.probed && !probeResult.ok && probeResult.errorType === `unknown_parameter` && probeResult.unknownParameter) {
-	                    let badParam = probeResult.unknownParameter;
-	                    for (let item of groupItems) {
-	                      let cfg = item.protocol?.config; if (!cfg) continue;
-	                      let fieldMapping = cfg.fieldMapping && typeof cfg.fieldMapping == `object` ? { ...cfg.fieldMapping } : {}, touched = false;
-	                      for (let internalKey of Object.keys(fieldMapping)) { if (fieldMapping[internalKey] === badParam) { fieldMapping[internalKey] = ``; touched = true; } }
-	                      if (badParam === `response_format`) { fieldMapping.responseFormat = ``; touched = true; }
-	                      if (touched) {
-	                        item.protocol.config = { ...cfg, fieldMapping: fieldMapping };
-	                        item.notes = `${item.notes || ``}${item.notes ? `；` : ``}探活修复：该接口不接受 ${badParam}，已在协议中跳过该参数`;
-	                        fixedCount += 1;
-	                      }
-	                    }
-	                  } else if (probeResult?.probed && !probeResult.ok && probeResult.suggestion) {
-	                    rep.notes = `${rep.notes || ``}${rep.notes ? `；` : ``}探活提示：${probeResult.suggestion}`;
-	                  }
-	                }
-	                fixedCount && showToast2(`探活已自动修复 ${fixedCount} 个模型的协议参数`);
-	              }
-	            } catch (probeError) { console.warn(`Config butler probe skipped`, probeError); }
-		            if (options.autoApply && options.allowUnreviewedApply === true && normalizedBatchItems.every((item) => item.enabled !== false && item.validation?.ok !== false && item.inferenceSource !== `fallback`)) {
-	              setConfigButlerBatchItems(normalizedBatchItems);
-	              let applyResult = applyConfigButlerBatchResults({
-	                items: normalizedBatchItems,
-	                apiConfig: targetApiConfig,
-	                docUrl: docUrlForBatch,
-	                silentToast: options.silentToast,
-	              });
-	              setConfigButlerBatchModalOpen(false);
-	              return {
-	                items: normalizedBatchItems,
-	                applyResult: applyResult,
-	                scannedModels: scannedModels,
-	                failedChunks: batchFailedChunks,
-	              };
-	            }
+	            if (!normalizedBatchItems.length) throw safeError(`未识别到可导入的模型配置`);
+	            // Do not send paid image/text generation requests as an implicit
+	            // part of analysis. Any future live probe needs its own explicit
+	            // user confirmation and separate reviewed implementation.
 	            (setConfigButlerBatchItems(normalizedBatchItems),
 	              setConfigButlerBatchActiveCategory(
 	                (configButlerCategoryOptions.find((categoryOption) =>
@@ -236,17 +186,20 @@ ${batchDocText}`));
 	                toolContext: toolContext,
 	              }, null, 2)),
 	              setConfigButlerBatchModalOpen(true),
-		              showToast2(options.autoApply ?
-		                `已识别 ${normalizedBatchItems.length} 个模型，其中有未验证或兜底配置，请确认后导入` :
-		                `已识别 ${normalizedBatchItems.length} 个模型，请确认后导入`));
+		              showToast2(appLanguage === `en-US` ?
+		                `Identified ${normalizedBatchItems.length} models. No live generation probes were run; review before importing.` :
+		                appLanguage === `zh-TW` ?
+		                `已識別 ${normalizedBatchItems.length} 個模型；未執行真實生成探活，請檢查後匯入。` :
+		                `已识别 ${normalizedBatchItems.length} 个模型；未执行真实生成探活，请检查后导入。`));
 	            return {
 	              items: normalizedBatchItems,
 	              scannedModels: scannedModels,
 	              failedChunks: batchFailedChunks,
 	            };
 	          } catch (error) {
-	            (console.error(`Config butler batch failed`, error),
-	              showToast2(`批量配置分析失败：${error.message}`));
+	            console.error(`Config butler batch failed`);
+	            const message = error instanceof Error && safeErrors.has(error) ? error.message : `请检查文档、模型配置和网络后重试。`;
+	            showToast2(`批量配置分析失败：${message}`);
 	          } finally {
 	            setConfigButlerBatchLoading(false);
 	          }

@@ -11,11 +11,16 @@ export function normalizePortraitAssetId(value) {
 
 export function normalizeTianjiAutomationPayload(value = {}) {
   const payload = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const mode = String(payload.mode || "text-to-video");
-  const images = Array.isArray(payload.images) ? payload.images.map((item) => String(item)) : [];
-  const portraitAssetIds = Array.isArray(payload.portraitAssetIds)
-    ? payload.portraitAssetIds.map(normalizePortraitAssetId)
-    : [];
+  const lists={};
+  for(const field of ['images','portraitAssetIds','videos','audios','references']){
+    const values=payload[field]===undefined?[]:payload[field];
+    if(!Array.isArray(values)||values.some(item=>typeof item!=='string'))throw new Error(`${field} 必须是字符串数组`);
+    lists[field]=values;
+  }
+  const hasMedia=Object.values(lists).some(values=>values.length)||typeof payload.referenceImage==='string'&&!!payload.referenceImage.trim();
+  const mode=payload.mode===undefined||payload.mode===''?(hasMedia?'reference-media':'text-to-video'):payload.mode;
+  if(typeof mode!=='string'||!['text-to-video','first-frame','first-last','reference-media'].includes(mode))throw new Error('天玑生成模式无效');
+  const images=lists.images.slice(),portraitAssetIds=lists.portraitAssetIds.map(normalizePortraitAssetId);
   if (images.some((item) => /^asset:\/\//i.test(item.trim()))) {
     throw new Error("普通图片参数不能使用 asset://；已审核天玑人像请使用 --portrait-asset-id");
   }

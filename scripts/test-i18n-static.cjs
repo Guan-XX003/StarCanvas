@@ -4,6 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const ts = require("typescript");
 const allowlist = require("./i18n-static-allowlist.cjs");
+const { isCompleteInlineLocale } = require("./i18n-inline-locale.cjs");
 
 const root = path.resolve(__dirname, "..");
 const deepLanguagePacks = JSON.parse(fs.readFileSync(path.join(root, "src/renderer/lib/i18n-deep-packs.json"), "utf8"));
@@ -94,7 +95,7 @@ for (const file of componentFiles) {
   const source = fs.readFileSync(file, "utf8");
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const visit = (node) => {
-    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isJsxText(node)) && isUiLiteral(node)) {
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isJsxText(node)) && isUiLiteral(node) && !isCompleteInlineLocale(node)) {
       const value = normalize(node.text);
       if (value && chinese.test(value)) {
         const entries = literals.get(value) || [];

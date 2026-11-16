@@ -8,6 +8,8 @@ export function WanJuanSettingsApiConfigSection({
   resetJixinDefaultConfiguration,
   setApiConfigs,
 }: any) {
+  const updateApiConfig = (id, patch) => setApiConfigs((current) =>
+    current.map((item) => item.id === id ? { ...item, ...patch } : item));
   return jsxs(`div`, {
                             className: `group bg-[#1a1a1a] rounded-xl overflow-hidden transition-all duration-300 shadow-sm border border-[#222] wanjuan-settings-card`,
                             children: [
@@ -58,10 +60,7 @@ export function WanJuanSettingsApiConfigSection({
                                                 placeholder: `配置名称 (例: API Studio)`,
                                                 value: config.name,
                                                 onChange: (event) => {
-                                                  let next = [...apiConfigs];
-                                                  ((next[index].name =
-                                                      event.target.value),
-                                                    setApiConfigs(next));
+                                                  updateApiConfig(config.id, { name: event.target.value });
                                                 },
                                               },
                                             ),
@@ -74,10 +73,7 @@ export function WanJuanSettingsApiConfigSection({
                                                 placeholder: `Base URL`,
                                                 value: config.url,
                                                 onChange: (event) => {
-                                                  let next = [...apiConfigs];
-                                                  ((next[index].url =
-                                                      event.target.value),
-                                                    setApiConfigs(next));
+                                                  updateApiConfig(config.id, { url: event.target.value });
                                                 },
                                               },
                                             ),
@@ -93,10 +89,7 @@ export function WanJuanSettingsApiConfigSection({
                                                   `password`,
                                                 value: config.key,
                                                 onChange: (event) => {
-                                                  let next = [...apiConfigs];
-                                                  ((next[index].key =
-                                                      event.target.value),
-                                                    setApiConfigs(next));
+                                                  updateApiConfig(config.id, { key: event.target.value });
                                                 },
                                                 onFocus: (event) =>
                                                   (event.target.type = `text`),
@@ -112,8 +105,7 @@ export function WanJuanSettingsApiConfigSection({
                                                 className: `w-full bg-transparent border-b border-[#444] px-1 py-1.5 text-xs text-gray-200 focus:border-blue-500 outline-none appearance-none cursor-pointer`,
                                                 value: config.protocolFormat || `auto`,
                                                 onChange: (event) => {
-                                                  let next = [...apiConfigs];
-                                                  ((next[index].protocolFormat = event.target.value), setApiConfigs(next));
+                                                  updateApiConfig(config.id, { protocolFormat: event.target.value });
                                                 },
                                                 children: [
 	                                                  jsx(`option`, { value: `auto`, children: `自动检测` }),
@@ -131,8 +123,7 @@ export function WanJuanSettingsApiConfigSection({
                                           }),
                                           jsx(`button`, {
                                             onClick: () => {
-                                              let next = [...apiConfigs];
-                                              (next.splice(index, 1), setApiConfigs(next));
+                                              setApiConfigs((current) => current.filter((item) => item.id !== config.id));
                                             },
                                             className: `wanjuan-danger-icon-action text-red-400 hover:text-red-300 p-1 opacity-0 group-hover/item:opacity-100 transition-opacity`,
                                             title: `删除配置`,
@@ -147,8 +138,8 @@ export function WanJuanSettingsApiConfigSection({
                                   ),
 	                                  jsx(`button`, {
 	                                    onClick: () => {
-	                                      setApiConfigs([
-	                                        ...apiConfigs,
+	                                      setApiConfigs((current) => [
+	                                        ...current,
 	                                        {
                                           id: Date.now().toString(),
                                           name: ``,

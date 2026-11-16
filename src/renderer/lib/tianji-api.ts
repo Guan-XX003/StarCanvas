@@ -26,6 +26,7 @@ import { WanJuanSameModelId } from "./model-id";
 import { wanjuanManagedRelayPlaceholderFor } from "./managed-relay";
 import { WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE } from "./upload-defaults";
 import { wanjuanClearProjectAssetBindingsFromData } from "./resource";
+import { safeGenerationError } from "./custom-task-error";
 
 /** chrome 扩展运行时（仅在浏览器扩展环境存在）。 */
 declare const chrome: any;
@@ -78,6 +79,7 @@ interface TianjiRequestOptions {
 
 /** wanjuanRunTianjiSeedanceVideo 的运行入参（来自调用方编辑器上下文）。 */
 interface RunTianjiSeedanceVideoOptions {
+  execution?: import('./application-generation-execution').ApplicationGenerationExecution;
   sourceNode?: { data?: Record<string, any> };
   prompt?: string;
   extraPrompts?: string[];
@@ -107,7 +109,7 @@ interface RunTianjiSeedanceVideoOptions {
   persistVideoNodeState: (
     style: Record<string, any>,
     data: Record<string, any>,
-    options?: { clearProjectAssetBindings?: string[] },
+    options?: { clearProjectAssetBindings?: string[]; onlyIfActiveTaskId?: string },
   ) => Promise<any>;
 }
 
@@ -692,6 +694,11 @@ const wanjuanTianjiRawStatus = (data: any): string =>
       ``,
   ).trim();
 
+/** Cancellation is only reported when the provider supplied an explicit
+ * status; do not infer it from error prose or unrelated response fields. */
+export const wanjuanTianjiIsExplicitCancellation = (data: any): boolean =>
+  /^(?:cancelled|canceled|cancel|已取消|取消)$/i.test(wanjuanTianjiRawStatus(data).trim());
+
 /** 从返回结构中查找缩略图 / 封面 / 末帧地址，仅接受 http(s)。 */
 export const wanjuanTianjiFindThumbUrl = (data: any): string => {
   let url = wanjuanTianjiFindDeep(data, [
@@ -847,33 +854,34 @@ export const wanjuanTianjiMediaUrl = async (media: any, kind = `image`, uploadOp
     throw Error(`天玑模式参考${kind === `video` ? `视频` : kind === `audio` ? `音频` : `图片`}必须是公网 URL`);
   let uploadMode = String(uploadOptions.uploadMode || uploadOptions.seedanceUploadMode || WANJUAN_DEFAULT_SEEDANCE_UPLOAD_MODE).trim(),
     filename = `tianji-seedance-${kind}-${Date.now()}`;
-  let uploadResult =
+  const send = () =>
     uploadMode === `tos` && typeof window.wanjuanDesktop?.uploadTosMedia == `function`
-      ? await window.wanjuanDesktop.uploadTosMedia({
+      ? window.wanjuanDesktop.uploadTosMedia({
           url: raw,
           kind,
           filename,
           tos: uploadOptions.tosConfig || {},
         })
       : uploadMode === `custom` && typeof window.wanjuanDesktop?.uploadCustomPublicMedia == `function`
-        ? await window.wanjuanDesktop.uploadCustomPublicMedia({
+        ? window.wanjuanDesktop.uploadCustomPublicMedia({
             url: raw,
             kind,
             filename,
             customUpload: uploadOptions.customPublicUploadConfig || {},
           })
         : uploadMode === `qiniu` && typeof window.wanjuanDesktop?.uploadQiniuMedia == `function`
-          ? await window.wanjuanDesktop.uploadQiniuMedia({
+          ? window.wanjuanDesktop.uploadQiniuMedia({
               url: raw,
               kind,
               filename,
               qiniu: uploadOptions.qiniuConfig || {},
             })
-          : await window.wanjuanDesktop.uploadPublicMedia({
+          : window.wanjuanDesktop.uploadPublicMedia({
               url: raw,
               kind,
               filename,
             });
+  const uploadResult = await (uploadOptions.execution ? uploadOptions.execution.upload(send, uploadOptions.providerBinding) : send());
   if (!uploadResult?.ok || !uploadResult.url)
     throw Error(uploadResult?.error || `天玑模式参考${kind === `video` ? `视频` : kind === `audio` ? `音频` : `图片`}上传失败`);
   return uploadResult.url;
@@ -887,14 +895,19 @@ export const wanjuanTianjiMediaUrl = async (media: any, kind = `image`, uploadOp
  * 按 pollingInterval 轮询历史接口，处理成功 / 失败 / 进行中三种状态，超时或取消时抛错。
  */
 export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVideoOptions): Promise<void> {
-  let config = await wanjuanGetSyncedTianjiSeedanceConfig(),
+  const approved = options.execution?.tianjiParameters();
+  // Controlled requests use exactly the reviewed stored provider. Merely
+  // approving generation must not invoke the legacy Jixin config writer.
+  let config = approved
+      ? wanjuanNormalizeTianjiSeedanceConfig((await wanjuanTianjiStorageGet(['tianjiSeedanceConfig'])).tianjiSeedanceConfig || {})
+      : await wanjuanGetSyncedTianjiSeedanceConfig(),
     nodeData = options.sourceNode?.data || {},
-    tianjiModelText = nodeData.tianjiSeedanceModel || config.models,
+    tianjiModelText = approved ? config.models : nodeData.tianjiSeedanceModel || config.models,
     tianjiModelCandidates = String(tianjiModelText || ``)
       .split(/[\s,，、]+/)
       .map((part) => part.trim())
       .filter(Boolean),
-    explicitTianjiModel = String(nodeData.tianjiSelectedModel || nodeData.selectedModel || ``).trim(),
+    explicitTianjiModel = String(approved?.model || nodeData.tianjiSelectedModel || nodeData.selectedModel || ``).trim(),
     prompt = (
       Array.isArray(options.extraPrompts) && options.extraPrompts.length > 0
         ? `${options.extraPrompts.join(`\n`)}\n${options.prompt || ``}`
@@ -906,38 +919,40 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
         ? explicitTianjiModel
         : wanjuanTianjiFirstListValue(tianjiModelText || nodeData.videoModel || config.models),
     resolution = String(
-      nodeData.selectedResolution ||
+      approved?.resolution || nodeData.selectedResolution ||
         wanjuanTianjiFirstListValue(nodeData.seedanceResolutions || config.resolutions, `720p`),
     ).trim(),
     duration = String(
-      nodeData.selectedSeconds ||
+      approved?.duration || nodeData.selectedSeconds ||
         options.selectedDuration ||
         wanjuanTianjiFirstListValue(nodeData.videoDurations || config.durations, `5`),
     ).trim(),
     ratio = String(
-      nodeData.size ||
+      approved?.aspectRatio || nodeData.size ||
         options.selectedSize ||
         wanjuanTianjiFirstListValue(nodeData.seedanceRatios || nodeData.videoResolutions || config.ratios, `16:9`),
     ).trim();
   if (!ratio.includes(`:`)) ratio = normalizeVideoAspectRatioValue(ratio, `1280x720`);
   // 上游只接受固定几个画幅，浮点比例（如 2.35:1）就近吸附到配置的候选列表。
   {
-    let supportedRatios = String(nodeData.seedanceRatios || nodeData.videoResolutions || config.ratios || ``)
+    let supportedRatios = String((approved ? config.ratios : nodeData.seedanceRatios || nodeData.videoResolutions || config.ratios) || ``)
       .split(/[\s,，、]+/)
       .map((item: string) => item.trim())
       .filter((item: string) => item.includes(`:`));
     ratio = snapVideoAspectRatioToSupported(ratio, supportedRatios.length ? supportedRatios : void 0);
   }
   if (!model) throw Error(`请先在设置中配置天玑 Seedance 模型`);
-  let generationMode = wanjuanNormalizeTianjiGenerationMode(nodeData.tianjiSeedanceGenerationMode),
+  if (approved && (model !== approved.model || ratio !== approved.aspectRatio))
+    throw Object.assign(Error('OPERATION_PARAMETER_UNAVAILABLE'), { code: 'OPERATION_PARAMETER_UNAVAILABLE' });
+  let generationMode = wanjuanNormalizeTianjiGenerationMode(approved?.mode || nodeData.tianjiSeedanceGenerationMode),
     commonPayload: any = {
       duration,
       ratio,
       prompt,
-      watermark: nodeData.watermark === void 0 ? config.watermark : nodeData.watermark === true,
+      watermark: approved ? approved.watermark : nodeData.watermark === void 0 ? config.watermark : nodeData.watermark === true,
       model_name: model,
       resolution,
-      generate_audio: nodeData.generateAudio === void 0 ? config.generateAudio : nodeData.generateAudio !== false,
+      generate_audio: approved ? approved.generateAudio : nodeData.generateAudio === void 0 ? config.generateAudio : nodeData.generateAudio !== false,
     },
     abortControllers = options.abortControllers,
     abortController = new AbortController();
@@ -951,6 +966,8 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
           tosConfig: nodeData.tosConfig,
           customPublicUploadConfig: nodeData.customPublicUploadConfig,
           qiniuConfig: nodeData.qiniuConfig,
+          execution: options.execution,
+          providerBinding: JSON.stringify(config),
         });
         mediaUrl && urls.push(mediaUrl);
       }
@@ -1002,7 +1019,7 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
   };
   console.info(`Tianji generation request profile`, requestSummary);
   options.showToast(`即梦天玑任务提交中...`);
-  let submitResponse = await wanjuanTianjiRequest(config, endpoint, {
+  const submit = () => wanjuanTianjiRequest(config, endpoint, {
       params: payload,
       encoding,
       enterpriseRequestKind: `submit`,
@@ -1012,7 +1029,8 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
       portraitConflictCount: Number(options.portraitConflictCount || 0),
       reviewedPortraitPreviewUrls: options.reviewedPortraitPreviewUrls || [],
       signal: abortController.signal,
-    }),
+    });
+  let submitResponse = await (options.execution ? options.execution.submit(submit, JSON.stringify(config)) : submit()),
     taskId = wanjuanTianjiFindTaskId(submitResponse);
   if (!taskId) throw Error(`即梦天玑提交成功但未返回 execute_id`);
   (options.updateGlobalTasks &&
@@ -1097,6 +1115,7 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
         videoUrl = wanjuanTianjiFindVideoUrl(statusResponse),
         thumbUrl = wanjuanTianjiFindThumbUrl(statusResponse),
         statusLabel = wanjuanTianjiStatusLabel(status);
+      if (abortController.signal.aborted) throw Error(`生成已取消`);
       consecutiveErrors = 0;
       // 只按 status 判定完成；不再用 videoUrl 兜底，避免预览片段被当成最终结果。
       if ([`succeeded`, `completed`, `complete`, `success`, `done`].includes(status)) {
@@ -1190,15 +1209,16 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
           options.addTransitResource && options.addTransitResource(videoUrl, `video`, `generated`),
           options.showToast(`即梦天玑视频生成成功！`));
         done = true;
-      } else if (status === `failed`) {
-        let failureMessage = wanjuanTianjiErrorMessage(statusResponse);
+      } else if (status === `failed` || wanjuanTianjiIsExplicitCancellation(statusResponse)) {
+        const cancelled = wanjuanTianjiIsExplicitCancellation(statusResponse);
+        let failureMessage = cancelled ? `服务商报告视频任务已取消` : safeGenerationError(wanjuanTianjiErrorMessage(statusResponse), "media");
         (options.updateGlobalTasks &&
           options.updateGlobalTasks((tasks) =>
             tasks.map((task) =>
-              task.id === taskId
+              task.id === taskId && task.stoppedByUser !== true && ![`completed`, `stopped`, `cancelled`, `canceled`].includes(String(task.status || ``).toLowerCase())
                 ? {
                     ...task,
-                    status: `failed`,
+                    status: cancelled ? `cancelled` : `failed`,
                     errorMsg: failureMessage,
                   }
                 : task,
@@ -1206,7 +1226,7 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
           ),
           options.updateNodes((nodes) =>
             nodes.map((node) =>
-              node.id === options.nodeId &&
+              node.id === options.nodeId && node.data?.loading === true && !node.data?.manuallyStopped &&
               (node.data?.seedanceTaskId === taskId ||
                 node.data?.taskId === taskId ||
                 node.data?.tianjiExecuteId === taskId)
@@ -1231,13 +1251,13 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
               errorMessage: failureMessage,
               loadingText: void 0,
             },
+            { onlyIfActiveTaskId: taskId },
           ),
           options.updateEdges((edges) =>
             edges.map((edge) => (edge.target === options.nodeId ? { ...edge, animated: false } : edge)),
           ));
-        let failureError: any = Error(failureMessage);
-        failureError.terminal = true;
-        throw failureError;
+        options.showToast(`即梦天玑任务状态已查询，请查看任务清单`);
+        return;
       } else {
         let progress = wanjuanTianjiFindProgress(statusResponse),
           hasRealProgress = !isNaN(progress);
@@ -1286,7 +1306,7 @@ export async function wanjuanRunTianjiSeedanceVideo(options: RunTianjiSeedanceVi
       ) {
         throw error;
       }
-      console.warn(`Tianji Seedance polling error:`, error);
+      console.warn(`Tianji Seedance polling error.`);
       consecutiveErrors++;
       if (consecutiveErrors === 5) {
         options.showToast(`即梦天玑状态查询暂时失败，仍会继续重试...`);

@@ -23,6 +23,7 @@ const {
   desktopProxyFetchControllers,
 } = require("./net/proxy-fetch.cjs");
 const { extractKnowledgeFileText } = require("./knowledge.cjs");
+const { isEncryptedBackupOutput } = require("./encrypted-backup-output.cjs");
 const { normalizeImagePayload, bufferFromDownloadPayload, bufferFromMediaPayload } = require("./media/payload.cjs");
 const {
   persistProjectAsset,
@@ -157,8 +158,9 @@ function isTrustedIpcEvent(event) {
 
 function rejectUntrustedIpc(event, channel) {
   if (isTrustedIpcEvent(event)) return null;
-  const senderUrl = getIpcSenderUrl(event);
-  appendDesktopLog("untrusted-ipc-blocked", { channel, senderUrl });
+  // Untrusted URLs may contain tokens, private paths or user content in any
+  // component, including the hostname. The channel is sufficient for audit.
+  appendDesktopLog("untrusted-ipc-blocked", { channel });
   return { ok: false, error: "Blocked untrusted desktop IPC caller" };
 }
 
@@ -173,6 +175,57 @@ function accountErrorResult(error) {
 
 function registerDesktopIpc() {
   if (!ipcMain || !dialog) return;
+  require('./application-operation-ipc.cjs').registerApplicationOperationIpc({ipcMain,rejectUntrustedIpc,getService:()=>require('./application-operation-host.cjs').getApplicationOperationService()});
+  let customConfigService;
+  require('./custom-node-config-ipc.cjs').registerCustomNodeConfigIpc({ipcMain,rejectUntrustedIpc,getService:() => customConfigService ||= require('./custom-node-config-service.cjs').createSystemCustomNodeConfigService()});
+  const assistant = require('./assistant-service.cjs');
+  for (const [channel, operation] of [
+    ['wanjuan:assistant-status', () => assistant.status()],
+    ['wanjuan:assistant-account-start', () => assistant.startAccountAuth()],
+    ['wanjuan:assistant-account-status', () => assistant.accountStatus()],
+    ['wanjuan:assistant-account-cancel', () => assistant.cancelAccountAuth()],
+    ['wanjuan:assistant-account-clear', () => assistant.clearAccount()],
+    ['wanjuan:assistant-check-connection', () => assistant.checkConnection()],
+    ['wanjuan:assistant-set-key', payload => assistant.setKey(payload?.key)],
+    ['wanjuan:assistant-clear-key', () => assistant.clearKey()],
+    ['wanjuan:assistant-send', payload => assistant.send(payload?.text, payload?.context)],
+    ['wanjuan:assistant-cancel', () => assistant.cancelChat()],
+    ['wanjuan:assistant-reset', () => assistant.reset()],
+    ['wanjuan:assistant-analyze-config', payload => assistant.analyzeConfiguration(payload?.prompt)],
+    ['wanjuan:assistant-workspace-list', () => assistant.workspaceList()],
+    ['wanjuan:assistant-workspace-create-session', payload => assistant.workspaceCreateSession(payload)],
+    ['wanjuan:assistant-workspace-read-session', payload => assistant.workspaceReadSession(payload?.id)],
+    ['wanjuan:assistant-workspace-progress', payload => assistant.workspaceProgress(payload?.id,payload?.requestId,payload?.afterRevision)],
+    ['wanjuan:assistant-workspace-patch-session', payload => assistant.workspacePatchSession(payload?.id,payload?.patch,payload?.revision)],
+    ['wanjuan:assistant-workspace-change-session', payload => assistant.workspaceChangeSession(payload?.id,payload?.patch,payload?.revision)],
+    ['wanjuan:assistant-workspace-select-session', payload => assistant.workspaceSelectSession(payload?.id)],
+    ['wanjuan:assistant-workspace-create-role', payload => assistant.workspaceCreateRole(payload?.configuration)],
+    ['wanjuan:assistant-workspace-read-role', payload => assistant.workspaceReadRole(payload?.id)],
+    ['wanjuan:assistant-workspace-patch-role', payload => assistant.workspacePatchRole(payload?.id,payload?.configuration,payload?.revision)],
+    ['wanjuan:assistant-workspace-add-attachment', payload => assistant.workspaceAddAttachment(payload?.id,payload?.attachment)],
+    ['wanjuan:assistant-workspace-read-turn-attachments', payload => assistant.workspaceReadTurnAttachments(payload?.id,payload?.turnId)],
+    ['wanjuan:assistant-workspace-preview-attachment', payload => assistant.workspacePreviewAttachment(payload?.id,payload?.assetId)],
+    ['wanjuan:assistant-workspace-export-backup', payload => assistant.workspaceExportBackup(payload)],
+    ['wanjuan:assistant-workspace-import-backup', payload => assistant.workspaceImportBackup(payload)],
+    ['wanjuan:assistant-workspace-import-legacy-role', payload => assistant.workspaceImportLegacyRole(payload)],
+    ['wanjuan:assistant-workspace-begin-custom-turn', payload => assistant.workspaceBeginCustomTurn(payload?.id,payload?.text)],
+    ['wanjuan:assistant-workspace-custom-running', payload => assistant.workspaceCustomRunning(payload?.id,payload?.turnId)],
+    ['wanjuan:assistant-workspace-complete-custom-turn', payload => assistant.workspaceCompleteCustomTurn(payload?.id,payload?.turnId,{text:payload?.text,code:payload?.code})],
+    ['wanjuan:assistant-workspace-send', payload => assistant.workspaceSend(payload?.id,payload?.text,payload?.context,payload?.requestId)],
+    ['wanjuan:assistant-workspace-cancel', payload => assistant.workspaceCancel(payload?.id)],
+  ]) {
+    ipcMain.handle(channel, async (event, payload = {}) => {
+      const blocked = rejectUntrustedIpc(event, channel);
+      if (blocked) return blocked;
+      try { return {ok:true, value:await operation(payload)}; }
+      catch (error) {
+        // Never return exception messages: provider/runtime diagnostics may
+        // include user prompts, credentials or local paths.
+        const code = /^ASSISTANT_[A-Z_]+$/.test(error?.code || '') ? error.code : 'ASSISTANT_FAILED';
+        return {ok:false, code};
+      }
+    });
+  }
   // The server remains authoritative: the bridge probes the authenticated
   // endpoint before advertising cloud projects. An explicit local kill switch
   // is retained for recovery and isolated tests.
@@ -674,7 +727,13 @@ function registerDesktopIpc() {
     const blocked = rejectUntrustedIpc(event, "wanjuan:save-download");
     if (blocked) return blocked;
     try {
-      const { buffer, mime } = await bufferFromDownloadPayload({
+      const encryptedBackup = payload?.encryptedBackup === true;
+      if (encryptedBackup && (!payload?.saveAsFolder || !isEncryptedBackupOutput(payload?.text))) {
+        return {ok:false, code:"BACKUP_ENCRYPTED_OUTPUT_INVALID"};
+      }
+      // Do not allow a second payload field (buffer, URL, etc.) to replace
+      // the validated envelope or initiate an unrelated fetch.
+      const { buffer, mime } = encryptedBackup ? {buffer:Buffer.from(payload.text, "utf8"), mime:"application/json"} : await bufferFromDownloadPayload({
         ...(payload || {}),
         sender: event.sender
       });
@@ -693,7 +752,13 @@ function registerDesktopIpc() {
         });
         if (result.canceled || !result.filePath) return { ok: false, canceled: true };
         const folderPath = result.filePath;
-        fs.mkdirSync(folderPath, { recursive: true });
+        if (encryptedBackup) {
+          // Exclusive new folder avoids overwriting a previous backup and
+          // makes the deterministic external-assets folder discoverable before
+          // the encrypted JSON can be opened.
+          try { fs.mkdirSync(folderPath, {mode:0o700}); }
+          catch (error) { if (error?.code === "EEXIST") return {ok:false, code:"BACKUP_FOLDER_EXISTS"}; throw error; }
+        } else fs.mkdirSync(folderPath, { recursive: true });
         target = path.join(folderPath, filename);
       } else if (payload?.saveAs) {
         const { directory: baseDirectory } = resolveWritableDownloadDirectory(payload?.directory);
@@ -722,6 +787,9 @@ function registerDesktopIpc() {
       const externalAssetFiles = Array.isArray(payload?.externalAssetFiles)
         ? payload.externalAssetFiles.filter(Boolean)
         : [];
+      if (encryptedBackup && externalAssetFiles.length && sanitizeFilename(payload?.externalAssetFolderName || "") !== `${path.parse(filename).name}-external-assets`) {
+        return {ok:false, code:"BACKUP_ASSET_FOLDER_INVALID"};
+      }
       const validation = validateExternalProjectAssetFiles(externalAssetFiles);
       if (!validation.ok) {
         return {
@@ -736,6 +804,11 @@ function registerDesktopIpc() {
         externalAssetFiles,
         payload?.externalAssetFolderName
       );
+      if (encryptedBackup && assetBundle && assetBundle.folderName !== `${path.parse(filename).name}-external-assets`) {
+        // Never write an envelope whose assets would be silently undiscoverable
+        // by the import chooser. The newly created media may remain on disk.
+        return {ok:false, code:"BACKUP_ASSET_FOLDER_CONFLICT"};
+      }
       if (assetBundle?.failed) {
         return {
           ok: false,
@@ -744,9 +817,9 @@ function registerDesktopIpc() {
           externalAssetBundle: assetBundle
         };
       }
-      const finalText = injectExternalAssetBundleSummary(payload?.text, assetBundle);
+      const finalText = encryptedBackup ? null : injectExternalAssetBundleSummary(payload?.text, assetBundle);
       try {
-        fs.writeFileSync(target, finalText !== null ? Buffer.from(finalText, "utf8") : buffer);
+        fs.writeFileSync(target, finalText !== null ? Buffer.from(finalText, "utf8") : buffer, encryptedBackup ? {flag:"wx",mode:0o600} : undefined);
       } catch (error) {
         if (assetBundle?.createdByOperation && assetBundle.folderPath) {
           try {
@@ -757,7 +830,7 @@ function registerDesktopIpc() {
       }
       return { ok: true, path: target, externalAssetBundle: assetBundle };
     } catch (error) {
-      console.error("save-download failed", error);
+      console.error("save-download failed");
       return { ok: false, error: String(error?.message || error) };
     }
   });
@@ -1134,11 +1207,13 @@ function registerDesktopIpc() {
     if (blocked) return blocked;
     const requestId = String(payload?.requestId || "").trim();
     const url = String(payload?.url || "").trim();
-    if (!requestId) {
+    if (!requestId||desktopProxyFetchControllers.has(requestId)) {
       return { ok: false, error: "Invalid proxy fetch payload" };
     }
     const controller = new AbortController();
-    desktopProxyFetchControllers.set(requestId, { controller, cancel: null });
+    const streaming=payload?.streamResponse===true;let streamChunks=0,streamed=false;
+    const streamFrame=part=>{if(controller.signal.aborted||rejectUntrustedIpc(event,'wanjuan:proxy-fetch')){controller.abort();throw Error('Streaming receiver unavailable');}event.senderFrame.send('wanjuan:proxy-fetch-stream',{requestId,...part});};
+    desktopProxyFetchControllers.set(requestId, { controller, cancel: null,...(streaming?{frame:event.senderFrame}:{}) });
     try {
       const method = String(payload?.method || "GET").toUpperCase();
       const originalHeaders = sanitizeProxyFetchHeaders(payload?.headers);
@@ -1163,6 +1238,10 @@ function registerDesktopIpc() {
           headers,
           body,
           signal: controller.signal,
+          // Preserve managed-key preparation and its existing single 401
+          // refresh. Never publish the rejected attempt; once text/headers are
+          // published a transport error cannot be retried or switched.
+          ...(streaming?{onResponse:meta=>{if(meta.status===401)return;streamed=true;streamFrame({type:'headers',...meta});},onChunk:bytes=>{if(streamed)streamFrame({type:'chunk',sequence:++streamChunks,base64:bytes.toString('base64')});}}:{}),
           requestTimeout: Number(payload?.requestTimeout || 180000)
         });
       };
@@ -1181,6 +1260,7 @@ function registerDesktopIpc() {
         status: response.status,
         statusText: response.statusText,
         headers: Array.isArray(response.headers) ? response.headers : [],
+        ...(streaming?{streamed,streamChunks}:{}),
         bodyBase64: String(response.bodyBase64 || "")
       };
     } catch (error) {
@@ -1205,6 +1285,7 @@ function registerDesktopIpc() {
     if (!normalizedId) return;
     const entry = desktopProxyFetchControllers.get(normalizedId);
     if (!entry) return;
+    if(entry.frame&&entry.frame!==event.senderFrame)return;
     entry.controller.abort();
     if (typeof entry.cancel === "function") entry.cancel();
   });

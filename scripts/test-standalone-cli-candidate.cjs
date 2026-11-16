@@ -1,0 +1,14 @@
+const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),crypto=require('node:crypto'),{spawnSync}=require('node:child_process');
+const root=path.resolve(__dirname,'..'),version=require('../package.json').version;
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'starcanvas-cli-docs-')),output=path.join(dir,`starcanvas-cli-${version}.zip`);
+const result=spawnSync(process.execPath,[path.join(root,'scripts/build-standalone-cli-candidate.mjs'),output],{cwd:dir,encoding:'utf8',timeout:60000});
+assert.equal(result.status,0,result.stderr);const receipt=JSON.parse(result.stdout);
+assert.equal(receipt.version,version);assert.equal(receipt.files,11);
+assert.equal(receipt.sha256,crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex'));
+const read=(...args)=>{const r=spawnSync('/usr/bin/unzip',args,{encoding:null,timeout:10000});assert.equal(r.status,0);return r.stdout;};
+assert.deepEqual(read('-p',output,'README.md'),fs.readFileSync(path.join(root,'docs/AUTOMATION_CLI.md')),'standalone README is the exact packaged resource source');
+const names=read('-Z1',output).toString().trim().split('\n');assert.equal(names.length,11);
+for(const name of names.filter(n=>n!=='README.md'))assert.deepEqual(read('-p',output,name),fs.readFileSync(path.join(root,'bin',name)));
+assert.equal(spawnSync(process.execPath,[path.join(root,'scripts/build-standalone-cli-candidate.mjs'),output],{cwd:dir,encoding:'utf8',timeout:10000}).status,1,'never replace an existing archive');
+const documentation=fs.readFileSync(path.join(root,'docs/AUTOMATION_CLI.md'),'utf8');assert(!documentation.includes('starcanvas-cli-1.4.7.zip'));
+console.log(JSON.stringify({status:'PASS_EXACT_CLI_APP_README_AND_ARCHIVE_BYTES',version,files:11,sha256:receipt.sha256,evidence:dir}));

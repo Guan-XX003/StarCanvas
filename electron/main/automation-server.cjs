@@ -11,6 +11,13 @@ const MAX_REFERENCE_FILE_BYTES = 100 * 1024 * 1024;
 let server = null;
 let automationInfo = null;
 let registeredWindow = null;
+const operationPolicy=import('../shared/application-operation-policy.mjs');
+// Until the reviewed application approval flow issues scoped grants, a local
+// connection receives metadata reads only. Never trust a permission/approval
+// field supplied in an HTTP body or model tool call.
+async function authorizeExternalOperation(method,payload={}) {
+  return (await operationPolicy).assertApplicationOperationPermission(method,['read'],{materialize:payload.materialize===true});
+}
 function infoPaths() { return AUTOMATION_FILE_NAMES.map((name) => path.join(app.getPath("userData"), name)); }
 function writeInfo() {
   const serialized = `${JSON.stringify(automationInfo, null, 2)}\n`;
@@ -27,17 +34,29 @@ function removeInfo() {
 }
 function setAutomationWindow(win) {
   registeredWindow = win && !win.isDestroyed?.() ? win : null;
+  require('./application-operation-host.cjs').setApplicationOperationWindow(registeredWindow);
 }
 function getWindow() { return registeredWindow && !registeredWindow.isDestroyed?.() ? registeredWindow : BrowserWindow.getAllWindows?.().find((win) => !win.isDestroyed?.()) || null; }
 async function evaluate(method, payload) {
+  await authorizeExternalOperation(method,payload);
   const win = getWindow();
   if (!win?.webContents) throw new Error("StarCanvas窗口尚未就绪");
   const m = JSON.stringify(String(method));
   const p = JSON.stringify(payload ?? {});
-  return Promise.race([
-    win.webContents.executeJavaScript(`(async()=>{const api=globalThis.__wanjuanAutomation;if(!api||typeof api[${m}]!=="function")throw new Error("自动化接口尚未就绪，请等待画布加载完成");return await api[${m}](${p})})()`, true),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("自动化接口响应超时，请等待画布加载完成后重试")), 10000)),
-  ]);
+  let timer;
+  const value=await Promise.race([
+    win.webContents.executeJavaScript(`(async()=>{try{const taskRead=["tasks","task"].includes(${m}),api=taskRead?globalThis.__wanjuanTaskAutomation:globalThis.__wanjuanAutomation;if(!api||typeof api[${m}]!=="function")return {ok:false,code:taskRead?"OPERATION_TASKS_UNAVAILABLE":"PLAN_CANVAS_NOT_READY"};return await api[${m}](${p});}catch(error){return {ok:false,code:typeof error?.code==="string"?error.code:"OPERATION_FAILED"};}})()`, true),
+    new Promise((_, reject) => {timer=setTimeout(() => reject(requestError("自动化接口响应超时，请等待画布加载完成后重试",504)), 10000);}),
+  ]).finally(()=>clearTimeout(timer));
+  // Electron does not preserve arbitrary Error properties across executeJS.
+  // Carry only a plain code envelope, then revalidate it in the trusted host.
+  if(value?.ok===false)throw Object.assign(new Error('Application read unavailable'),{code:(await import('../shared/application-operation-contract.mjs')).applicationOperationErrorCode(value)});
+  return (await operationPolicy).applicationOperationMetadata(method,value,{includeDiagnostics:payload?.includeDiagnostics===true});
+}
+async function evaluateValidated(method,req,validate) {
+  // Authorize BEFORE validation can stat/read a caller-supplied media path.
+  await authorizeExternalOperation(method);
+  return evaluate(method,validate(await readJson(req)));
 }
 function send(res, status, payload) {
   const body = Buffer.from(JSON.stringify(payload ?? { ok: false }), "utf8");
@@ -135,18 +154,30 @@ function createServer() {
       const parsedUrl = (() => { try { return new URL(req.url || "/", "http://127.0.0.1"); } catch { return new URL("http://127.0.0.1/"); } })();
       const pathname = parsedUrl.pathname;
     try {
+      if(req.method==='POST'&&pathname==='/v1/operations')return send(res,202,await require('./application-operation-host.cjs').getApplicationOperationService().submit('external',await readJson(req)));
+      if(req.method==='POST'&&pathname==='/v1/media/import')return send(res,202,await require('./application-operation-host.cjs').submitLegacyOperation('media.import',await readJson(req),req.headers['idempotency-key']));
+      const operation=pathname.match(/^\/v1\/operations\/([A-Za-z0-9-]+)$/);
+      if(operation&&['GET','DELETE'].includes(req.method)){
+        const service=require('./application-operation-host.cjs').getApplicationOperationService(),receipt=req.headers['x-starcanvas-operation-receipt'];
+        return send(res,200,{request:req.method==='GET'?service.read('external',operation[1],receipt):service.cancel('external',operation[1],receipt)});
+      }
       if (req.method === "GET" && pathname === "/v1/status") return send(res, 200, await evaluate("status", {}));
       if (req.method === "GET" && pathname === "/v1/models") return send(res, 200, await evaluate("models", {}));
-      if (req.method === "GET" && pathname === "/v1/tasks") return send(res, 200, await evaluate("tasks", { materialize: parsedUrl.searchParams.get("materialize") === "1" }));
+      if (req.method === "GET" && pathname === "/v1/tasks") return send(res, 200, await evaluate("tasks", { materialize: parsedUrl.searchParams.get("materialize") === "1",includeDiagnostics:parsedUrl.searchParams.get('diagnostics')==='1' }));
       const task = pathname.match(/^\/v1\/tasks\/([^/]+)$/);
-      if (task && req.method === "GET") return send(res, 200, await evaluate("task", { id: decodeURIComponent(task[1]), materialize: parsedUrl.searchParams.get("materialize") !== "0" }));
-      if (task && req.method === "POST") return send(res, 200, await evaluate("cancel", { id: decodeURIComponent(task[1]) }));
-      if (req.method === "POST" && pathname === "/v1/image/generate") return send(res, 200, await evaluate("generateImage", validateGenerationPayload("image", await readJson(req))));
-      if (req.method === "POST" && pathname === "/v1/video/generate") return send(res, 200, await evaluate("generateVideo", validateGenerationPayload("video", await readJson(req))));
-      if (req.method === "POST" && pathname === "/v1/tianji/generate") return send(res, 200, await evaluate("generateTianjiVideo", validateTianjiPayload(await readJson(req))));
+      const taskExport=pathname.match(/^\/v1\/tasks\/([^/]+)\/export$/);
+      if(taskExport&&req.method==='POST')return send(res,202,await require('./application-operation-host.cjs').submitLegacyOperation('media.export',{...await readJson(req),id:decodeURIComponent(taskExport[1])},req.headers['idempotency-key']));
+      if (task && req.method === "GET") return send(res, 200, await evaluate("task", { id: decodeURIComponent(task[1]), materialize: parsedUrl.searchParams.get("materialize") === "1",includeDiagnostics:parsedUrl.searchParams.get('diagnostics')==='1' }));
+      if(task&&req.method==='POST')return send(res,202,await require('./application-operation-host.cjs').submitLegacyOperation('tasks.cancel',{...await readJson(req),id:decodeURIComponent(task[1])},req.headers['idempotency-key']));
+      const generation={'/v1/image/generate':'generation.image','/v1/video/generate':'generation.video','/v1/tianji/generate':'generation.tianji'}[pathname];
+      if(req.method==='POST'&&generation)return send(res,202,await require('./application-operation-host.cjs').submitLegacyOperation(generation,await readJson(req),req.headers['idempotency-key']));
       if (process.env.WANJUAN_AUTOMATION_TEST_ENDPOINTS === "1" && req.method === "POST" && pathname === "/v1/automation-test/materialize") return send(res, 200, await evaluate("materializeTestResult", await readJson(req)));
       return send(res, 404, { ok: false, error: "未找到自动化接口" });
-    } catch (error) { return send(res, Number(error?.statusCode || 500), { ok: false, error: String(error?.message || error) }); }
+    } catch (error) {
+      const code=(await import('../shared/application-operation-contract.mjs')).applicationOperationErrorCode(error);
+      return send(res,Number(error?.statusCode||(code==='OPERATION_NOT_FOUND'?404:code==='OPERATION_FAILED'?500:400)),{ok:false,code,error:code==='OPERATION_PERMISSION_REQUIRED'?'Application permission required':error?.statusCode&&!error?.code?String(error.message):'Application operation failed',
+        ...(code==='OPERATION_PERMISSION_REQUIRED'?{permission:error.permission}:{} )});
+    }
   });
 }
 async function startAutomationServer(win) {
@@ -154,7 +185,7 @@ async function startAutomationServer(win) {
   if (server) return automationInfo;
   // 上次异常退出可能留下旧端口和旧 token；新实例启动前先同步清理。
   removeInfo();
-  automationInfo = { protocol: "starcanvas-automation", protocolVersion: 1, host: "127.0.0.1", port: 0, token: crypto.randomBytes(32).toString("hex"), pid: process.pid, appVersion: app.getVersion?.() || "", startedAt: Date.now() };
+  automationInfo = { protocol: "starcanvas-automation", protocolVersion: 2, host: "127.0.0.1", port: 0, token: crypto.randomBytes(32).toString("hex"), pid: process.pid, appVersion: app.getVersion?.() || "", startedAt: Date.now() };
   server = createServer();
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => { automationInfo.port = server.address().port; writeInfo(); resolve(); }); });
   return automationInfo;
@@ -162,6 +193,7 @@ async function startAutomationServer(win) {
 async function stopAutomationServer() {
   removeInfo();
   registeredWindow = null;
+  require('./application-operation-host.cjs').closeApplicationOperations();
   if (!server) { automationInfo = null; return; }
   await new Promise((resolve) => server.close(() => resolve()));
   server = null; automationInfo = null;

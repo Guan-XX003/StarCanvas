@@ -4,14 +4,14 @@
  */
 import { useCallback, useMemo } from "react";
 import type { ApiBindings, ApiConfig, StoredGlobalConfig, Toast } from "../lib/app-types";
-import { WanJuanSunoHeaders, WanJuanSunoTaskFailed, WanJuanSunoTaskSucceeded, WanJuanTtsMusicApiUrl, WanJuanTtsMusicExtractAudio, WanJuanTtsMusicExtractClipId, WanJuanTtsMusicExtractTaskId, WanJuanTtsMusicTaskAudioUrl } from "../components/audio-nodes";
+import { WanJuanSunoHeaders, WanJuanSunoTaskFailed, WanJuanSunoTaskStatus, WanJuanSunoTaskSucceeded, WanJuanTtsMusicApiUrl, WanJuanTtsMusicExtractAudio, WanJuanTtsMusicExtractClipId, WanJuanTtsMusicExtractTaskId, WanJuanTtsMusicTaskAudioUrl } from "../components/audio-nodes";
 import { wanjuanClearProjectAssetBindingsFromData } from "../lib/resource";
 import { wanjuanResetTianjiPortraitBindingForImage } from "../lib/tianji-portrait";
-import { wanjuanBuildTianjiTaskQuery, wanjuanGetSyncedTianjiSeedanceConfig, wanjuanTianjiErrorMessage, wanjuanTianjiFindProgress, wanjuanTianjiFindThumbUrl, wanjuanTianjiFindVideoUrl, wanjuanTianjiRequest, wanjuanTianjiStatus } from "../lib/tianji-api";
+import { wanjuanBuildTianjiTaskQuery, wanjuanGetSyncedTianjiSeedanceConfig, wanjuanTianjiErrorMessage, wanjuanTianjiFindProgress, wanjuanTianjiFindThumbUrl, wanjuanTianjiFindVideoUrl, wanjuanTianjiIsExplicitCancellation, wanjuanTianjiRequest, wanjuanTianjiStatus } from "../lib/tianji-api";
 import { wanjuanTaskUsesSeedanceSlot } from "../lib/video-task";
-import { collectTaskCredentialConfigs, resolveTaskApiCredential, resolveTaskPollUrl } from "../lib/global-config";
-import { failGlobalTaskRefresh } from "../lib/global-tasks";
-import { resolveModelApiBindingIdHelper } from "../lib/model-binding";
+import { collectTaskCredentialConfigs, isTaskCredentialUrlAllowed, resolveSeedanceTaskPollUrl, resolveTaskApiCredential, resolveTaskPollUrl } from "../lib/global-config";
+import { buildMediaApiUrl, resolveModelApiBindingIdHelper } from "../lib/model-binding";
+import { safeGenerationError } from "../lib/custom-task-error";
 declare const chrome: any;
 
 interface UseRefreshGlobalTaskDeps {
@@ -60,25 +60,12 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
 	                  } catch {}
 	                }
 	                let notify = manualRefreshOptions?.silent === true ? () => {} : showToast2;
+	                const unsafeEndpoint = () => notify(`任务查询地址与原 API 配置不一致，已停止刷新，请检查原配置。`);
+	                if (task?.stoppedByUser === true || [`stopped`, `cancelled`, `canceled`].includes(String(task?.status || ``).toLowerCase())) {
+	                  notify(`任务已停止，不会自动回填结果`);
+	                  return;
+	                }
 	                const taskCredentialConfigs = collectTaskCredentialConfigs(apiConfigs, storedGlobalConfigs);
-	                const markRefreshFailed = (message) => {
-	                  updateGlobalTasks((tasks) => failGlobalTaskRefresh(tasks, task.id, message));
-	                  task.nodeId &&
-	                    Send((nodes) =>
-	                      nodes.map((node) =>
-	                        node.id === task.nodeId
-	                          ? {
-	                              ...node,
-	                              data: {
-	                                ...node.data,
-	                                loading: false,
-	                                errorMessage: message,
-	                              },
-	                            }
-	                          : node,
-	                      ),
-	                    );
-	                };
 	                try {
                     if (task.type === `audio` || task.customOutputType === `audio`) {
                       let audioUrl = WanJuanTtsMusicTaskAudioUrl(task);
@@ -173,7 +160,30 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                             node.data?.taskId === task.id ||
                             (task.remoteTaskId && node.data?.remoteTaskId === task.remoteTaskId) ||
                             (refreshedTaskId && node.data?.remoteTaskId === refreshedTaskId);
-                          if (failed) throw Error(payload?.data?.fail_reason || payload?.fail_reason || payload?.message || `Suno 任务失败`);
+                          if (failed) {
+                            const remoteStatus = WanJuanSunoTaskStatus(payload);
+                            const cancelled = /^(CANCELLED|CANCELED|CANCEL)$/.test(remoteStatus);
+                            const definitelyFailed = /^(FAIL|FAILED|FAILURE|ERROR)$/.test(remoteStatus);
+                            if (completed || (!cancelled && !definitelyFailed)) {
+                              notify(`音频任务状态无法确认，请查看任务清单后重试查询`);
+                              return;
+                            }
+                            const safeError = cancelled ? `服务商报告音频任务已取消` : safeGenerationError(payload?.data?.fail_reason || payload?.fail_reason || payload?.message || `Suno 任务失败`, "media");
+                            // A refresh may settle after the user stops a task or
+                            // the node starts another one. Never overwrite either.
+                            updateGlobalTasks((tasks) => tasks.map((current) =>
+                              current.id === task.id && current.remoteTaskId === task.remoteTaskId &&
+                              !current.stoppedByUser && [`running`, `pending`, `failed`].includes(current.status)
+                                ? {...current, status:cancelled ? `cancelled` : `failed`, errorMsg:safeError, updatedAt:Date.now()}
+                                : current));
+                            Send((nodes) => nodes.map((node) =>
+                              node.id === task.nodeId && node.data?.loading === true && !node.data?.manuallyStopped &&
+                              (node.data?.taskId === task.id || node.data?.remoteTaskId === task.remoteTaskId)
+                                ? {...node, data:{...node.data, loading:false, errorMessage:safeError}}
+                                : node));
+                            notify(`音频状态已查询，请查看任务清单`);
+                            return;
+                          }
                           if (refreshedAudioUrl) {
                             (updateGlobalTasks((tasks) =>
                                 tasks.map((task2) =>
@@ -508,10 +518,13 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           task.asyncImageDetailUrl ||
                           (/\/api\/async\/image_gpt$/i.test(imageTaskBaseUrl) ?
                             imageTaskBaseUrl.replace(/\/api\/async\/image_gpt$/i, `/api/async/detail`) :
-                            `${imageTaskBaseUrl}/api/async/detail`),
-                          imageQueryUrl = `${imageDetailUrl}?key=${encodeURIComponent(imageTaskKey)}&id=${encodeURIComponent(task.remoteTaskId)}`,
+                            `${imageTaskBaseUrl}/api/async/detail`);
+                        if (!isTaskCredentialUrlAllowed(imageTaskBaseUrl, imageDetailUrl)) { unsafeEndpoint(); return; }
+                        imageDetailUrl = new URL(imageDetailUrl, imageTaskBaseUrl).toString();
+                        let imageQueryUrl = `${imageDetailUrl}?key=${encodeURIComponent(imageTaskKey)}&id=${encodeURIComponent(task.remoteTaskId)}`,
                           response = await fetch(imageQueryUrl, {
                             method: `GET`,
+                            redirect: `error`,
                             headers: {
                               Authorization: imageTaskKey,
                               "Content-Type": `application/json`,
@@ -525,7 +538,7 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           status = Number(result.data?.status ?? result.status ?? 0),
                           imageUrl = findImageTaskUrl(result.data || result);
                         if (result.code && result.code !== 200) {
-	                          notify(result.msg || `图片刷新失败`);
+	                          notify(safeGenerationError(result.msg || `图片刷新失败`, "media"));
                           return;
                         }
                         if (imageUrl || status === 2) {
@@ -572,18 +585,19 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           return;
                         }
                         if (status === 3) {
+                          const safeError = safeGenerationError(result.data?.message || result.msg || `图片生成失败`, "media");
                           updateGlobalTasks((tasks) =>
                             tasks.map((task2) =>
                               task2.id === task.id ?
                               {
                                 ...task2,
                                 status: `failed`,
-                                errorMsg: result.data?.message || result.msg || `图片生成失败`,
+                                errorMsg: safeError,
                               } :
                               task2,
                             ),
                           );
-	                          notify(result.data?.message || result.msg || `图片生成失败`);
+	                          notify(safeError);
                           return;
                         }
                         (updateGlobalTasks((tasks) =>
@@ -616,7 +630,22 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                         videoUrl = wanjuanTianjiFindVideoUrl(result),
                         thumbUrl = wanjuanTianjiFindThumbUrl(result),
                         progress = wanjuanTianjiFindProgress(result);
-                      if ([`succeeded`, `completed`, `complete`, `success`, `done`].includes(status) || videoUrl) {
+                      if (status === `failed` || wanjuanTianjiIsExplicitCancellation(result)) {
+                        const cancelled = wanjuanTianjiIsExplicitCancellation(result);
+                        const message = cancelled ? `服务商报告视频任务已取消` : safeGenerationError(wanjuanTianjiErrorMessage(result), "media");
+                        updateGlobalTasks((tasks) => tasks.map((current) =>
+                          current.id === task.id && current.stoppedByUser !== true && ![`stopped`, `cancelled`, `canceled`].includes(String(current.status || ``).toLowerCase())
+                            ? {...current, status:cancelled ? `cancelled` : `failed`, errorMsg:message}
+                            : current));
+                        task.nodeId && Send((nodes) => nodes.map((node) =>
+                          node.id === task.nodeId && node.data?.loading === true && !node.data?.manuallyStopped &&
+                          (node.data?.taskId === task.id || node.data?.seedanceTaskId === task.id || node.data?.tianjiExecuteId === task.id)
+                            ? {...node, data:{...node.data, loading:false, errorMessage:message}}
+                            : node));
+                        notify(`即梦天玑任务状态已查询，请查看任务清单`);
+                        return;
+                      }
+                      if ([`succeeded`, `completed`, `complete`, `success`, `done`].includes(status)) {
                         if (!videoUrl) {
                           notify(`即梦天玑任务已完成，但接口没有返回视频地址`);
                           return;
@@ -660,22 +689,6 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           notify(`即梦天玑任务已完成，结果已拉回`));
                         return;
                       }
-                      if (status === `failed`) {
-                        let message = wanjuanTianjiErrorMessage(result);
-                        (updateGlobalTasks((tasks) =>
-                            tasks.map((taskItem) =>
-                              taskItem.id === task.id ?
-                              {
-                                ...taskItem,
-                                status: `failed`,
-                                errorMsg: message,
-                              } :
-                              taskItem,
-                            ),
-                          ),
-                          notify(message));
-                        return;
-                      }
                       (updateGlobalTasks((tasks) =>
                           tasks.map((taskItem) =>
                             taskItem.id === task.id ?
@@ -692,15 +705,7 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                       return;
                     }
                     let requestProfile = task.requestProfile || {},
-                      buildApiUrl = (baseUrl, path) => {
-                        let base = String(baseUrl || ``).replace(/\/$/, ``),
-                          path2 = String(path || ``).trim();
-                        return path2 ?
-                          /^https?:\/\//i.test(path2) ?
-                          path2 :
-                          `${base}/${path2.replace(/^\/+/, ``)}` :
-                          base;
-                      },
+                      buildApiUrl = buildMediaApiUrl,
                       taskIdForRequest = task.remoteTaskId || task.taskId || task.id,
                       replaceTaskPath = (pathTemplate, taskId) => {
                         let taskUrlTemplate = String(pathTemplate || `/v1/videos/{taskId}`);
@@ -745,22 +750,22 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                       (isXpclawSoraCompatTask ? `/v1/videos/{taskId}/content` : ``),
                       taskKey = videoTaskCredential.key;
                     if (videoTaskCredential.missingOriginalConfig) {
-                      let message = `任务原始 API 配置已不存在，无法安全刷新；请恢复对应全局配置和 Key 后重试`;
-                      markRefreshFailed(message);
-                      notify(message);
+                      notify(`任务原始 API 配置已不存在，无法安全刷新；请恢复对应全局配置和 Key 后重试。当前仍显示上次记录，实际状态未确认`);
                       return;
                     }
                     const storedPollUrl = String(requestProfile.pollUrl || ``).trim(),
                       pollUrl = isSeedanceTask
-                        ? `${baseUrl}/contents/generations/tasks/${taskIdForRequest}`
+                        ? resolveSeedanceTaskPollUrl(baseUrl, taskIdForRequest)
                         : resolveTaskPollUrl({
                             baseUrl,
                             pollPath: requestProfile.pollPath,
                             storedPollUrl,
                             taskId: taskIdForRequest,
                           });
+                    if (!isTaskCredentialUrlAllowed(baseUrl, pollUrl)) { unsafeEndpoint(); return; }
                     const response = await fetch(
-                      pollUrl, {
+                      new URL(pollUrl, baseUrl).toString(), {
+                        redirect: `error`,
                         headers: {
                           Authorization: `Bearer ${taskKey}`
                         },
@@ -911,7 +916,7 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                               }
                             }
                           } catch (error) {
-                            console.warn(`Failed to query Sora-compatible video status`, error);
+                            console.warn(`Failed to query Sora-compatible video status.`);
                           }
                         if (
                           !videoUrl &&
@@ -947,8 +952,12 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                               }
                             }
                           } catch (error) {
-                            console.warn(`Failed to fetch Seedance video content`, error);
+                            console.warn(`Failed to fetch Seedance video content.`);
                           }
+                        [`canceled`, `cancelled`].includes(status2) ?
+                          ((status = `cancelled`), (errorMsg = `服务商报告视频任务已取消`)) :
+                        [`failed`, `failure`, `fail`, `error`, `expired`, `rejected`].includes(status2) ?
+                          ((status = `failed`), (errorMsg = seedanceItemErrorMessage || seedanceItem?.message || data.error?.message || data.data?.error?.message || data.message || data.error?.code || `视频生成失败`)) :
                         [
                           `succeeded`,
                           `completed`,
@@ -957,24 +966,6 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           `done`,
                         ].includes(status2) || videoUrl ?
                           ((isCompleted = true), (status = `completed`), (progress = 100), (resultUrl = videoUrl), (thumbnailUrl = thumbnailUrl2)) :
-                          [
-	                            `failed`,
-	                            `fail`,
-	                            `error`,
-                            `expired`,
-                            `canceled`,
-                            `cancelled`,
-                            `rejected`,
-                          ].includes(status2) ?
-	                          ((status = `failed`),
-	                            (errorMsg =
-	                              seedanceItemErrorMessage ||
-	                              seedanceItem?.message ||
-	                              data.error?.message ||
-	                              data.data?.error?.message ||
-                              data.message ||
-                              data.error?.code ||
-                              `视频生成失败`)) :
 	                          ((status = `running`),
 	                            (progress =
 	                              seedanceItem?.progress !== undefined &&
@@ -1051,15 +1042,17 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           data.data?.file_id ||
                           data.output?.file_id ||
                           data.result?.file_id;
-                        if (!videoUrl && fileId)
+                        if (!videoUrl && fileId && ![`failed`, `failure`, `error`, `fail`, `expired`, `canceled`, `cancelled`, `rejected`].includes(statusText))
                           try {
                             let apiUrl = buildApiUrl(
-                                task.apiBaseUrl || videoTaskConfig?.url || videoApiUrl,
+                                baseUrl,
                                 `/v1/files/retrieve`,
                               ),
                               requestUrl = new URL(apiUrl);
+                            if (!isTaskCredentialUrlAllowed(baseUrl, requestUrl.toString())) { unsafeEndpoint(); return; }
                             requestUrl.searchParams.set(`file_id`, fileId);
                             let response2 = await fetch(requestUrl.toString(), {
+                              redirect: `error`,
                               headers: {
                                 Authorization: `Bearer ${taskKey}`
                               },
@@ -1073,15 +1066,17 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                                 ) || videoUrl;
                             }
                           } catch (error) {
-                            console.warn(`Failed to retrieve video file by file_id`, error);
+                            console.warn(`Failed to retrieve video file by file_id.`);
                           }
-                        if (!videoUrl && contentPathTemplate)
+                        if (!videoUrl && contentPathTemplate && ![`failed`, `failure`, `error`, `fail`, `expired`, `canceled`, `cancelled`, `rejected`].includes(statusText))
                           try {
                             let apiUrl = buildApiUrl(
                                 baseUrl,
                                 replaceTaskPath(contentPathTemplate, taskIdForRequest),
-                              ),
-                              response2 = await fetch(apiUrl, {
+                              );
+                            if (!isTaskCredentialUrlAllowed(baseUrl, apiUrl)) { unsafeEndpoint(); return; }
+                            let response2 = await fetch(apiUrl, {
+                                redirect: `error`,
                                 headers: {
                                   Authorization: `Bearer ${taskKey}`
                                 },
@@ -1091,11 +1086,12 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                               videoUrl = URL.createObjectURL(blob);
                             }
                           } catch (error) {
-                            console.warn(`Failed to retrieve video content by contentPath`, error);
+                            console.warn(`Failed to retrieve video content by contentPath.`);
                           }
-                        if ([`completed`, `complete`, `success`, `succeeded`, `done`].includes(statusText) || videoUrl)
-                          ((isCompleted = true), (status = `completed`), (progress = 100), (resultUrl = videoUrl), (thumbnailUrl = thumbnailUrl2));
-                        else if ([`failed`, `error`, `fail`, `expired`, `canceled`, `cancelled`, `rejected`].includes(statusText)) {
+                        if ([`canceled`, `cancelled`].includes(statusText)) {
+                          status = `cancelled`;
+                          errorMsg = `服务商报告视频任务已取消`;
+                        } else if ([`failed`, `failure`, `error`, `fail`, `expired`, `rejected`].includes(statusText)) {
                           status = `failed`;
                           let errorMsg2 = `视频生成失败`;
                           (data.error &&
@@ -1103,7 +1099,9 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                               (errorMsg2 = data.error) :
                               data.error.message && (errorMsg2 = data.error.message)),
                             (errorMsg = errorMsg2));
-                        } else
+                        } else if ([`completed`, `complete`, `success`, `succeeded`, `done`].includes(statusText) || videoUrl)
+                          ((isCompleted = true), (status = `completed`), (progress = 100), (resultUrl = videoUrl), (thumbnailUrl = thumbnailUrl2));
+                        else
                           ((status = `running`),
                             (errorMsg = undefined),
                             (progress =
@@ -1115,18 +1113,24 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                       }
                       (updateGlobalTasks((tasks) =>
                           tasks.map((task2) =>
-                            task2.id === task.id ?
+                            task2.id === task.id && task2.stoppedByUser !== true && ![`stopped`, `cancelled`, `canceled`].includes(String(task2.status || ``).toLowerCase()) ?
                             {
                               ...task2,
                               status: status,
                               progress: progress,
-                              errorMsg: errorMsg,
+                              errorMsg: status === `failed` ? safeGenerationError(errorMsg, "media") : errorMsg,
                               resultUrl: resultUrl,
                               thumbnailUrl: thumbnailUrl,
                             } :
                               task2,
                           ),
                         ),
+                        [`failed`, `cancelled`].includes(status) && task.nodeId &&
+                        Send((nodes) => nodes.map((node) =>
+                          node.id === task.nodeId && node.data?.loading === true && !node.data?.manuallyStopped &&
+                          (node.data?.taskId === task.id || node.data?.seedanceTaskId === task.id)
+                            ? {...node, data:{...node.data, loading:false, errorMessage:status === `failed` ? safeGenerationError(errorMsg, "media") : `服务商报告视频任务已取消`}}
+                            : node)),
                         isCompleted &&
                         resultUrl &&
                         (task.nodeId &&
@@ -1153,14 +1157,13 @@ export function use_refreshGlobalTask(deps: UseRefreshGlobalTaskDeps) {
                           thumbnailUrl && addResource(thumbnailUrl, `image`, `generated`)),
 	                        notify(isCompleted ? resultUrl ? `任务已完成，结果已拉回` : `任务已完成，但接口没有返回视频地址` : `状态已刷新`));
 	                    } else if (response.status === 401 || response.status === 403) {
-	                      let message = `任务查询认证失败（${response.status}），请恢复提交该任务时使用的全局配置和 Key 后重试`;
-	                      markRefreshFailed(message);
-	                      notify(message);
+	                      notify(`任务查询认证失败（${response.status}），请恢复提交该任务时使用的全局配置和 Key 后重试。当前仍显示上次记录，实际状态未确认`);
 	                    } else notify(`刷新失败: ${response.status}`);
 	                } catch (error) {
 	                  let message = String(error?.message || error || `未知错误`);
-	                  /任务原始 API 配置已不存在/.test(message) && markRefreshFailed(message);
-	                  notify(`网络错误: ${message}`);
+	                  if (message === `任务原始 API 配置已不存在，无法安全刷新；请恢复对应全局配置后重试`) {
+	                    notify(`${message}。当前仍显示上次记录，实际状态未确认`);
+	                  } else notify(safeGenerationError(error, "media"));
 	                }
 	              };
   return { refreshGlobalTask };

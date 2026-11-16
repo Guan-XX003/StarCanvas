@@ -6,6 +6,7 @@ import { memo as reactMemo, useEffect, useMemo, useRef, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 import { parseSeedanceList } from "../lib/model-binding";
 import { resolveMediaModelContract } from "../lib/media-model-contract";
+import { CANVAS_IMAGE_RESOLUTIONS, CANVAS_IMAGE_RATIOS } from "../lib/canvas-plan-capabilities";
 import localforage from "localforage";
 import { NodeResizer, Position, useNodeConnections, useNodesData, useNodesState, useReactFlow } from "@xyflow/react";
 import { ArrowUp, CircleAlert, Crop, Download, PenLine, RefreshCw, ShieldCheck, Square, Type, Upload, ZoomIn } from "lucide-react";
@@ -63,16 +64,7 @@ export const WanJuanPromptNode = reactMemo(({
 	      fileInputRef = useRef(null),
 	      wanjuanImageCompatResolutionOptions = (data.imageCompatResolutions ?
 	        parseSeedanceList(data.imageCompatResolutions) :
-	        [
-	          `1024x1024`,
-	          `1280x720`,
-	          `720x1280`,
-	          `2048x2048`,
-	          `2560x1440`,
-	          `1440x2560`,
-	          `3840x2160`,
-	          `2160x3840`,
-	        ]).map((url) => String(url || ``).trim()).filter((e) => /^\d{2,5}x\d{2,5}$/i.test(e)),
+        CANVAS_IMAGE_RESOLUTIONS).map((url) => String(url || ``).trim()).filter((e) => /^\d{2,5}x\d{2,5}$/i.test(e)),
       wanjuanActiveImageResolution =
         imageResolution && wanjuanImageCompatResolutionOptions.includes(imageResolution) ?
         imageResolution :
@@ -917,17 +909,7 @@ export const WanJuanPromptNode = reactMemo(({
                                   }),
                                   jsx(`div`, {
                                     className: `flex flex-wrap gap-1.5`,
-                                    children: [
-                                      `Auto`,
-                                      `21:9`,
-                                      `16:9`,
-                                      `3:2`,
-                                      `4:3`,
-                                      `1:1`,
-                                      `3:4`,
-                                      `2:3`,
-                                      `9:16`,
-                                    ].map((aspectRatio2) =>
+                                    children: CANVAS_IMAGE_RATIOS.map((aspectRatio2) =>
                                       jsx(
                                         `button`, {
                                           className: `px-3 py-1.5 text-[11px] rounded-md border transition-colors wanjuan-node-popover-option ${aspectRatio === aspectRatio2 ? `bg-blue-600 border-blue-400 text-white wanjuan-node-popover-option-active` : `bg-[#1a1a1a] border-transparent text-gray-400 hover:bg-[#2a2a2a]`}`,

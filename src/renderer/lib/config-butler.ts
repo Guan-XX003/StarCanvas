@@ -254,6 +254,23 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
         apiUrl = String(modelInfo.apiUrl || ``).trim().toLowerCase(),
         category = normalizeModelCategory(modelInfo.category || normalizedModel.category) || normalizedModel.category || ``,
         validationNotes = [];
+      const fillOpenAiVideoDefaults = () => {
+        const hasSoraHint = /sora|openai/.test(modelName) || /api\.openai\.com|\/v1\/videos/i.test(apiUrl) ||
+          /\/v1\/videos/i.test(String(normalizedModel.submitPath || normalizedModel.pollPath || ``));
+        const lconai = /(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl);
+        if (!normalizedModel.submitPath && !lconai && (hasSoraHint || normalizedModel.requestType === `openai-video`)) {
+          normalizedModel.submitPath = `/v1/videos`;
+          validationNotes.push(`已补充缺省的 OpenAI 视频提交路径`);
+        }
+        // A custom route may have a different task API. Never invent or
+        // overwrite its polling/content paths based on the model name alone.
+        const canonicalSubmit = /^\/v1\/videos\/?$/i.test(String(normalizedModel.submitPath || ``).trim());
+        if (canonicalSubmit && !normalizedModel.pollPath) normalizedModel.pollPath = `/v1/videos/{taskId}`;
+        if (canonicalSubmit && hasSoraHint && normalizedModel.contentPath === undefined &&
+            /^\/v1\/videos\/\{taskId\}\/?$/i.test(String(normalizedModel.pollPath || ``).trim())) {
+          normalizedModel.contentPath = `/v1/videos/{taskId}/content`;
+        }
+      };
       return (
         (normalizedModel.category = category || normalizedModel.category),
         (normalizedModel.fieldMapping = butlerCloneObject(normalizedModel.fieldMapping)),
@@ -349,18 +366,7 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
         category === `video` &&
         (String(normalizedModel.requestType || ``).trim() === `openai-video` ||
           String(normalizedModel.requestType || ``).trim() === `multipart-video`) &&
-        ((/sora|openai/.test(modelName) ||
-            /api\.openai\.com|\/v1\/videos/i.test(apiUrl) ||
-            /\/v1\/videos/i.test(String(normalizedModel.submitPath || normalizedModel.pollPath || ``))) &&
-          ((normalizedModel.submitPath = `/v1/videos`),
-            (normalizedModel.pollPath = `/v1/videos/{taskId}`),
-            normalizedModel.contentPath === undefined && (normalizedModel.contentPath = `/v1/videos/{taskId}/content`),
-            validationNotes.push(`已按 OpenAI/Sora 视频接口修正 submitPath、pollPath、contentPath`)),
-          normalizedModel.requestType === `openai-video` &&
-          !normalizedModel.submitPath &&
-          !/(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl) &&
-          (normalizedModel.submitPath = `/v1/videos`),
-          normalizedModel.pollPath || (normalizedModel.pollPath = `/v1/videos/{taskId}`),
+        (fillOpenAiVideoDefaults(),
           (normalizedModel.fieldMapping = {
             model: `model`,
             prompt: `prompt`,
@@ -399,7 +405,8 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
         category === `video` &&
         (String(normalizedModel.requestType || ``).trim() === `json-video`) &&
         ((normalizedModel.submitPath = normalizedModel.submitPath || `/v1/video/create`),
-          (normalizedModel.pollPath = normalizedModel.pollPath || `/v1/video/query?id={taskId}`),
+          (!normalizedModel.pollPath && /^\/v1\/video\/create\/?$/i.test(String(normalizedModel.submitPath).trim()) &&
+            (normalizedModel.pollPath = `/v1/video/query?id={taskId}`)),
           (normalizedModel.fieldMapping = {
             model: `model`,
             prompt: `prompt`,
@@ -425,7 +432,7 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
               `url`,
             ]),
           })),
-        category === `video` &&
+        !modelInfo.preserveExplicitProtocol && category === `video` &&
         (String(normalizedModel.requestType || ``).trim() === `openai-video` || String(normalizedModel.requestType || ``).trim() === `json-video`) &&
         (/^wan/i.test(modelName) || /aigc\.x-see\.cn|x-see\.cn/.test(apiUrl)) &&
         (normalizedModel.fieldValueTypes = {
@@ -433,7 +440,7 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
           seconds: `string`,
           duration: `string`,
         }),
-        category === `video` &&
+        !modelInfo.preserveExplicitProtocol && category === `video` &&
         /^veo/i.test(modelName) &&
         /aigc\.x-see\.cn|x-see\.cn/i.test(apiUrl) &&
         /(?:^|[-_])(portrait|landscape|fl|frame|reverse|gif|hd|4k|pro)(?:[-_]|$)/i.test(modelName) &&
@@ -464,7 +471,7 @@ export const finalizeButlerProtocolConfig = (model, modelInfo: any = {}) => {
             ...(normalizedModel.parameterAdapter || {}),
           }),
           validationNotes.push(`已按 X-See Veo 帧转/参考视频模型规则启用 input_reference 并要求参考图`)),
-        category === `video` &&
+        !modelInfo.preserveExplicitProtocol && category === `video` &&
         /^veo/i.test(modelName) &&
         /(^|\.)lconai\.com|\/\/[nsv]\.lconai\.com/i.test(apiUrl) &&
         ((normalizedModel.requestType = `multipart-video`),
@@ -688,14 +695,16 @@ export const extractButlerCurlExamples = (rawText) => {
           extractMethod = (curl) => {
             let match = curl.match(/(?:-X|--request)\s+['"]?([A-Z]+)['"]?/i);
             if (match) return match[1].toUpperCase();
-            return /(?:-d|--data|--data-raw|--data-binary)\s/i.test(curl) ? `POST` : `GET`;
+            if (/(?:^|\s)(?:-G|--get)(?=\s|$)/.test(curl)) return `GET`;
+            if (/(?:^|\s)(?:-I|--head)(?=\s|$)/.test(curl)) return `HEAD`;
+            return /(?:^|\s)(?:-d(?:\s|(?=['"@]))|--data(?:-raw|-binary|-urlencode)?(?:\s|=)|--json(?:\s|=)|-F(?:\s|(?=['"]))|--form(?:\s|=))/i.test(curl) ? `POST` : `GET`;
           },
           extractUrl = (curl) => {
             let match = curl.match(/https?:\/\/[^\s'"`]+/i) || curl.match(/['"]((?:\/v\d+|\/api)[^'"]+)['"]/i);
             return match ? String(match[1] || match[0]).replace(/[\\,;]+$/g, ``) : ``;
           },
           extractBodyKeys = (curl) => {
-            let match = curl.match(/(?:-d|--data|--data-raw|--data-binary)\s+(['"])([\s\S]*?)\1/i);
+            let match = curl.match(/(?:-d\s*|--(?:data|data-raw|data-binary|json)(?:\s+|=))(['"])([\s\S]*?)\1/i);
             return match ? extractButlerJsonKeys(match[2]) : [];
           };
         for (let match of text.matchAll(curlPattern)) {
@@ -1044,7 +1053,7 @@ ${curlText}`,
           protocolName = ``,
           hasGenerationsPath = /\/v1\/video\/generations\b/i.test(combinedText),
           hasVideosPath = /\/v1\/videos\b/i.test(combinedText);
-        if (category === `video` && /^veo/i.test(modelName) && hasGenerationsPath && hasVideosPath) {
+        if (!modelInfo.preserveExplicitProtocol && category === `video` && /^veo/i.test(modelName) && hasGenerationsPath && hasVideosPath) {
           let hasVariantSuffix = /-(portrait|landscape|pro|gif|hd|4k|reverse|sora)\b/i.test(modelName),
             submitPath = hasVariantSuffix ? `/v1/videos` : `/v1/video/generations`;
           ((config.requestType = `multipart-video`),
@@ -1073,7 +1082,7 @@ ${curlText}`,
             (protocolName = hasVariantSuffix ? `X-See Veo 逆向` : `X-See Veo 普通`),
             notes.push(`已按文档多视频端点规则拆分 Veo 协议：${submitPath}，并省略固定时长字段`));
         }
-        if (category === `video` && /^veo/i.test(modelName) && /aigc\.x-see\.cn|x-see\.cn/i.test(String(modelInfo.apiUrl || ``)) && /(?:^|[-_])(portrait|landscape|fl|frame|reverse|gif|hd|4k|pro)(?:[-_]|$)/i.test(modelName)) {
+        if (!modelInfo.preserveExplicitProtocol && category === `video` && /^veo/i.test(modelName) && /aigc\.x-see\.cn|x-see\.cn/i.test(String(modelInfo.apiUrl || ``)) && /(?:^|[-_])(portrait|landscape|fl|frame|reverse|gif|hd|4k|pro)(?:[-_]|$)/i.test(modelName)) {
           ((config.requestType = `multipart-video`),
             (config.submitPath = `/v1/videos`),
             (config.pollPath = `/v1/videos/{taskId}`),
@@ -1357,13 +1366,15 @@ export const validateAndRepairConfigButlerResult = (baseModel, options: any = {}
 	            apiConfigName: model.apiConfig?.name || options.apiConfigName || ``,
 	          }),
 	          protocolConfig = normalizeProtocolConfig(protocol.config, category),
+	          preserveExplicitProtocol = options.preserveExplicitProtocol === true && category === `video` &&
+	            !!String(protocolConfig.submitPath || ``).trim() && !!String(protocolConfig.pollPath || ``).trim(),
 	          providerPackage = matchWanJuanProviderProtocolPackage({
 	            modelName: modelName,
 	            category: category,
 	            apiUrl: apiUrl,
 	            apiConfigName: model.apiConfig?.name || options.apiConfigName || ``,
 	          });
-	        providerPackage &&
+	        !preserveExplicitProtocol && providerPackage &&
 	          (!model.protocol?.config ||
 	            protocolConfig.requestType === `custom` ||
 	            (providerPackage.config?.requestType &&
@@ -1387,6 +1398,7 @@ export const validateAndRepairConfigButlerResult = (baseModel, options: any = {}
             modelName: modelName,
             apiUrl: apiUrl,
             category: category,
+            preserveExplicitProtocol,
           }),
           documentedRequestFields = getButlerDocFieldsForPath(options.toolContext, finalConfig.submitPath),
           documentedFieldTypes = getButlerDocFieldTypesForPath(options.toolContext, finalConfig.submitPath),
@@ -1396,18 +1408,20 @@ export const validateAndRepairConfigButlerResult = (baseModel, options: any = {}
             apiUrl: apiUrl,
             category: category,
             toolContext: options.toolContext || null,
+            preserveExplicitProtocol,
           });
         finalConfig = learnedResult.config;
+        if (preserveExplicitProtocol) finalConfig.__wanjuanPreferExplicitProtocol = true;
         category === `video` && !finalConfig.parameterMode && (finalConfig.parameterMode = wanjuanResolveVideoParameterMode(finalConfig));
         let documentedReferenceField = String(finalConfig.fieldMapping?.referenceImage || ``).trim(),
           documentedReferenceType = String(documentedFieldTypes[documentedReferenceField] || ``).toLowerCase();
-        category === `video` &&
+        !preserveExplicitProtocol && category === `video` &&
           finalConfig.requestType === `openai-video` &&
           !hasDocumentedReferenceShape &&
           (String(finalConfig.fieldMapping?.referenceImage || ``).trim() || (finalConfig.fieldMapping = { ...(finalConfig.fieldMapping || {}), referenceImage: `input_reference` }),
             (finalConfig.referenceImageAsArray = false),
             (finalConfig.referenceImageItemShape = `string`));
-        category === `video` && documentedReferenceType &&
+        !preserveExplicitProtocol && category === `video` && documentedReferenceType &&
           ((finalConfig.referenceImageMode = `url`),
             (finalConfig.referenceImageAsArray = documentedReferenceType === `array`),
             (finalConfig.referenceImageItemShape = `string`));

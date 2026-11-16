@@ -9,12 +9,17 @@ export function WanJuanConfigButlerSettingsPanel({
   applyConfigButlerResult,
   applyStoredGlobalConfig,
   configButlerAgentExpanded,
+  configButlerUseAssistant,
+  setConfigButlerUseAssistant,
+  appLanguage,
   configButlerApiKey,
   configButlerApiUrl,
   configButlerBatchItems,
   configButlerBatchLoading,
   configButlerDocUrl,
   configButlerLoading,
+  configButlerResultStale,
+  setConfigButlerResultStale,
   configButlerMode,
   configButlerModel,
   configButlerProtocol,
@@ -48,6 +53,20 @@ export function WanJuanConfigButlerSettingsPanel({
   return jsxs(`div`, {
 	                                className: `px-4 pt-4 space-y-4 wanjuan-settings-card-body wanjuan-config-butler-body`,
 	                                children: [
+	                                  jsxs(`div`, {
+	                                    className: `wanjuan-settings-card px-3 py-3 rounded-xl`,
+	                                    children: [
+	                                      jsx(`div`, { className: `text-xs wanjuan-settings-muted`, children: appLanguage === `en-US` ? `Single-model analysis source` : appLanguage === `zh-TW` ? `單一模型分析來源` : `单模型分析来源` }),
+	                                      jsx(`button`, {
+	                                        type: `button`,
+	                                        className: `wanjuan-settings-button wanjuan-settings-chip-button px-3 py-2 mt-2 rounded-xl`,
+	                                        onClick: () => { if (!configButlerUseAssistant) setConfigButlerMode(`single`); setConfigButlerUseAssistant(!configButlerUseAssistant); },
+	                                        'aria-pressed': !!configButlerUseAssistant,
+	                                        children: configButlerUseAssistant ? (appLanguage === `en-US` ? `Main assistant (click to use manual model)` : appLanguage === `zh-TW` ? `主智慧助手（點擊切回手動模型）` : `主智能体（点击切回手动模型）`) : (appLanguage === `en-US` ? `Manual model (click to use main assistant)` : appLanguage === `zh-TW` ? `手動模型（點擊使用主智慧助手）` : `手动模型（点击使用主智能体）`),
+	                                      }),
+	                                      configButlerUseAssistant && jsx(`p`, { className: `text-xs wanjuan-settings-muted mt-2`, children: appLanguage === `en-US` ? `The documentation link is sent to third-party reader r.jina.ai. The summary, model name and target API address are sent to DeepSeek and may incur charges. Do not submit private data. Batch analysis still uses the manual model.` : appLanguage === `zh-TW` ? `文件連結會傳送至第三方轉讀服務 r.jina.ai；文件摘要、模型名稱和目標 API 地址會傳送至 DeepSeek，可能產生費用。請勿提供私密資料。批次分析仍使用手動模型。` : `文档链接会发送至第三方转读服务 r.jina.ai；文档摘要、模型名称和目标 API 地址会发送至 DeepSeek，可能产生费用。请勿提供私密数据。批量分析仍使用手动模型。` }),
+	                                    ],
+	                                  }),
 	                                  false &&
 	                                  configButlerMode === `batch` &&
 	                                  jsxs(`div`, {
@@ -505,7 +524,9 @@ export function WanJuanConfigButlerSettingsPanel({
 	                                        children: [
 	                                          jsx(`button`, {
 	                                            type: `button`,
+	                                            disabled: configButlerLoading || configButlerResultStale || !String(configButlerResultText || ``).trim(),
 	                                            onClick: () => {
+	                                              if (configButlerLoading || configButlerResultStale) return;
 	                                              try {
                                                 let jsonBlock = extractJsonBlock(
                                                   configButlerResultText,
@@ -513,11 +534,11 @@ export function WanJuanConfigButlerSettingsPanel({
                                                 applyConfigButlerResult(jsonBlock);
                                               } catch (error) {
                                                 showToast2(
-                                                  `配置管家结果格式不正确：${error.message}`,
+                                                  `配置未应用：${error.message}`,
                                                 );
                                               }
 	                                            },
-	                                            className: `px-4 py-2 rounded-lg bg-[#222] text-gray-200 text-xs font-medium hover:bg-[#2a2a2a] transition-colors`,
+	                                            className: `px-4 py-2 rounded-lg bg-[#222] text-gray-200 text-xs font-medium hover:bg-[#2a2a2a] disabled:opacity-50 transition-colors`,
 	                                            children: `应用到当前设置`,
 	                                          }),
 	                                          jsx(WanJuanConfigButlerHelp, {
@@ -540,6 +561,12 @@ export function WanJuanConfigButlerSettingsPanel({
 	                                  configButlerMode === `single` &&
 	                                  jsxs(`div`, {
 	                                    children: [
+	                                      configButlerResultStale && String(configButlerResultText || ``).trim() && jsxs(`div`, {
+	                                        role: `status`,
+	                                        className: `mb-2 text-xs wanjuan-settings-muted`,
+	                                        children: [appLanguage === `en-US` ? `The latest analysis did not complete. The previous result is retained for review. ` : appLanguage === `zh-TW` ? `最新分析未完成，已保留先前結果供核對。` : `最新分析未完成，已保留先前结果供核对。`,
+	                                          jsx(`button`, {type:`button`, disabled:configButlerLoading, className:`underline`, onClick:() => setConfigButlerResultStale(false), children:appLanguage === `en-US` ? `I reviewed the previous result` : appLanguage === `zh-TW` ? `我已核對，使用先前結果` : `我已核对，使用先前结果`})],
+	                                      }),
 	                                      jsx(`label`, {
 	                                        className: `block text-xs font-medium text-gray-500 mb-2`,
 	                                        children: `配置管家输出（可手动微调后应用）`,

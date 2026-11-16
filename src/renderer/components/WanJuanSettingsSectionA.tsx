@@ -52,6 +52,7 @@ export function WanJuanSettingsSectionA(props: any) {
   }, [appLanguage, activeView, agentConfigOpen, selectedAgentId, selectedAgentMessages.length, filteredAgentItems.length]);
   return jsxs(`div`, {
               ref: agentPageRef,
+              "data-wanjuan-assistant-view": `agents`,
               className: `absolute inset-0 grid min-w-0 overflow-hidden wanjuan-agent-page ${activeView === `agents` ? `visible z-10` : `invisible -z-10`}`,
               style: {
                 gridTemplateColumns: `280px minmax(0, 1fr)`,
@@ -72,6 +73,11 @@ export function WanJuanSettingsSectionA(props: any) {
                     transition: `filter 180ms ease, transform 180ms ease`,
                   },
                   children: [
+                    props.onOpenAssistantWorkbench && jsx(`button`, {
+                      type:`button`, className:`wj-assistant-legacy-return`,
+                      onClick:props.onOpenAssistantWorkbench,
+                      children:appLanguage === `en-US` ? `Assistant workbench` : appLanguage === `zh-TW` ? `助手工作台` : `助手工作台`,
+                    }),
                     jsxs(`div`, {
                       className: `h-16 px-4 flex items-center`,
                       children: [

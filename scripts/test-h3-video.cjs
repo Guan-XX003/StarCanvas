@@ -97,6 +97,16 @@ async function runCase({
   bindingModel,
   nodeProtocolBindings,
   protocolRegistry,
+  nodeType = 'videoNode',
+  tianjiMode = false,
+  tianjiGenerationMode,
+  tianjiStaleStop = false,
+  tianjiReboundNode = false,
+  execution,
+  nodeData = {},
+  tianjiConfig = {},
+  tianjiStored = {},
+  secondImage = false,
 } = {}) {
   const resolvedProfileName = profileName === undefined
     ? catalog.WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS[model]
@@ -108,8 +118,10 @@ async function runCase({
     selectedModel: model,
     videoModel: model,
     selectedApiConfigId,
+    ...(tianjiMode ? {seedanceMode:'tianji',tianjiSeedanceModel:'fixture-model',tianjiSelectedModel:'fixture-model',...(tianjiGenerationMode?{tianjiSeedanceGenerationMode:tianjiGenerationMode}:{})} : {}),
     ...(nodeProtocolBindings ? { videoModelProtocolBindings: nodeProtocolBindings } : {}),
     ...(previousResult ? { videoUrl: 'https://fixture.invalid/previous-result.mp4', resultData: { url: 'https://fixture.invalid/previous-result.mp4' } } : {}),
+    ...nodeData,
   };
   const contextFor = (kind) => kind === 'video'
     ? { kind: 'video', url: 'data:video/mp4;base64,aGVsbG8=' }
@@ -117,13 +129,14 @@ async function runCase({
       ? { kind: 'audio', url: 'data:audio/mpeg;base64,aGVsbG8=' }
       : { kind: 'image', url: 'data:image/png;base64,aGVsbG8=' };
   if (selectedContextKind) targetData.selectedContextResources = [contextFor(selectedContextKind)];
-  let nodes = [{ id: 'video-test', type: 'videoNode', data: targetData }];
+  let nodes = [{ id: 'video-test', type: nodeType, data: targetData }];
   let edges = [];
   const media = mediaFixture(mediaKind, { imageUrl: connectedImageUrl, staleOriginalImageUrl });
   if (media) {
     nodes.push(media.node);
     edges.push(media.edge);
   }
+  if(secondImage){nodes.push({id:'second-image-source',type:'imageNode',data:{imageUrl:'data:image/png;base64,c2Vjb25k',mediaKind:'image'}});edges.push({id:'second-image-edge',source:'second-image-source',target:'video-test'});}
   let refNodes = nodes;
   if (staleContextKind) {
     refNodes = nodes.map((node) => node.id === 'video-test'
@@ -133,6 +146,7 @@ async function runCase({
   let tasks = [];
   const requests = [];
   const notices = [];
+  const taskSnapshots = [];
   const generatedAssets = [];
   const nodesRef = { current: refNodes };
   let stored = { nodes };
@@ -148,9 +162,12 @@ async function runCase({
   }
   global.fetch = async (url, init = {}) => {
     const requestUrl = String(url);
-    assert.ok(requestUrl.includes('fixture'), `external network forbidden: ${requestUrl}`);
+    assert.ok(requestUrl.includes('fixture') || ['ark.cn-beijing.volces.com', 'aigc.x-see.cn'].includes(new URL(requestUrl).hostname), `unexpected mocked host: ${requestUrl}`);
     requests.push({ url: requestUrl, init });
-    if (init.method === 'POST') return Response.json(submitPayload);
+    if (tianjiMode && requests.length === 1) return Response.json({code:200,data:{execute_id:'fixture-task'}});
+    if (tianjiMode && tianjiStaleStop){tasks=tasks.map(t=>({...t,status:'failed',stoppedByUser:true,errorMsg:'已取消'}));nodes=nodes.map(n=>({...n,data:{...n.data,loading:false,manuallyStopped:true,errorMessage:'已取消'}}));nodesRef.current=nodes;stored={nodes};}
+    if (tianjiMode && tianjiReboundNode){nodes=nodes.map(n=>({...n,data:{...n.data,seedanceTaskId:'new-task',tianjiExecuteId:'new-task',loading:true}}));nodesRef.current=nodes;stored={nodes};}
+    if (!tianjiMode && init.method === 'POST') return Response.json(submitPayload);
     if (requestUrl.includes('/v1/files/retrieve')) {
       return Response.json({ file: { download_url: 'https://fixture.invalid/legacy-file-result.mp4' } });
     }
@@ -176,7 +193,7 @@ async function runCase({
     getEdges: () => edges,
     setNodes: (fn) => { nodes = typeof fn === 'function' ? fn(nodes) : fn; nodesRef.current = nodes; },
     setEdges: (fn) => { edges = typeof fn === 'function' ? fn(edges) : fn; },
-    updateTaskList: (fn) => { tasks = typeof fn === 'function' ? fn(tasks) : fn; },
+    updateTaskList: (fn) => { tasks = typeof fn === 'function' ? fn(tasks) : fn; taskSnapshots.push(JSON.stringify(tasks)); },
     addGeneratedAsset: (...args) => generatedAssets.push(args),
     abortControllersRef: { current: new Map() },
     canvasStateKeyPrefix: 'fixture-',
@@ -187,12 +204,16 @@ async function runCase({
     timeoutSeconds: 5,
     setDailyGenerationCount() {},
   });
-  const originalConsoleError = console.error;
+  const originalConsoleError = console.error, originalConsoleWarn = console.warn, originalChrome = global.chrome, originalWindowStorage = window.localStorage, warnings = [], tianjiStorageWrites = [];
   try {
-    console.error = () => {};
-    await generateVideo('video-test', prompt, resolution, model, duration, apiBindingId, ratio);
+    if(tianjiMode){window.localStorage=global.localStorage;global.chrome={storage:{local:{get:(_keys,cb)=>cb({...tianjiStored,tianjiSeedanceConfig:{baseUrl:'https://fixture.invalid',token:'synthetic-key',syncSource:'manual',models:'fixture-model',durations:'5',resolutions:'720p',ratios:'16:9',...tianjiConfig}}),set:(value,cb)=>{tianjiStorageWrites.push(value);cb();}}}};}
+    console.error = (...args) => warnings.push(args.map(String).join(' '));
+    console.warn = (...args) => warnings.push(args.map(String).join(' '));
+    await generateVideo('video-test', prompt, resolution, model, duration, apiBindingId, ratio, execution);
   } finally {
     console.error = originalConsoleError;
+    console.warn = originalConsoleWarn;
+    global.chrome = originalChrome;window.localStorage=originalWindowStorage;
   }
   return {
     requests,
@@ -203,10 +224,45 @@ async function runCase({
     uploadCalls,
     uploadedReferenceSources,
     generatedAssets,
+    taskSnapshots,
+    warnings,
+    tianjiStorageWrites,
   };
 }
 
-(async () => {
+async function main() {
+  // Exercise the real canvas submission and polling path, not just normalization.
+  // A newly applied documented protocol must win over model-name heuristics.
+  const explicitGrok = await runCase({
+    model: 'grok-imagine-video',
+    profileName: 'fixture-explicit-gateway',
+    profile: {
+      category: 'video', requestType: 'json-video',
+      submitPath: '/gateway/tasks', pollPath: '/gateway/tasks/{taskId}',
+      fieldMapping: { model: 'model', prompt: 'prompt', duration: 'duration', resolution: 'resolution', aspectRatio: 'aspect_ratio' },
+      __wanjuanPreferExplicitProtocol: true,
+    },
+  });
+  assert.equal(explicitGrok.node.data.errorMessage, undefined, explicitGrok.node.data.errorMessage);
+  assert.equal(explicitGrok.requests[0].url, 'https://fixture.invalid/gateway/tasks');
+  assert.equal(explicitGrok.requests[1].url, 'https://fixture.invalid/gateway/tasks/fixture-task');
+  const explicitBody = JSON.parse(explicitGrok.requests[0].init.body);
+  assert.equal(explicitBody.model, 'grok-imagine-video');
+  assert.equal(Object.hasOwn(explicitBody, 'preset'), false);
+  assert.equal(Object.hasOwn(explicitBody, 'resolution_name'), false);
+  assert.equal(explicitGrok.node.data.videoUrl, 'https://fixture.invalid/result.mp4');
+
+  const explicitVeo = await runCase({
+    model:'veo-portrait', apiUrl:'https://aigc.x-see.cn', profileName:'fixture-veo-gateway',
+    profile:{category:'video',requestType:'json-video',submitPath:'/v2/create',pollPath:'/v2/jobs/{taskId}',
+      fieldMapping:{model:'model',prompt:'prompt',duration:'duration',resolution:'resolution',aspectRatio:'aspect_ratio'},
+      __wanjuanPreferExplicitProtocol:true},
+  });
+  assert.equal(explicitVeo.node.data.errorMessage, undefined, explicitVeo.node.data.errorMessage);
+  assert.equal(explicitVeo.requests[0].url, 'https://aigc.x-see.cn/v2/create');
+  assert.equal(explicitVeo.requests[1].url, 'https://aigc.x-see.cn/v2/jobs/fixture-task');
+  assert.equal(explicitVeo.node.data.videoUrl, 'https://fixture.invalid/result.mp4');
+
   const profileName = catalog.WANJUAN_JIXIN_BUILTIN_VIDEO_PROTOCOL_BINDINGS[H3_MODEL];
   assert.equal(profileName, h3.JIXIN_H3_PROTOCOL_NAME);
   const profile = catalog.WANJUAN_JIXIN_BUILTIN_PROTOCOLS[profileName];
@@ -261,6 +317,10 @@ async function runCase({
   const failedWithUrl = await runCase({ pollPayloads: [{ status: 'failed', url: 'https://fixture.invalid/stale.mp4', error: { message: 'Synthetic failed with stale URL' } }] });
   assert.equal(failedWithUrl.tasks[0].status, 'failed');
   assert.equal(failedWithUrl.requests.length, 2);
+  const privateFailure = await runCase({ pollPayloads: [{status:'failed',error:{message:'HTTP 429 rate limit SYNTHETIC_PRIVATE_PROMPT https://synthetic.invalid/private'}}] });
+  assert.equal(privateFailure.tasks[0].status,'failed');
+  assert.match(privateFailure.node.data.errorMessage,/HTTP 429/);
+  for(const value of [privateFailure.node.data.errorMessage,privateFailure.tasks[0].errorMsg,...privateFailure.taskSnapshots,...privateFailure.notices,...privateFailure.warnings]) assert.doesNotMatch(value,/SYNTHETIC_PRIVATE_PROMPT|synthetic\.invalid\/private/,'provider error must not reach state, notices or error logs');
   const completedWithoutMedia = await runCase({ pollPayloads: [{ status: 'completed' }] });
   assert.equal(completedWithoutMedia.tasks[0].status, 'failed');
   assert.match(completedWithoutMedia.node.data.errorMessage, /未返回视频地址/);
@@ -273,9 +333,13 @@ async function runCase({
       pollPayloads: [{ status: terminalStatus, error: { message: `Synthetic ${terminalStatus}` } }],
     });
     assert.equal(terminal.tasks.length, 1);
-    assert.equal(terminal.tasks[0].status, 'failed');
-    assert.match(terminal.node.data.errorMessage, new RegExp(`Synthetic ${terminalStatus}`));
+    assert.equal(terminal.tasks[0].status, terminalStatus === 'cancelled' ? 'cancelled' : 'failed');
+    assert.doesNotMatch(terminal.node.data.errorMessage, new RegExp(`Synthetic ${terminalStatus}`), 'provider error text is not persisted into the node');
+    assert.match(terminal.node.data.errorMessage, terminalStatus === 'cancelled' ? /服务商报告视频任务已取消/ : /生成任务执行失败/);
     assert.equal(terminal.requests.length, 2, `${terminalStatus} must stop polling immediately`);
+    const withStaleUrl = await runCase({pollPayloads:[{status:terminalStatus,url:'https://fixture.invalid/stale.mp4'}]});
+    assert.equal(withStaleUrl.tasks[0].status, terminalStatus === 'cancelled' ? 'cancelled' : 'failed');
+    assert.notEqual(withStaleUrl.node.data.videoUrl,'https://fixture.invalid/stale.mp4');assert.equal(withStaleUrl.generatedAssets.length,0);
   }
 
   for (const illegalDuration of ['3', '16', '4.5', 'invalid']) {
@@ -416,6 +480,63 @@ async function runCase({
     assert.equal(channel.stored.nodes[0].data.videoUrl, channel.node.data.videoUrl);
   }
 
+  const prefixed = await runCase({ apiUrl: 'https://fixture.invalid/v1' });
+  assert.equal(prefixed.requests.find((request) => request.init.method === 'POST').url, 'https://fixture.invalid/v1/videos');
+  assert.equal(prefixed.requests.at(-1).url, 'https://fixture.invalid/v1/videos/fixture-task');
+  assert.equal(prefixed.node.data.videoUrl, 'https://fixture.invalid/result.mp4');
+
+  const unknown = await runCase({ model: 'unknown-video-fixture', profileName: '', previousResult: true });
+  assert.equal(unknown.requests.length, 0, 'unbound video must not submit a guessed protocol');
+  assert.equal(unknown.uploadCalls, 0);
+  assert.equal(unknown.node.data.videoUrl, 'https://fixture.invalid/previous-result.mp4', 'preflight must preserve the old result');
+  assert.ok(unknown.notices.some((text) => text.includes('尚未选择视频请求协议')));
+
+  const seedance25 = await runCase({
+    model: 'doubao-seedance-2-5-260628', profileName: '',
+    apiUrl: 'https://ark.cn-beijing.volces.com/api/v3', duration: '20',
+    pollPayloads: [{ status: 'succeeded', content: { video_url: 'https://fixture.invalid/result.mp4' } }],
+  });
+  assert.equal(seedance25.node.data.errorMessage, undefined, seedance25.node.data.errorMessage);
+  const arkSubmit = seedance25.requests.find((request) => request.init.method === 'POST');
+  assert.equal(arkSubmit.url, 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks');
+  const arkBody = JSON.parse(arkSubmit.init.body);
+  assert.equal(arkBody.model, 'doubao-seedance-2-5-260628');
+  assert.equal(arkBody.duration, 20);
+  assert.equal(Object.hasOwn(arkBody, 'prompt'), false);
+  assert.ok(arkBody.content.some((part) => part.type === 'text'));
+  assert.equal(seedance25.requests.at(-1).url, 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/fixture-task');
+  assert.equal(seedance25.node.data.videoUrl, 'https://fixture.invalid/result.mp4');
+  for(const terminalStatus of ['failed','cancelled']){
+    const terminal=await runCase({model:'doubao-seedance-2-5-260628',profileName:'',apiUrl:'https://ark.cn-beijing.volces.com/api/v3',duration:'20',pollPayloads:[{status:terminalStatus,content:{video_url:'https://fixture.invalid/stale.mp4'}}]});
+    assert.equal(terminal.tasks[0].status,terminalStatus);assert.notEqual(terminal.node.data.videoUrl,'https://fixture.invalid/stale.mp4');assert.equal(terminal.generatedAssets.length,0);assert.equal(terminal.requests.length,2);
+  }
+  for(const terminalStatus of ['failed','cancelled','cancel']){
+    const terminal=await runCase({nodeType:'seedanceNode',model:'fixture-model',profileName:'',tianjiMode:true,pollPayloads:[{code:200,status:terminalStatus,video_url:'https://fixture.invalid/stale.mp4',message:'PRIVATE_TIANJI_ERROR'}]});
+    assert.equal(terminal.tasks.length,1,'Tianji terminal result does not add a duplicate local failure');assert.equal(terminal.tasks[0].status,terminalStatus==='failed'?'failed':'cancelled');assert.notEqual(terminal.node.data.videoUrl,'https://fixture.invalid/stale.mp4');assert.equal(terminal.generatedAssets.length,0);assert.equal(terminal.requests.length,2);assert.doesNotMatch(JSON.stringify({task:terminal.tasks[0].errorMsg,node:terminal.node.data.errorMessage,notices:terminal.notices}),/PRIVATE_TIANJI_ERROR/);
+    assert.equal(terminal.stored.nodes[0].data.loading,false,'terminal status is persisted for the matching node');
+  }
+  const tianjiStopped=await runCase({nodeType:'seedanceNode',model:'fixture-model',profileName:'',tianjiMode:true,tianjiStaleStop:true,pollPayloads:[{code:200,status:'failed',message:'PRIVATE_TIANJI_ERROR'}]});
+  assert.equal(tianjiStopped.tasks.length,1);assert.equal(tianjiStopped.tasks[0].stoppedByUser,true);assert.equal(tianjiStopped.tasks[0].errorMsg,'已取消');assert.equal(tianjiStopped.node.data.errorMessage,'已取消');assert.equal(tianjiStopped.stored.nodes[0].data.errorMessage,'已取消');
+  const tianjiRebound=await runCase({nodeType:'seedanceNode',model:'fixture-model',profileName:'',tianjiMode:true,tianjiReboundNode:true,pollPayloads:[{code:200,status:'failed'}]});
+  assert.equal(tianjiRebound.node.data.seedanceTaskId,'new-task');assert.equal(tianjiRebound.node.data.loading,true);assert.equal(tianjiRebound.stored.nodes[0].data.loading,true);
+  for(const terminalStatus of ['failed','cancelled']){
+    const terminal=await runCase({nodeType:'tongyiWanxiangNode',model:'wan-fixture',profileName:'',pollPayloads:[{status:terminalStatus,video_url:'https://fixture.invalid/stale.mp4'}]});
+    assert.equal(terminal.tasks[0].status,terminalStatus);assert.notEqual(terminal.node.data.videoUrl,'https://fixture.invalid/stale.mp4');assert.equal(terminal.generatedAssets.length,0);assert.equal(terminal.requests.length,2);
+  }
+  for(const terminalStatus of ['failed','cancelled']){
+    const terminal=await runCase({model:'multipart-fixture',profileName:'fixture-multipart',profile:{category:'video',requestType:'multipart-video',submitPath:'/v1/videos',pollPath:'/v1/videos/{taskId}',fieldMapping:{model:'model',prompt:'prompt'},__wanjuanPreferExplicitProtocol:true},pollPayloads:[{status:terminalStatus,video_url:'https://fixture.invalid/stale.mp4'}]});
+    assert.equal(terminal.tasks[0].status,terminalStatus);assert.notEqual(terminal.node.data.videoUrl,'https://fixture.invalid/stale.mp4');assert.equal(terminal.generatedAssets.length,0);assert.equal(terminal.requests.length,2);
+  }
+
+  const invalidSeedance25 = await runCase({
+    model: 'doubao-seedance-2-5-260628', profileName: '',
+    apiUrl: 'https://ark.cn-beijing.volces.com/api/v3', duration: '31', previousResult: true,
+  });
+  assert.equal(invalidSeedance25.requests.length, 0);
+  assert.equal(invalidSeedance25.uploadCalls, 0);
+  assert.equal(invalidSeedance25.node.data.videoUrl, 'https://fixture.invalid/previous-result.mp4');
+  assert.ok(invalidSeedance25.notices.some((text) => text.includes('视频时长须为')));
+
   const legacyFile = await runCase({
     model: 'MiniMax-Hailuo-2.3',
     profileName: '',
@@ -428,8 +549,34 @@ async function runCase({
   assert.equal(legacyFile.node.data.videoUrl, 'https://fixture.invalid/legacy-file-result.mp4');
   assert.equal(legacyFile.requests.filter((request) => request.url.includes('/v1/files/retrieve')).length, 1);
 
-  console.log('H3 actual generation hook: JSON contract, edited-reference routing per channel, polling, persistence, terminal failure, UI bounds, zero-network media gate, custom protocol and legacy file_id PASS');
-})().catch((error) => {
+  const {describeApplicationGeneration}=require('../src/renderer/lib/application-generation.ts');
+  const reviewCases=[
+    {model:'sora-2',profile:{requestType:'multipart-video'}},
+    {model:'sora-2',profile:{requestType:'multipart-video',resolutionValueMode:'dimension',fieldMapping:{prompt:'input_prompt',duration:'duration'}}},
+    {model:'fixture-json',profile:{requestType:'json-video',resolutionValueMode:'quality',resolutionValueMap:{'720P':'HD'},resolutionValueCase:'lower',fieldValueTypes:{seconds:'string'}}},
+    {model:'fixture-json',profile:{requestType:'json-video',extraBody:{model:'provider-alias',prompt:'ACTUAL_PROMPT',n:2}}},
+    {model:'fixture-json',profile:{requestType:'json-video',omitDuration:true}},
+    {model:'grok-video-3',profile:{requestType:'json-video'}},
+    {model:'grok-imagine-video',profile:{requestType:'json-video'}},
+    {model:'veo-portrait',profile:{requestType:'json-video',__wanjuanPreferExplicitProtocol:true}},
+  ];
+  for(const row of reviewCases){
+    const profile={category:'video',submitPath:'/v1/videos',pollPath:'/v1/videos/{taskId}',...row.profile},model=row.model;
+    const args={prompt:'QA_PARITY',model,resolution:'1280x720',duration:5,aspectRatio:'16:9'};
+    const configuration={models:[model],apiConfigs:[],url:'https://fixture.invalid',key:'QA_SYNTHETIC_KEY',protocolBindings:{[model]:'qa-review'},registry:{'qa-review':profile},probe:{id:'probe',type:'videoNode',data:{videoModel:model,videoDurations:'5 6 8 10 15',videoModelProtocolBindings:{[model]:'qa-review'},modelProtocolRegistry:{'qa-review':profile}}}};
+    const preview=describeApplicationGeneration('video',args,configuration).requestPreview;
+    assert(preview,'generic video must expose its actual wire-field review');
+    const actual=await runCase({...row,profile,profileName:'qa-review',prompt:args.prompt,resolution:args.resolution,duration:args.duration,ratio:args.aspectRatio});
+    assert.equal(actual.node.data.errorMessage,undefined,actual.node.data.errorMessage);
+    const first=actual.requests[0];assert(first&&first.init.method==='POST');
+    if(typeof first.init.body==='string')assert.deepEqual(Object.fromEntries(preview.fields.map(f=>[f.name,f.value])),JSON.parse(first.init.body),'JSON review must match the normal sender after overrides');
+    else assert.deepEqual(preview.fields.map(f=>[f.name,f.value]),[...first.init.body.entries()],'multipart review must match every sent field and order');
+    assert.equal(preview.hiddenFields,0);assert.equal(actual.uploadCalls,0);
+  }
+  console.log('H3 actual generation hook: existing lifecycle/media compatibility plus eight actual sender/paid-review wire-parity cases PASS');
+}
+module.exports = { runCase };
+if (require.main === module) main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

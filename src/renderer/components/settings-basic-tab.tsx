@@ -1,6 +1,7 @@
 /** 设置-基础 标签页。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
 import { Trash2 } from "lucide-react";
+import { invalidateAssistantPreferencePersistence } from "../lib/assistant-preferences";
 declare const chrome: any;
 
 export function WanJuanSettingsBasicTab({
@@ -204,6 +205,7 @@ export function WanJuanSettingsBasicTab({
 	                                      value: normalizeThemeMode(themeMode),
 	                                      onChange: (event) => {
 	                                        let themeMode2 = normalizeThemeMode(event.target.value);
+	                                        invalidateAssistantPreferencePersistence("theme", document.documentElement);
 	                                        setThemeMode(themeMode2);
 	                                        try {
 	                                          localStorage.setItem(`themeMode`, themeMode2),
@@ -269,6 +271,7 @@ export function WanJuanSettingsBasicTab({
 	                                      value: appLanguage,
 		                                      onChange: (event) => {
 		                                        let nextLanguage = event.target.value || `zh-CN`;
+		                                        invalidateAssistantPreferencePersistence("language", document.documentElement);
 		                                        setAppLanguage(nextLanguage);
 		                                        globalThis.wanjuanI18nRuntime?.setLanguage?.(nextLanguage);
 		                                        try {
@@ -336,7 +339,7 @@ export function WanJuanSettingsBasicTab({
                                       children: [
                                         jsx(`span`, {
                                           className: `text-sm font-semibold text-gray-100`,
-	                                          children: `1.4.8`,
+	                                          children: `1.4.9`,
 	                                        }),
 	                                        jsxs(`div`, {
 	                                          className: `flex items-center gap-2 ml-auto`,

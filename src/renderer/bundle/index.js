@@ -12,6 +12,19 @@ import {
   r as wanjuanToEsm
 } from "./rolldown-runtime.js";
 import { configureCloudProjectStorage } from "../lib/cloud-project-app-storage";
+import { AssistantOnboarding } from "../components/assistant-onboarding";
+import { canvasPerfMedia } from "../lib/canvas-perf-media.mjs";
+import { useCanvasOperationPlans,commitCanvasPlanBatch } from "../hooks/useCanvasOperationPlans";
+import { useApplicationOperations } from "../hooks/useApplicationOperations";
+import { ApplicationOperationApprovals } from "../components/application-operation-approvals";
+import {describeApplicationGeneration,assertApplicationGenerationTarget,assertApplicationTaskCancellationTarget,prepareApplicationGenerationReferences} from "../lib/application-generation";
+import {createApplicationGenerationExecution} from "../lib/application-generation-execution";
+import {prepareCanvasPlanGeneration} from "../lib/canvas-plan-generation";
+import {applicationOperationTaskStatus} from "../../../electron/shared/application-operation-policy.mjs";
+import {applicationTaskRecordSnapshot,findApplicationTask,sharedApplicationTaskJobs,beginApplicationTaskSubmission} from "../lib/application-task-records";
+import { canvasPlanFocusViewport } from "../lib/canvas-plan-layout";
+import { getAccountState as getAssistantNavigationAccountState } from "../lib/account";
+import { assistantNavigationAllowed, assistantNavigationAvailable } from "../lib/assistant-local-operations";
 import {
   $ as ArrowUp,
   A as Palette,
@@ -125,6 +138,7 @@ import {
   wanjuanTianjiPortraitNodeDataFromAutomation,
   wanjuanTianjiPortraitToResource,
 } from "../lib/tianji-portrait";
+import { resolveApplicationTianjiPortraits } from "../lib/application-tianji-portraits";
 import {
   wanjuanClearProjectAssetBindingsFromData,
   wanjuanResourceKind,
@@ -437,6 +451,7 @@ import { use_addTransitResource } from "../hooks/use_addTransitResource";
 import { use_hydrateProjectAssetContainer } from "../hooks/use_hydrateProjectAssetContainer";
 import { use_normalizeBackupModules } from "../hooks/use_normalizeBackupModules";
 import { use_sanitizeProjectNodeDataForExport } from "../hooks/use_sanitizeProjectNodeDataForExport";
+import { backupExportFailureMessage, backupImportFailureMessage } from "../lib/backup-export-errors";
 import { use_addAccount } from "../hooks/use_addAccount";
 import { use_duplicateSelectedAgent } from "../hooks/use_duplicateSelectedAgent";
 import { use_buildBackupModules } from "../hooks/use_buildBackupModules";
@@ -561,6 +576,7 @@ import { useHandleSplitOne } from "../hooks/useHandleSplitOne";
 import { useRelinkMissingAssets } from "../hooks/useRelinkMissingAssets";
 import { useSaveEditedVideo } from "../hooks/useSaveEditedVideo";
 import { useSaveCanvasState } from "../hooks/useSaveCanvasState";
+import { useCanvasUnloadMirror } from "../hooks/useCanvasUnloadMirror";
 import { useRunNodeChain } from "../hooks/useRunNodeChain";
 import { useAssetCandidateDialog } from "../hooks/useAssetCandidateDialog";
 import { useGroupNodes } from "../hooks/useGroupNodes";
@@ -1108,6 +1124,7 @@ function WanJuanCanvasShell(props) {
 function WanJuanAppCanvas({
   appLanguage: appLanguage = `zh-CN`,
   projectId: projectId = `default`,
+  assistantCanvasControllerRef: assistantCanvasControllerRef,
   textApiUrl: propTextApiUrl,
   textApiKey: propTextApiKey,
   imageApiUrl: propImageApiUrl,
@@ -1195,6 +1212,7 @@ function WanJuanAppCanvas({
 	  customPublicUploadConfig: customPublicUploadConfig = {},
   qiniuConfig: qiniuConfig = {},
   initialEmptyProject: initialEmptyProject = false,
+  canvasVisible: canvasVisible = true,
   onInitialEmptyProjectReady: onInitialEmptyProjectReady,
 	}) {
   const wanjuanCanvasT = (text) =>
@@ -1270,8 +1288,7 @@ function WanJuanAppCanvas({
           const withResults = options.withResults !== !1;
           const videoThumbnails = options.videoThumbnails !== !1;
           const extractedFrameCount = Math.max(0, Math.min(500, Number(options.extractedFrameCount || 120)));
-          const sampleVideoUrl = `https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4`;
-          const sampleAudioUrl = `https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3`;
+          const {video:sampleVideoUrl,audio:sampleAudioUrl} = canvasPerfMedia();
           const columns = Math.max(1, Math.ceil(Math.sqrt(count)));
           const fixtureNodes = Array.from({ length: count }, (_, index) => {
             const type = nodeTypes[index % nodeTypes.length];
@@ -1439,40 +1456,7 @@ function WanJuanAppCanvas({
       };
       return () => { delete globalThis.__wanjuanCanvasDebug; };
     }, [fitView, setEdges, setNodes, setViewport]),
-    useEffect(() => {
-      let handleBeforeUnload = () => {
-        // 关窗/刷新时同步 flush 当前画布到 localStorage，避免 2.8s 自动保存防抖窗口内的未保存编辑丢失。
-        // 异步的 saveCanvasState 在卸载时来不及完成写盘；这里用同步 setItem 做 best-effort 兜底。
-        try {
-          if (shouldFitViewRef.current) {
-            let currentProjectId = projectIdRef.current;
-            if (!globalThis.__wanjuanProjectMigrationLocks?.has(currentProjectId) && !globalThis.__wanjuanStorageMaintenanceRunning) {
-              let canvasState = {
-                nodes: (nodesRef.current || [])
-                  .filter((node) => node.id !== `ghost-target`)
-                  .map((node) => {
-                    let nodeData = { ...WanJuanStripRuntimeNodeData(node.data || {}) };
-                    Object.keys(nodeData).forEach((key) => { typeof nodeData[key] == `function` && delete nodeData[key]; });
-                    return { ...node, data: nodeData };
-                  }),
-                edges: (edgesRef.current || []).filter((edge) => edge.id !== `ghost-edge`),
-              };
-              localStorage.setItem(`${canvasStateKeyPrefix}${currentProjectId}`, JSON.stringify(canvasState));
-            }
-          }
-        } catch {}
-        (abortControllersRef.current.forEach((controller) => controller.abort()), abortControllersRef.current.clear());
-      };
-      return (
-        window.addEventListener(`beforeunload`, handleBeforeUnload),
-        window.addEventListener(`pagehide`, handleBeforeUnload),
-        () => {
-          (window.removeEventListener(`beforeunload`, handleBeforeUnload),
-            window.removeEventListener(`pagehide`, handleBeforeUnload));
-        }
-      );
-    }, []),
-    useLateEffect1076({ fitView, nodes, shouldFitView }));
+    useLateEffect1076({ fitView, nodes, shouldFitView, visible:canvasVisible, wrapperRef }));
   let [isVisible, setIsVisible] = useState(false),
   [history, setHistory] = useState([]),
   [historyIndex, setHistoryIndex] = useState(-1),
@@ -1480,6 +1464,8 @@ function WanJuanAppCanvas({
     historyIndexRef = useRef(-1),
     [dailyGenerationCount, setDailyGenerationCount] = useState(0),
     LoadOnceRef = useRef(false),
+    assistantLoadedProjectRef = useRef(null),
+    assistantCanvasLiveRef = useRef(null),
     planLimits = WANJUAN_PLAN_LIMITS[membership.type] || WANJUAN_PLAN_LIMITS.FREE;
   useLateEffect1095({ setDailyGenerationCount });
 	  let nodesRef = useRef(nodes),
@@ -1524,17 +1510,19 @@ function WanJuanAppCanvas({
     stopGeneration = useStopGeneration({ abortControllersRef, nodesRef, setEdges, setNodes, showToast, updateTaskList }).stopGeneration,
     canvasStateKeyPrefix = `canvas-state-v1-`,
     desktopCanvasMirrorPrefix = `desktop-canvas-state-v1-`,
-	    saveCanvasState = useSaveCanvasState({ WanJuanStripRuntimeNodeData, canvasStateKeyPrefix, desktopCanvasMirrorPrefix, edgesRef, externalizeProjectCanvasState, historyIndexRef, isRestoringRef, localforageModule, nodesRef, projectIdRef, setHistory, setHistoryIndex, shouldFitViewRef, showToast }).saveCanvasState,
+	    canvasPersistence = useSaveCanvasState({ WanJuanStripRuntimeNodeData, canvasStateKeyPrefix, desktopCanvasMirrorPrefix, edgesRef, externalizeProjectCanvasState, historyIndexRef, isRestoringRef, localforageModule, nodesRef, projectIdRef, setHistory, setHistoryIndex, shouldFitViewRef, showToast }),
+      saveCanvasState = canvasPersistence.saveCanvasState,
     $e = use_$e({ historyIndex, historyIndexRef, isRestoringRef, setEdges, setHistoryIndex, setNodes, edges, history, nodes }).$e,
     redo = use_redo({ historyIndex, historyIndexRef, isRestoringRef, setEdges, setHistoryIndex, setNodes, edges, history, nodes }).redo,
     relinkMissingProjectAssets = useRelinkMissingAssets({ localforageModule, nodesRef, projectIdRef, saveCanvasState, setNodes }).relinkMissingProjectAssets,
     showProjectAssetCandidateDialog = useAssetCandidateDialog({}).showProjectAssetCandidateDialog,
     relinkMissingProjectAssetsFromFolder = useRelinkFromFolder({ localforageModule, nodesRef, projectIdRef, saveCanvasState, setNodes, showProjectAssetCandidateDialog }).relinkMissingProjectAssetsFromFolder;
-  (useCanvasLoadEffect({ GlobalTasks, LoadOnceRef, abortControllersRef, canvasStateKeyPrefix, desktopCanvasMirrorPrefix, hydrateProjectAssetContainer, initialEmptyProject, localforageModule, onInitialEmptyProjectReady, projectId, projectIdRef, resolveWanjuanPlayableTaskUrl, setEdges, setNodes, setShouldFitView, shouldFitViewRef }),
+  (useCanvasUnloadMirror({ WanJuanStripRuntimeNodeData, canvasStateKeyPrefix, nodesRef, edgesRef, projectIdRef, shouldFitViewRef, abortControllersRef, saveCanvasState, getProtectedCanvasSnapshot:canvasPersistence.getProtectedCanvasSnapshot, showToast }),
+    useCanvasLoadEffect({ GlobalTasks, LoadOnceRef, abortControllersRef, canvasStateKeyPrefix, desktopCanvasMirrorPrefix, hydrateProjectAssetContainer, initialEmptyProject, localforageModule, onInitialEmptyProjectReady, onAssistantCanvasLoadState: (id, ready) => { assistantLoadedProjectRef.current = ready ? id : null; }, projectId, projectIdRef, resolveWanjuanPlayableTaskUrl, setEdges, setNodes, setShouldFitView, shouldFitViewRef, showToast }),
     useGlobalTasksSyncEffect({ GlobalTasks, projectIdRef, resolveWanjuanPlayableTaskUrl, setNodes, shouldFitView }),
 	    useSafeEffect11({ nodes, setEdges, shouldFitView }),
 	    useSafeEffect12({ edges, nodes, setNodes, shouldFitView, wanjuanPrevEdgesRef }),
-		    useLateEffect1184({ edges, nodes, saveCanvasState, shouldFitView }),
+		    useLateEffect1184({ edges, nodes, saveCanvasState, prepareCanvasConfigs:canvasPersistence.prepareCanvasConfigs, shouldFitView }),
 		    useEffect(() => () => {
 		      shouldFitViewRef.current && saveCanvasState();
 	    }, [projectId, saveCanvasState]),
@@ -1660,7 +1648,8 @@ function WanJuanAppCanvas({
 	    resolveVideoRunModel = use_resolveVideoRunModel({  seedanceModel, tianjiSeedanceModel, videoModel }).resolveVideoRunModel,
 	    runNodeChain = useRunNodeChain({ generateImage, generateText, generateVideo, getEdges, getNodes, handleGenerateCustom, resolveVideoRunModel, showToast }).runNodeChain,
     layeredRunDownstream = useLayeredRun({ generateImage, generateText, generateVideo, getEdges, getNodes, handleGenerateCustom, layeredRunMaxConcurrency, resolveVideoRunModel, showToast }).layeredRunDownstream,
-	    createNodeAt = use_createNodeAt({ createImageNode, generateImage, generateText, generateVideo, handleAIAssist, handleCrop, handleGenerateCustom, handleArkTrustedAssetReview, handleSplit, handleSplitOne, handleTianjiPortraitReview, nodesRef, openImageEditor, openImagePreview, openVideoEditor, projectIdRef, setEdges, setMenuPosition, setNodes, stopGeneration, addCustomNode, addGeneratedAsset, apiConfigs, arkTrustedAssetConfig, audioApiKey, audioApiUrl, audioModel, audioModelApiBindings, audioModelProtocolBindings, customPublicUploadConfig, drawingModel, imageCompatResolutions, imageModelApiBindings, imageModelProtocolBindings, modelProtocolRegistry, presetPrompts, projectId, qiniuConfig, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, sendToActiveTab, showToast, textModel, textModelApiBindings, textModelProtocolBindings, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangTextModels, tosConfig, ttsMusicModel, updateTaskList, videoAspectRatios, videoDurations, videoModel, videoModelApiBindings, videoModelProtocolBindings, videoModelRequestProfiles, videoResolutions }).createNodeAt,
+	    nodeFactory = use_createNodeAt({ createImageNode, generateImage, generateText, generateVideo, handleAIAssist, handleCrop, handleGenerateCustom, handleArkTrustedAssetReview, handleSplit, handleSplitOne, handleTianjiPortraitReview, nodesRef, openImageEditor, openImagePreview, openVideoEditor, projectIdRef, setEdges, setMenuPosition, setNodes, stopGeneration, addCustomNode, addGeneratedAsset, apiConfigs, arkTrustedAssetConfig, audioApiKey, audioApiUrl, audioModel, audioModelApiBindings, audioModelProtocolBindings, customPublicUploadConfig, drawingModel, imageCompatResolutions, imageModelApiBindings, imageModelProtocolBindings, modelProtocolRegistry, presetPrompts, projectId, qiniuConfig, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, sendToActiveTab, showToast, textModel, textModelApiBindings, textModelProtocolBindings, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangTextModels, tosConfig, ttsMusicModel, updateTaskList, videoAspectRatios, videoDurations, videoModel, videoModelApiBindings, videoModelProtocolBindings, videoModelRequestProfiles, videoResolutions }),
+    createNodeAt = nodeFactory.createNodeAt,
     persistImportedMediaFile = use_persistImportedMediaFile({ projectIdRef, projectId }).persistImportedMediaFile,
     createImportedMediaNode = use_createImportedMediaNode({ createNodeAt, persistImportedMediaFile, setNodes, addGeneratedAsset }).createImportedMediaNode,
     handleFileChange = use_handleFileChange({ createImportedMediaNode, createNodeAt, menuPosition, screenToFlowPosition, wrapperRef, addGeneratedAsset }).handleFileChange,
@@ -1686,7 +1675,7 @@ function WanJuanAppCanvas({
           );
   useNodeSyncEffect({ addCustomNode, addGeneratedAsset, apiConfigs, arkTrustedAssetConfig, audioApiKey, audioApiUrl, audioModel, audioModelApiBindings, audioModelProtocolBindings, createImageNode, customPublicUploadConfig, drawingModel, generateImage, generateText, generateVideo, handleAIAssist, handleCancel2, handleCrop, handleExtractFrames, handleGenerateCustom, handleArkTrustedAssetReview, handleNoop, handleSplit, handleSplitOne, handleTianjiPortraitReview, imageCompatResolutions, imageModelApiBindings, imageModelProtocolBindings, modelProtocolRegistry, openImageEditor, openImagePreview, openVideoEditor, presetPrompts, projectIdRef, qiniuConfig, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, sendToActiveTab, setNodes, shouldFitView, showToast, stopGeneration, textModel, textModelApiBindings, textModelProtocolBindings, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangTextModels, tosConfig, ttsMusicModel, updateTaskList, videoAspectRatios, videoDurations, videoModel, videoModelApiBindings, videoModelProtocolBindings, videoModelRequestProfiles, videoResolutions });
 
-  const automationJobsRef = useRef(new Map());
+  const automationJobsRef = useRef(sharedApplicationTaskJobs());
   const automationResultCacheRef = useRef(new Map());
   const automationGenerateImageRef = useRef(generateImage);
   const automationGenerateVideoRef = useRef(generateVideo);
@@ -1696,7 +1685,7 @@ function WanJuanAppCanvas({
   useEffect(() => {
     const cleanTask = (task, stableResultUrl = "") => ({
       id: task?.id || "", type: task?.type || "", nodeId: task?.nodeId || "", projectId: task?.projectId || "",
-      status: task?.status || "", progress: task?.progress ?? 0, modelName: task?.modelName || "", prompt: task?.prompt || "",
+      status: applicationOperationTaskStatus(task), progress: task?.progress ?? 0, modelName: task?.modelName || "", prompt: task?.prompt || "",
       resultUrl: stableResultUrl || task?.resultUrl || task?.videoUrl || task?.imageUrl || wanjuanExtractAutomationMedia(task?.customResultData, task?.type) || "",
       stableResultUrl: stableResultUrl || "", thumbnailUrl: task?.thumbnailUrl || task?.posterUrl || "",
       errorMsg: task?.errorMsg || "", createdAt: task?.createdAt || 0, updatedAt: task?.updatedAt || 0,
@@ -1720,38 +1709,31 @@ function WanJuanAppCanvas({
           if (cacheKey) automationResultCacheRef.current.set(cacheKey, stable);
           return cleanTask(task, stable);
         }
-      } catch (error) { console.warn("automation result persistence skipped", error); }
+      } catch { console.warn("automation result persistence skipped"); }
       // 持久化失败时仍返回远端 URL；blob/data URL 不直接泄漏给 CLI。
       return cleanTask(task, /^(blob:|data:)/i.test(current) ? "" : current);
     };
     const allAutomationTasks = async (materialize = false) => {
-      const sourceTasks = Array.isArray(GlobalTasks) ? GlobalTasks : [];
-      const tasks = cleanTasks(sourceTasks);
-      const knownIds = new Set(tasks.flatMap((task) => [task.id, task.nodeId]).filter(Boolean));
-      const now = Date.now();
-      for (const [nodeId, job] of automationJobsRef.current.entries()) {
-        if (knownIds.has(nodeId) || knownIds.has(job.id)) automationJobsRef.current.delete(nodeId);
-        else if (now - Number(job.updatedAt || job.createdAt || now) > 24 * 60 * 60 * 1000) automationJobsRef.current.delete(nodeId);
-      }
-      const combined = [...sourceTasks, ...automationJobsRef.current.values()];
+      const combined = applicationTaskRecordSnapshot(GlobalTasks,automationJobsRef.current);
       return materialize ? Promise.all(combined.map(materializeAutomationTask)) : combined.map((task) => cleanTask(task));
     };
-    const findAutomationTask = async (id, materialize = false) => (await allAutomationTasks(materialize)).filter((task) => task.id === String(id || "") || task.nodeId === String(id || "")).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+    const findAutomationTask = async (id, materialize = false) => findApplicationTask(await allAutomationTasks(materialize),String(id||""));
     const setAutomationJob = (nodeId, patch) => {
-      const previous = automationJobsRef.current.get(nodeId) || { id: nodeId, nodeId, createdAt: Date.now(), progress: 0 };
+      const previous = automationJobsRef.current.get(nodeId);if(!previous)return;
       automationJobsRef.current.set(nodeId, { ...previous, ...patch, updatedAt: Date.now() });
     };
-    const runAutomationGeneration = (nodeId, type, run) => {
-      setAutomationJob(nodeId, { type, status: "submitting", errorMsg: "" });
-      void Promise.resolve().then(run).then(() => {
-        const node = getNodes().find((item) => item.id === nodeId);
-        const createdTaskId = node?.data?.taskId || node?.data?.seedanceTaskId || "";
-        if (createdTaskId) setAutomationJob(nodeId, { id: createdTaskId, status: "pending" });
-        else setAutomationJob(nodeId, { status: "failed", errorMsg: "任务未创建；请检查应用内模型、接口配置和输入参数" });
-      }).catch(() => {
-        setAutomationJob(nodeId, { status: "failed", errorMsg: "任务提交失败；请在StarCanvas任务列表查看详情" });
-      });
-    };
+    const runAutomationGeneration = (nodeId, type, run, guard, execution) => new Promise((resolve,reject) => {
+      const submission=beginApplicationTaskSubmission(automationJobsRef.current,nodeId,{type,projectId:projectIdRef.current,clientSubmissionId:execution.submissionId});
+      let started=false;
+      void Promise.resolve().then(async () => {
+        guard();const pending=run();
+        await execution.waitForSubmission(pending);
+        started=true;submission.update({status:"running"});resolve();return pending;
+      }).then(() => {
+        const node=getNodes().find(item=>item.id===nodeId),taskId=node?.data?.taskId||node?.data?.seedanceTaskId||"";
+        submission.update({...(taskId?{id:taskId}:{}),status:node?.data?.manuallyStopped?"cancelled":taskId?"pending":"unknown"});
+      }).catch(error => {submission.update({status:started?"unknown":"failed",errorMsg:"Submission outcome requires checking"});reject(error);});
+    });
     const waitForCanvasState = async ({ nodeId, sourceNodeIds = [] } = {}) => {
       const expectedSourceIds = new Set(sourceNodeIds.filter(Boolean));
       const deadline = Date.now() + 3e3;
@@ -1766,62 +1748,66 @@ function WanJuanAppCanvas({
       }
       throw Error(`自动化画布状态同步超时`);
     };
+    const executeApprovedGeneration = async (kind,args,guard) => {
+      if(typeof guard!=="function")throw Object.assign(Error("Permission required"),{code:"OPERATION_PERMISSION_REQUIRED"});
+      guard("create");
+      const type=kind==="image"?"promptNode":kind==="tianji"?"seedanceNode":"videoNode";
+      const nodeId="automation-"+kind+"-"+crypto.randomUUID(),fields=args.nodeFields;
+      const node=nodeFactory.prepareNodeAt(type,{x:0,y:0},{__nodeId:nodeId,...fields});
+      // The normal factory injects runtime defaults after input data. Apply only
+      // locally validated scalar fields, never callbacks or caller properties.
+      node.data={...node.data,...fields};
+      const references=prepareApplicationGenerationReferences(nodeId,args.referenceMedia||[],nodeFactory.prepareNodeAt,args.portraitMedia||[]);
+      guard("create");const before={nodes:getNodes(),edges:getEdges()};
+      commitCanvasPlanBatch({setNodes,setEdges},before,{nodes:[...before.nodes,...references.nodes,node],edges:[...before.edges,...references.edges]});
+      await waitForCanvasState({nodeId,sourceNodeIds:references.nodes.map(n=>n.id)});
+      const beforeDispatch=(allowRunning=false)=>{guard("dispatch");assertApplicationGenerationTarget(getNodes(),getEdges(),nodeId,type,args.prompt,args.model,fields,references.checks,references.edges,allowRunning);};
+      await guard("sender");beforeDispatch();
+      const execution=createApplicationGenerationExecution((stage,binding)=>guard(stage,binding),()=>beforeDispatch(true),{kind,model:args.model,resolution:args.resolution,duration:args.duration,aspectRatio:args.aspectRatio,mode:args.mode,generateAudio:args.generateAudio,watermark:args.watermark});
+      await runAutomationGeneration(nodeId,kind==="image"?"image":"video",()=>kind==="image"?
+        automationGenerateImageRef.current(nodeId,args.prompt,args.size,args.model,undefined,execution):
+        automationGenerateVideoRef.current(nodeId,args.prompt,args.resolution,args.model,args.duration,undefined,args.aspectRatio,execution),beforeDispatch,execution);
+      return {ok:true,accepted:true,nodeId};
+    };
+    const describeConfiguredGeneration=async (kind,args,referenceMedia=[],probeOverride=null,canvasReferenceTypes=[])=>{
+      const image=kind==="image",tianji=kind==="tianji",list=WanJuanParseModelList(image?drawingModel:tianji?tianjiSeedanceModel:videoModel||"");
+      if(tianji){const stored=await wanjuanTianjiStorageGet(['tianjiSeedanceConfig','tianjiSeedanceGroups']),config=wanjuanNormalizeTianjiSeedanceConfig(stored.tianjiSeedanceConfig||{}),models=WanJuanParseModelList(config.models),groups=stored.tianjiSeedanceGroups||{};
+        return {...describeApplicationGeneration(kind,args,{referenceMedia,models,preferredModel:models[0],apiConfigs:[],url:config.baseUrl,key:config.token,resolutions:config.resolutions,durations:config.durations,ratios:config.ratios,generateAudio:config.generateAudio,watermark:config.watermark,portraitGroups:groups}),privateBinding:JSON.stringify(args.portraitAssetIds?.length?{config,groups}:config),privateProviderBinding:JSON.stringify(config)};}
+      return describeApplicationGeneration(kind,args,{referenceMedia,canvasReferenceTypes,models:list,preferredModel:WanJuanGetPreferredModel(list,""),apiConfigs,
+        apiBindings:image?imageModelApiBindings:videoModelApiBindings,protocolBindings:image?imageModelProtocolBindings:videoModelProtocolBindings,registry:modelProtocolRegistry,
+        url:image?propImageApiUrl:videoApiUrl,key:image?propImageApiKey:videoApiKey,
+        probe:probeOverride||nodeFactory.prepareNodeAt(image?"promptNode":"videoNode",{x:0,y:0},{__nodeId:"operation-generation-probe"}),
+        resolutions:seedanceResolutions,durations:seedanceDurations,ratios:seedanceRatios});
+    };
     const automation = {
-      status: async () => ({ ok: true, app: "StarCanvas", version: globalThis.chrome?.runtime?.getManifest?.()?.version || "", ready: true, activeTasks: (await allAutomationTasks()).filter((task) => ["pending", "submitting", "running"].includes(task.status)).length }),
+      status: async () => ({ ok: true, app: "StarCanvas", version: globalThis.chrome?.runtime?.getManifest?.()?.version || "", ready: true, activeTasks: (await allAutomationTasks()).filter((task) => ["pending", "queued", "submitting", "running", "processing"].includes(task.status)).length }),
       models: async () => ({ ok: true, image: WanJuanParseModelList(drawingModel || ""), video: WanJuanParseModelList(videoModel || ""), text: WanJuanParseModelList(textModel || "") }),
       tasks: async ({ materialize = false } = {}) => ({ ok: true, tasks: await allAutomationTasks(materialize === true) }),
       task: async ({ id, materialize = true } = {}) => ({ ok: true, task: await findAutomationTask(id, materialize !== false) }),
-      cancel: async ({ id } = {}) => {
-        const task = await findAutomationTask(id);
-        if (!task) return { ok: false, error: "任务不存在" };
-        if (task.nodeId) {
-          stopGeneration(task.nodeId);
-          setAutomationJob(task.nodeId, { id: task.id || task.nodeId, type: task.type, status: "cancelled", errorMsg: "已取消" });
-        }
-        return { ok: true, taskId: task.id, nodeId: task.nodeId };
+      describeGeneration:describeConfiguredGeneration,
+      prepareCanvasGeneration:nodeId=>prepareCanvasPlanGeneration(nodeId,{
+        getNodes,getEdges,prepareNode:nodeFactory.prepareNodeAt,waitForCanvasState,
+        commit:(before,after)=>commitCanvasPlanBatch({setNodes,setEdges},before,after),
+        describe:(kind,args,node,types)=>describeConfiguredGeneration(kind,args,[],node,types),
+        run:(nodeId,kind,args,guard,execution)=>runAutomationGeneration(nodeId,kind==="image"?"image":"video",()=>kind==="image"?
+          automationGenerateImageRef.current(nodeId,args.prompt,args.size,args.model,undefined,execution):
+          automationGenerateVideoRef.current(nodeId,args.prompt,args.resolution,args.model,args.duration,undefined,args.aspectRatio,execution),guard,execution),
+      }),
+      cancel: async ({id,projectId:expectedProject,nodeId:expectedNode,createdAt}={},guard) => {
+        if(typeof guard!=="function")throw Object.assign(Error("Permission required"),{code:"OPERATION_PERMISSION_REQUIRED"});
+        const task=await findAutomationTask(id,false);guard();
+        if(!task||task.projectId!==expectedProject||task.nodeId!==expectedNode||task.createdAt!==createdAt||!["pending","submitting","queued","running","processing"].includes(task.status))throw Object.assign(Error("Task changed"),{code:"OPERATION_TASK_CHANGED"});
+        assertApplicationTaskCancellationTarget(getNodes(),task,automationJobsRef.current.get(expectedNode));
+        stopGeneration(task.nodeId,{silent:true});setAutomationJob(task.nodeId,{id:task.id||task.nodeId,type:task.type,projectId:expectedProject,status:"cancelled",errorMsg:"Stop requested locally"});
+        return {ok:true,cancellationRequested:true};
       },
-      generateImage: async ({ prompt = "", model = "", size = "1024x1024", referenceImage = "" } = {}) => {
-        const nodeId = `automation-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        setNodes((current) => [...current, { id: nodeId, type: "promptNode", position: { x: 0, y: 0 }, data: { prompt: String(prompt), imageUrl: String(referenceImage || ""), mediaKind: referenceImage ? "image" : undefined } }]);
-        await waitForCanvasState({ nodeId });
-        runAutomationGeneration(nodeId, "image", () => automationGenerateImageRef.current(nodeId, String(prompt), String(size || "1024x1024"), String(model || "")));
-        return { ok: true, accepted: true, nodeId };
-      },
-      generateVideo: async ({ prompt = "", model = "", resolution = "1280x720", duration = "", aspectRatio = "", referenceImage = "" } = {}) => {
-        const nodeId = `automation-video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const sourceId = referenceImage ? `${nodeId}-source` : "";
-        setNodes((current) => [...current, ...(sourceId ? [{ id: sourceId, type: "imageNode", position: { x: -360, y: 0 }, data: { imageUrl: String(referenceImage), mediaKind: "image" } }] : []), { id: nodeId, type: "videoNode", position: { x: 0, y: 0 }, data: { prompt: String(prompt), aspectRatio: String(aspectRatio || ""), imageResolution: String(resolution || "") } }]);
-        if (sourceId) setEdges((current) => [...current, { id: `automation-edge-${nodeId}`, source: sourceId, target: nodeId, type: "custom" }]);
-        await waitForCanvasState({ nodeId, sourceNodeIds: sourceId ? [sourceId] : [] });
-        runAutomationGeneration(nodeId, "video", () => automationGenerateVideoRef.current(nodeId, String(prompt), String(resolution || "1280x720"), String(model || ""), duration ? Number(duration) : undefined, undefined, String(aspectRatio || "")));
-        return { ok: true, accepted: true, nodeId, sourceNodeId: sourceId || undefined };
-      },
-      generateTianjiVideo: async ({ prompt = "", model = "", resolution = "720p", duration = "5", aspectRatio = "16:9", mode = "text-to-video", images = [], portraitAssetIds = [], videos = [], audios = [] } = {}) => {
-        const nodeId = `automation-tianji-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const sources = [];
-        const edges = [];
-        const addSources = (items, kind) => (Array.isArray(items) ? items : []).forEach((url, index) => {
-          const sourceId = `${nodeId}-${kind}-${index + 1}`;
-          const sourceType = kind === "image" ? "imageNode" : kind === "audio" ? "audioNode" : "videoNode";
-          const sourceData = kind === "image" ? { imageUrl: String(url), mediaKind: "image" } : kind === "audio" ? { audioUrl: String(url), mediaKind: "audio" } : { videoUrl: String(url), mediaKind: "video" };
-          sources.push({ id: sourceId, type: sourceType, position: { x: -420, y: index * 100 }, data: sourceData });
-          edges.push({ id: `automation-edge-${sourceId}`, source: sourceId, target: nodeId, type: "custom" });
-        });
-        addSources(images, "image");
-        (Array.isArray(portraitAssetIds) ? portraitAssetIds : []).forEach((assetId, index) => {
-          const sourceId = `${nodeId}-portrait-${index + 1}`;
-          sources.push({ id: sourceId, type: "imageNode", position: { x: -420, y: (images.length + index) * 100 }, data: wanjuanTianjiPortraitNodeDataFromAutomation(assetId) });
-          edges.push({ id: `automation-edge-${sourceId}`, source: sourceId, target: nodeId, type: "custom" });
-        });
-        addSources(videos, "video"); addSources(audios, "audio");
-        setNodes((current) => [...current, ...sources, { id: nodeId, type: "seedanceNode", position: { x: 0, y: 0 }, data: {
-          prompt: String(prompt), seedanceNode: true, seedanceMode: "tianji", tianjiSeedanceGenerationMode: String(mode || "text-to-video"),
-          tianjiSelectedModel: String(model || ""), selectedResolution: String(resolution || "720p"), selectedSeconds: String(duration || "5"), size: String(aspectRatio || "16:9"),
-        } }]);
-        if (edges.length) setEdges((current) => [...current, ...edges]);
-        await waitForCanvasState({ nodeId, sourceNodeIds: sources.map((item) => item.id) });
-        runAutomationGeneration(nodeId, "video", () => automationGenerateVideoRef.current(nodeId, String(prompt), String(resolution || "720p"), String(model || ""), duration ? Number(duration) : undefined, undefined, String(aspectRatio || "16:9")));
-        return { ok: true, accepted: true, nodeId, sourceNodeIds: sources.map((item) => item.id), mode: String(mode || "text-to-video") };
+      generateImage: (args,guard) => executeApprovedGeneration("image",args,guard),
+      generateVideo: (args,guard) => executeApprovedGeneration("video",args,guard),
+      generateTianjiVideo: (args,guard) => executeApprovedGeneration("tianji",args,guard),
+      resolveTianjiPortraits: async (ids,guard) => {
+        if(typeof guard!=="function")throw Object.assign(Error("Permission required"),{code:"OPERATION_PERMISSION_REQUIRED"});guard("create");
+        const stored=await wanjuanTianjiStorageGet(['tianjiSeedanceConfig','tianjiSeedanceGroups']);guard("create");
+        return resolveApplicationTianjiPortraits(ids,{config:wanjuanNormalizeTianjiSeedanceConfig(stored.tianjiSeedanceConfig||{}),groups:stored.tianjiSeedanceGroups||{},guard:()=>guard("create")});
       },
       materializeTestResult: async ({ kind = "image", dataUrl = "", directory = "" } = {}) => {
         if (!String(dataUrl).startsWith(`data:${kind}/`) || !directory) throw new Error("无效的隔离媒体持久化测试参数");
@@ -1836,7 +1822,7 @@ function WanJuanAppCanvas({
     };
     globalThis.__wanjuanAutomation = automation;
     return () => { if (globalThis.__wanjuanAutomation === automation) delete globalThis.__wanjuanAutomation; };
-  }, [drawingModel, videoModel, textModel, GlobalTasks, generateImage, generateVideo, getNodes, getEdges, setNodes, setEdges, stopGeneration]);
+  }, [drawingModel, videoModel, textModel, GlobalTasks, generateImage, generateVideo, getNodes, getEdges, setNodes, setEdges, stopGeneration, nodeFactory.prepareNodeAt, apiConfigs, imageModelApiBindings, videoModelApiBindings, imageModelProtocolBindings, videoModelProtocolBindings, modelProtocolRegistry, propImageApiUrl, propImageApiKey, videoApiUrl, videoApiKey, tianjiSeedanceModel, seedanceResolutions, seedanceDurations, seedanceRatios]);
 		  let onDeleteEdge = useCallback(
 	    (event, edge) => {
 	      (event.stopPropagation(), setEdges((edges2) => edges2.filter((edge2) => edge2.id !== edge.id)));
@@ -1854,6 +1840,38 @@ function WanJuanAppCanvas({
 		    addKeyboardNode = use_addKeyboardNode({ createNodeAt, getShortcutNodePosition, menuPosition }).addKeyboardNode,
 			    clipboardHasPastePayload = use_clipboardHasPastePayload({}).clipboardHasPastePayload;
 			  useWorkspaceTemplateEffect({ createNodeAt, getNodes, projectId, projectIdRef, screenToFlowPosition, showToast, wrapperRef });
+			  const canvasPlans = useCanvasOperationPlans({ projectId, nodes, edges, nodesRef, edgesRef, projectIdRef, loadedProjectRef:assistantLoadedProjectRef, shouldFitViewRef, setNodes, setEdges, prepareNodeAt:nodeFactory.prepareNodeAt,
+        generationDefaults:{text:{url:propTextApiUrl,key:propTextApiKey},image:{url:propImageApiUrl,key:propImageApiKey},video:{url:videoApiUrl,key:videoApiKey}},generationContext:{tianjiSeedanceModel,seedanceResolutions,seedanceDurations,seedanceRatios,seedanceUploadMode,qiniuConfig,tosConfig,customPublicUploadConfig,arkTrustedAssetConfig} });
+			  useEffect(() => { assistantCanvasLiveRef.current = { projectId, screenToFlowPosition }; });
+			  useEffect(() => {
+			    if (!assistantCanvasControllerRef) return;
+			    const controller = {
+			      projectId,
+			      plans: canvasPlans,
+			      focusPlan(nodeIds) {
+			        if (!Array.isArray(nodeIds) || !nodeIds.length) return;
+			        requestAnimationFrame(() => requestAnimationFrame(() => {
+			          if (projectIdRef.current !== projectId || assistantLoadedProjectRef.current !== projectId) return;
+			          const canvas=wrapperRef.current?.getBoundingClientRect(),drawer=document.querySelector(`.wj-assistant-drawer:not(.wj-assistant-workbench)`)?.getBoundingClientRect();
+			          if(!canvas||!Number.isFinite(canvas.width)||!Number.isFinite(canvas.height)||canvas.width<=0||canvas.height<=0)return;
+			          const targets=nodesRef.current.filter(n=>nodeIds.includes(n.id));
+			          const viewport=canvas&&canvasPlanFocusViewport(targets,{width:canvas.width,height:canvas.height},drawer?{left:drawer.left-canvas.left,right:drawer.right-canvas.left,top:drawer.top-canvas.top,bottom:drawer.bottom-canvas.top}:undefined);
+			          if(viewport)setViewport(viewport,{duration:160});
+			          else fitView({ nodes:nodeIds.map(id=>({id})), padding:0.2, duration:160, maxZoom:0.8 });
+			        }));
+			      },
+			      placement(expectedProjectId) {
+			        const live = assistantCanvasLiveRef.current;
+			        const rect = wrapperRef.current?.getBoundingClientRect();
+			        if (!live || live.projectId !== projectId || expectedProjectId !== projectId || projectIdRef.current !== projectId || assistantLoadedProjectRef.current !== projectId || !rect || rect.width <= 0 || rect.height <= 0) return null;
+			        const offset = (nodesRef.current.length % 5) * 18;
+			        const position = live.screenToFlowPosition({ x: rect.left + rect.width / 2 + offset, y: rect.top + rect.height / 2 + offset });
+			        return Number.isFinite(position?.x)&&Number.isFinite(position?.y)?position:null;
+			      },
+			    };
+			    assistantCanvasControllerRef.current = controller;
+			    return () => { if (assistantCanvasControllerRef.current === controller) assistantCanvasControllerRef.current = null; };
+			  }, [assistantCanvasControllerRef, projectId, canvasPlans]);
 			  return (
 	    useSafeEffect18({ $e, addKeyboardNode, autoLayout, clipboardHasPastePayload, copySelectedNodes, groupSelectedNodes, handlePaste, menuPosition, nodesRef, redo, setEdges, setNodes, stopGeneration }),
     jsxs(`div`, {
@@ -1906,7 +1924,8 @@ function WanJuanAppCanvas({
           onDrop: onDrop,
           onConnectEnd: onConnectEnd,
           deleteKeyCode: [`Backspace`, `Delete`],
-          fitView: true,
+          // The visibility-aware project-load hook owns automatic fitting.
+          fitView: false,
           minZoom: 0.05,
           maxZoom: 4,
           onlyRenderVisibleElements: true,
@@ -2134,7 +2153,11 @@ function WanJuanAppCanvas({
 }
 
 function WanJuanAppRoot() {
+  const assistantCanvasControllerRef = useRef(null);
   let [globalTasks, setGlobalTasks] = useState([]),
+  [assistantTasksAvailable, setAssistantTasksAvailable] = useState(false),
+  [assistantSettingsUnavailable, setAssistantSettingsUnavailable] = useState(false),
+  [modelConfigurationReady, setModelConfigurationReady] = useState(false),
   [isOpen, setIsOpen] = useState(false),
   [users, setUsers] = useState([]),
   [selectedUser, setSelectedUser] = useState(null),
@@ -2344,6 +2367,7 @@ Suno 音乐生成`,
   ),
   [configButlerApiUrl, setConfigButlerApiUrl] = useState(``),
   [configButlerApiKey, setConfigButlerApiKey] = useState(``),
+  [configButlerUseAssistant, setConfigButlerUseAssistant] = useState(false),
   [configButlerProtocol, setConfigButlerProtocol] = useState(
 	    `openai`,
 	  ),
@@ -2361,6 +2385,7 @@ Suno 音乐生成`,
     ``,
   ),
   [configButlerResultText, setConfigButlerResultText] = useState(``),
+  [configButlerResultStale, setConfigButlerResultStale] = useState(false),
   [configButlerLoading, setConfigButlerLoading] = useState(false),
   [configButlerMode, setConfigButlerMode] = useState(`single`),
   [configButlerBatchLoading, setConfigButlerBatchLoading] = useState(false),
@@ -2734,7 +2759,9 @@ Suno 音乐生成`,
     ]),
   [backupDialogState, setBackupDialogState] = useState(null),
   [backupDialogTab, setBackupDialogTab] = useState(`projects`),
+  backupExportBusyRef = useRef(false),
   [agentItems, setAgentItems] = useState(() => wanjuanCloneBuiltinAgentItems()),
+  [assistantLegacyMode, setAssistantLegacyMode] = useState(false),
   [selectedAgentId, setSelectedAgentId] = useState(WANJUAN_BUILTIN_AGENT_ITEMS[0]?.id || ``),
   [agentConversations, setAgentConversations] = useState(() => wanjuanCloneBuiltinAgentConversations()),
   [agentComposer, setAgentComposer] = useState(``),
@@ -2915,10 +2942,9 @@ Suno 音乐生成`,
     configButlerModel.trim() ||
     WANJUAN_CONFIG_BUTLER_DEFAULT_MODEL,
   getSelectedButlerTargetApiConfig = () =>
-    apiConfigs.find((config) => config.id === configButlerTargetApiConfigId) ||
-    apiConfigs.find((config) => config.id === `vectorengine`) ||
-    apiConfigs[0] ||
-    null,
+    configButlerTargetApiConfigId
+      ? apiConfigs.find((config) => config.id === configButlerTargetApiConfigId) || null
+      : apiConfigs.find((config) => config.id === `vectorengine`) || apiConfigs[0] || null,
   repairXSeeVeoReferenceVideoBindings = use_repairXSeeVeoReferenceVideoBindings({  modelProtocolRegistry, videoApiUrl, videoModelProtocolBindings }).repairXSeeVeoReferenceVideoBindings,
   normalizeStoredGlobalConfigBackup = use_normalizeStoredGlobalConfigBackup({ repairXSeeVeoReferenceVideoBindings, apiConfigs, videoApiUrl }).normalizeStoredGlobalConfigBackup,
   normalizeStoredGlobalConfigs = use_normalizeStoredGlobalConfigs({ normalizeStoredGlobalConfigBackup, configButlerDocUrl }).normalizeStoredGlobalConfigs,
@@ -3027,14 +3053,113 @@ Suno 音乐生成`,
 	            autoApply: true,
 	            silentToast: true,
 	          });
-	          batchResult?.applyResult?.importedCount ?
-	            showToast2(`极鑫中转站模型已同步：${batchResult.applyResult.importedCount} 个模型`) :
-	            showToast2(`极鑫中转站模型同步完成，请检查批量识别结果`);
+	          if (batchResult?.items?.length) showToast2(`极鑫模型识别完成，未进行真实生成探活；请检查并确认导入`);
 	        },
-  applyConfigButlerResult = useApplyConfigButlerResult({ _e, activeStoredGlobalConfigId, apiConfigs, audioModelApiBindings, audioModelProtocolBindings, audioModels, configButlerTargetApiConfigId, configButlerTargetApiKey, configButlerTargetApiUrl, configButlerTargetCategory, configButlerTargetModel, getSelectedButlerTargetApiConfig, imageModelApiBindings, imageModelProtocolBindings, imageModels, modelProtocolRegistry, setActiveProtocolConfigText, setActiveProtocolName, setActiveStoredGlobalConfigId, setApiConfigs, setAudioApiConfigId, setAudioModelApiBindings, setAudioModelProtocolBindings, setAudioModels, setConfigButlerExpanded, setImageModelApiBindings, setImageModelProtocolBindings, setImageModels, setModelProtocolRegistry, setProtocolFormatsExpanded, setProtocolNamesText, setStoredGlobalConfigs, setTextModelApiBindings, setTextModelProtocolBindings, setTtsMusicModel, setVideoModelApiBindings, setVideoModelProtocolBindings, setVideoModels, showToast2, storedGlobalConfigs, textModelApiBindings, textModelProtocolBindings, textModels, ttsMusicModel, videoModelApiBindings, videoModelProtocolBindings, videoModels }).applyConfigButlerResult,
+  applyConfigButlerResult = useApplyConfigButlerResult({ _e, activeStoredGlobalConfigId, apiConfigs, audioModelApiBindings, audioModelProtocolBindings, audioModels, configButlerTargetApiConfigId, configButlerDocUrl, configButlerTargetApiKey, configButlerTargetApiUrl, configButlerTargetCategory, configButlerTargetModel, getSelectedButlerTargetApiConfig, imageModelApiBindings, imageModelProtocolBindings, imageModels, modelProtocolRegistry, setActiveProtocolConfigText, setActiveProtocolName, setActiveStoredGlobalConfigId, setApiConfigs, setAudioApiConfigId, setAudioModelApiBindings, setAudioModelProtocolBindings, setAudioModels, setConfigButlerExpanded, setImageModelApiBindings, setImageModelProtocolBindings, setImageModels, setModelProtocolRegistry, setProtocolFormatsExpanded, setProtocolNamesText, setStoredGlobalConfigs, setTextModelApiBindings, setTextModelProtocolBindings, setTtsMusicModel, setVideoModelApiBindings, setVideoModelProtocolBindings, setVideoModels, showToast2, storedGlobalConfigs, textModelApiBindings, textModelProtocolBindings, textModels, ttsMusicModel, videoModelApiBindings, videoModelProtocolBindings, videoModels }).applyConfigButlerResult,
   applyConfigButlerBatchResults = useApplyConfigButlerBatchResults({ _e, apiModelCloudSettingsSaveTimerRef, captureCurrentGlobalConfig, configButlerBatchItems, configButlerDocUrl, configButlerTargetApiKey, configButlerTargetApiUrl, getSelectedButlerTargetApiConfig, mergeStoredGlobalApiConfigs, normalizeStoredGlobalConfigBackup, setActiveStoredGlobalConfigId, setApiConfigs, setAudioApiConfigId, setAudioApiKey, setAudioApiUrl, setAudioModelApiBindings, setAudioModelProtocolBindings, setAudioModels, setConfigButlerBatchModalOpen, setConfigButlerExpanded, setImageApiConfigId, setImageApiKey, setImageApiUrl, setImageModelApiBindings, setImageModelProtocolBindings, setImageModels, setModelProtocolRegistry, setProtocolNamesText, setStoredGlobalConfigs, setTextApiConfigId, setTextApiKey, setTextApiUrl, setTextModelApiBindings, setTextModelProtocolBindings, setTtsMusicModel, setVideoApiConfigId, setVideoApiKey, setVideoApiUrl, setVideoModelApiBindings, setVideoModelProtocolBindings, setVideoModels, showToast2, storedGlobalConfigs }).applyConfigButlerBatchResults,
-  runConfigButlerBatch = useRunConfigButlerBatch({ applyConfigButlerBatchResults, callConfigButlerModel, configButlerDocUrl, getSelectedButlerTargetApiConfig, setConfigButlerBatchActiveCategory, setConfigButlerBatchItems, setConfigButlerBatchLoading, setConfigButlerBatchModalOpen, setConfigButlerResultText, showToast2 }).runConfigButlerBatch,
-  runConfigButler = useRunConfigButler({ callConfigButlerModel, configButlerDocUrl, configButlerTargetCategory, configButlerTargetModel, getSelectedButlerTargetApiConfig, setConfigButlerLoading, setConfigButlerResultText, showToast2 }).runConfigButler;
+  runConfigButlerBatch = useRunConfigButlerBatch({ appLanguage, callConfigButlerModel, configButlerDocUrl, getSelectedButlerTargetApiConfig, setConfigButlerBatchActiveCategory, setConfigButlerBatchItems, setConfigButlerBatchLoading, setConfigButlerBatchModalOpen, setConfigButlerResultText, showToast2 }).runConfigButlerBatch,
+  runConfigButler = useRunConfigButler({ callConfigButlerModel, appLanguage, configButlerUseAssistant, configButlerDocUrl, configButlerTargetCategory, configButlerTargetModel, getSelectedButlerTargetApiConfig, setConfigButlerLoading, setConfigButlerResultText, setConfigButlerResultStale, showToast2 }).runConfigButler;
+  function applyAssistantPreference(kind, value) {
+                if (!isReady || !settingsHydratedRef.current) return false;
+                const confirmReadback = (storage, keys, expected, finish) => {
+                  const check = (saved, reliable) => finish(reliable && !globalThis.chrome?.runtime?.lastError && !!saved && Object.entries(expected).every(([name, item]) => saved[name] === item));
+                  if (typeof storage.getWithStatus === `function`) {
+                    storage.getWithStatus(keys, result => check(result?.values, result?.reliable === true));
+                  } else {
+                    storage.get(keys, saved => check(saved, true));
+                  }
+                };
+                const persistPreference = (slot, values) => {
+                  const root = document.documentElement;
+                  const key = `wanjuan${slot}Persisted`, revisionKey = `wanjuan${slot}PersistenceRevision`;
+                  const revision = String((Number(root.dataset[revisionKey]) || 0) + 1);
+                  root.dataset[revisionKey] = revision;
+                  root.dataset[key] = `pending`;
+                  // The synchronous boot mirror is not authoritative. Do not
+                  // alter it until the queued write and readback have passed;
+                  // manual changes invalidate this revision while it waits.
+                  const finish = (ok) => {
+                    if (root.dataset[revisionKey] !== revision) return;
+                    if (ok) {
+                      try { for (const [name, item] of Object.entries(values)) localStorage.setItem(name, item); }
+                      catch { ok = false; }
+                    }
+                    root.dataset[key] = ok ? value : `failed`;
+                  };
+                  try {
+                    const storage = globalThis.chrome?.storage?.local;
+                    if (!storage?.set || !storage?.get) finish(false);
+                    else storage.set(values, () => {
+                      if (globalThis.chrome?.runtime?.lastError) { finish(false); return; }
+                      try { confirmReadback(storage, Object.keys(values), values, finish); }
+                      catch { finish(false); }
+                    });
+                  } catch { finish(false); }
+                };
+                if (kind === `autoDownload` && typeof value === `boolean`) {
+                  const root = document.documentElement, expected = value ? `on` : `off`;
+                  const applied = root.dataset.wanjuanAutoDownloadListener === expected;
+                  if (autoDownloadGeneratedResults !== value || !applied) {
+                    if (autoDownloadGeneratedResults !== value) setAutoDownloadGeneratedResults(value);
+                    try { window.dispatchEvent(new CustomEvent(`wanjuan:auto-download-setting-changed`, {detail:{enabled:value}})); } catch { return false; }
+                  }
+                  if (nonModelSettingsSaveTimerRef.current != null) saveNonModelSettings({autoDownloadGeneratedResults:value});
+                  // A live listener alone is not a saved setting. Check the
+                  // existing storage API by reading the value back after write;
+                  // a later request must not be confirmed by an older callback.
+                  const revision = String((Number(root.dataset.wanjuanAutoDownloadPersistenceRevision) || 0) + 1);
+                  root.dataset.wanjuanAutoDownloadPersistenceRevision = revision;
+                  root.dataset.wanjuanAutoDownloadPersisted = `pending`;
+                  const finish = (ok) => {
+                    if (root.dataset.wanjuanAutoDownloadPersistenceRevision === revision) root.dataset.wanjuanAutoDownloadPersisted = ok ? expected : `failed`;
+                  };
+                  try {
+                    const storage = globalThis.chrome?.storage?.local;
+                    if (!storage?.set || !storage?.get) finish(false);
+                    else storage.set({autoDownloadGeneratedResults:value}, () => {
+                      if (globalThis.chrome?.runtime?.lastError) { finish(false); return; }
+                      try { confirmReadback(storage, [`autoDownloadGeneratedResults`], {autoDownloadGeneratedResults:value}, finish); }
+                      catch { finish(false); }
+                    });
+                  } catch { finish(false); }
+                  return true;
+                }
+                if (kind === `theme` && [`graphite`, `dark`, `light`, `warm-light`, `chrome-rose`, `sage-green`, `system`].includes(value)) {
+                  setThemeMode(value);
+                  if (nonModelSettingsSaveTimerRef.current != null) saveNonModelSettings({themeMode:value});
+                  const values = {themeMode:value, uiTheme:value, theme:value, appearanceTheme:value};
+                  persistPreference(`Theme`, values);
+                  return true;
+                }
+                if (kind === `language` && [`zh-CN`, `zh-TW`, `en-US`].includes(value)) {
+                  setAppLanguage(value);
+                  try { globalThis.wanjuanI18nRuntime?.setLanguage?.(value); } catch {}
+                  if (nonModelSettingsSaveTimerRef.current != null) saveNonModelSettings({appLanguage:value});
+                  const values = {appLanguage:value, uiLanguage:value};
+                  persistPreference(`Language`, values);
+                  return true;
+                }
+                return false;
+              }
+  function navigateAssistantLocal(destination) {
+                if (!assistantNavigationAvailable(destination, isReady, settingsHydratedRef.current)) return false;
+                const enterprise = getAssistantNavigationAccountState().enterprise;
+                if (!assistantNavigationAllowed(destination, enterprise)) return false;
+                if (destination === `workspace`) { window.dispatchEvent(new CustomEvent(`wanjuan:workspace-open`)); return true; }
+                const targets = {canvas:[`canvas`,null],resources:[`transit`,null],agents:[`agents`,null],settings:[`settings`,`account`],account:[`settings`,`account`],appearance:[`settings`,`basic`],api:[`settings`,`api`],models:[`settings`,`models`],generation:[`settings`,`generation`]};
+                if (typeof destination !== `string` || !Object.hasOwn(targets, destination)) return false;
+                document.documentElement.classList.remove(`wanjuan-workspace-open`);
+                document.querySelector(`.wanjuan-workspace-nav-tab`)?.classList.remove(`wanjuan-app-nav-tab-active`);
+                const [view,tab] = targets[destination];
+                if (tab) setActiveSettingsTab(tab);
+                setActiveView(view);
+                return true;
+              }
+  function canNavigateAssistantLocal(destination) { return assistantNavigationAvailable(destination,isReady,settingsHydratedRef.current) && assistantNavigationAllowed(destination,getAssistantNavigationAccountState().enterprise); }
+  useApplicationOperations({projectId:activeProjectId,projects,canvasRef:assistantCanvasControllerRef,taskRecords:assistantTasksAvailable?globalTasks:null,localActions:{
+    readState:()=>({ready:isReady,settingsReady:settingsHydratedRef.current,theme:normalizeThemeMode(themeMode),language:appLanguage,autoDownload:autoDownloadGeneratedResults,activeView,activeSettingsTab}),
+    applyPreference:applyAssistantPreference,navigate:navigateAssistantLocal,canNavigate:canNavigateAssistantLocal,
+  }});
 	  useLateEffect4703({});
   useLateEffect4712({ apiConfigs, isReady, settingsHydratedRef, syncTianjiConfigFromJixinApi });
   useSafeEffect30({ isReady });
@@ -3052,7 +3177,7 @@ Suno 音乐生成`,
   useLateEffect4737({ activeView, setDailyUsageCount });
   (useLateEffect4743({ activeProjectId, isReady }),
     useSafeEffect37({ activeProjectId, isReady, projectHydratedRef, settingsHydratedRef, themeMode }),
-    usePluginEnvEffect({ _e, localforageModule, normalizeStoredGlobalConfigs, projectHydratedRef, repairXSeeVeoReferenceVideoBindings, setActiveProjectId, setActiveStoredGlobalConfigId, setActiveView, setAdvancedSettingsUnlocked, setAgentConversations, setAgentItems, setApiConfigs, setArkTrustedAssetConfig, setAppLanguage, setAudioApiConfigId, setAudioApiKey, setAudioApiUrl, setAudioModelApiBindings, setAudioModelProtocolBindings, setAudioModels, setAutoDownloadGeneratedResults, setBackupExportSelection, setConfigButlerApiKey, setConfigButlerApiUrl, setConfigButlerDocUrl, setConfigButlerMode, setConfigButlerModel, setConfigButlerProtocol, setConfigButlerRepairHistory, setConfigButlerTargetApiConfigId, setConfigButlerTargetCategory, setCurrentPlatform, setCustomPublicUploadConfig, setDailyUsageCount, setDeviceId, setDownloadDirectory, setEdges, setGlobalTasks, setHasCurrentTab, setImageApiConfigId, setImageApiKey, setImageApiUrl, setImageCompatResolutions, setImageModelApiBindings, setImageModelProtocolBindings, setImageModels, setIsLoading, setIsPluginEnv, setIsReady, setLayeredRunConcurrencyOptions, setLayeredRunMaxConcurrency, setMaxPollingDuration, setMembership, setModelProtocolRegistry, setPerformanceProfile, setPollingInterval, setPresetPrompts, setProjectGroups, setProjects, setQiniuConfig, setSeedanceDurations, setSeedanceEnableWebSearch, setSeedanceGenerateAudio, setSeedanceModel, setSeedanceRatios, setSeedanceResolutions, setSeedanceUploadMode, setSeedanceVirtualPortraits, setSeedanceWatermark, setSelectedAgentId, setStorageOptimizationEnabled, setStorageOptimizationPaused, setStoredGlobalConfigs, setTextApiConfigId, setTextApiKey, setTextApiUrl, setTextModelApiBindings, setTextModelProtocolBindings, setThemeMode, setTianjiSeedanceModel, setTianjiSeedanceSettingsMode, setTongyiWanxiangDurations, setTongyiWanxiangEditModels, setTongyiWanxiangImageModels, setTongyiWanxiangRatios, setTongyiWanxiangReferenceImageModels, setTongyiWanxiangResolutions, setTongyiWanxiangTextModels, setTosConfig, setTransitGridCols, setTransitResources, setTtsMusicModel, setUpdateInfo, setUsers, setVideoApiConfigId, setVideoApiKey, setVideoApiUrl, setVideoAspectRatios, setVideoDurations, setVideoModelApiBindings, setVideoModelProtocolBindings, setVideoModelRequestProfilesText, setVideoModels, setVideoResolutions, settingsHydratedRef, showToast2 }),
+    usePluginEnvEffect({ setModelConfigurationReady, _e, localforageModule, normalizeStoredGlobalConfigs, projectHydratedRef, repairXSeeVeoReferenceVideoBindings, setActiveProjectId, setActiveStoredGlobalConfigId, setActiveView, setAdvancedSettingsUnlocked, setAgentConversations, setAgentItems, setApiConfigs, setArkTrustedAssetConfig, setAppLanguage, setAudioApiConfigId, setAudioApiKey, setAudioApiUrl, setAudioModelApiBindings, setAudioModelProtocolBindings, setAudioModels, setAutoDownloadGeneratedResults, setBackupExportSelection, setConfigButlerApiKey, setConfigButlerApiUrl, setConfigButlerDocUrl, setConfigButlerMode, setConfigButlerModel, setConfigButlerProtocol, setConfigButlerRepairHistory, setConfigButlerTargetApiConfigId, setConfigButlerTargetCategory, setCurrentPlatform, setCustomPublicUploadConfig, setDailyUsageCount, setDeviceId, setDownloadDirectory, setEdges, setGlobalTasks, setAssistantTasksAvailable, setAssistantSettingsUnavailable, setHasCurrentTab, setImageApiConfigId, setImageApiKey, setImageApiUrl, setImageCompatResolutions, setImageModelApiBindings, setImageModelProtocolBindings, setImageModels, setIsLoading, setIsPluginEnv, setIsReady, setLayeredRunConcurrencyOptions, setLayeredRunMaxConcurrency, setMaxPollingDuration, setMembership, setModelProtocolRegistry, setPerformanceProfile, setPollingInterval, setPresetPrompts, setProjectGroups, setProjects, setQiniuConfig, setSeedanceDurations, setSeedanceEnableWebSearch, setSeedanceGenerateAudio, setSeedanceModel, setSeedanceRatios, setSeedanceResolutions, setSeedanceUploadMode, setSeedanceVirtualPortraits, setSeedanceWatermark, setSelectedAgentId, setStorageOptimizationEnabled, setStorageOptimizationPaused, setStoredGlobalConfigs, setTextApiConfigId, setTextApiKey, setTextApiUrl, setTextModelApiBindings, setTextModelProtocolBindings, setThemeMode, setTianjiSeedanceModel, setTianjiSeedanceSettingsMode, setTongyiWanxiangDurations, setTongyiWanxiangEditModels, setTongyiWanxiangImageModels, setTongyiWanxiangRatios, setTongyiWanxiangReferenceImageModels, setTongyiWanxiangResolutions, setTongyiWanxiangTextModels, setTosConfig, setTransitGridCols, setTransitResources, setTtsMusicModel, setUpdateInfo, setUsers, setVideoApiConfigId, setVideoApiKey, setVideoApiUrl, setVideoAspectRatios, setVideoDurations, setVideoModelApiBindings, setVideoModelProtocolBindings, setVideoModelRequestProfilesText, setVideoModels, setVideoResolutions, settingsHydratedRef, showToast2 }),
     useSafeEffect38({ agentConversations, agentItems, appLanguage, autoDownloadGeneratedResults, backupExportSelection, downloadDirectory, layeredRunConcurrencyOptions, layeredRunMaxConcurrency, maxPollingDuration, performanceProfile, pollingInterval, presetPrompts, saveNonModelSettings, selectedAgentId, storageOptimizationEnabled, storageOptimizationPaused, themeMode }),
     useEffect(() => {
       globalThis.__wanjuanLastCanvasActivityAt = Date.now();
@@ -3152,20 +3277,20 @@ Suno 音乐生成`,
                     (extractProjectAssetRefs(canvasData).forEach((assetRef) => assetRefs.add(assetRef)),
                       extractProjectPortableDataRefs(canvasData).forEach((dataRef) => portableDataRefs.add(dataRef)),
                       await localforageModule.default.removeItem(canvasStorageKey));
-                  } catch (error) {
-                    console.warn(`删除项目画布缓存失败`, error);
+                  } catch {
+                    console.warn(`删除项目画布缓存失败`);
                   }
                 for (let assetRef of assetRefs)
                   try {
                     await localforageModule.default.removeItem(assetRef);
-                  } catch (error) {
-                    console.warn(`删除项目资产引用失败`, assetRef, error);
+                  } catch {
+                    console.warn(`删除项目资产引用失败`);
                   }
                 for (let dataRef of portableDataRefs)
                   try {
                     assetRefs.has(dataRef) || (await localforageModule.default.removeItem(dataRef));
-                  } catch (error) {
-                    console.warn(`删除项目便携资产失败`, dataRef, error);
+                  } catch {
+                    console.warn(`删除项目便携资产失败`);
                   }
                 if (isPluginEnv) {
                   try {
@@ -3173,8 +3298,8 @@ Suno 音乐生成`,
                       getDesktopProjectMirrorStorageKey(projectId),
                       activeProjectId === projectId ? `lastOpenedProjectId` : ``,
                     ].filter(Boolean));
-                  } catch (error) {
-                    console.warn(`删除项目镜像缓存失败`, error);
+                  } catch {
+                    console.warn(`删除项目镜像缓存失败`);
                   }
                 }
                 if (window.wanjuanDesktop?.removeProjectAssets)
@@ -3183,10 +3308,10 @@ Suno 音乐生成`,
                       projectId: projectId,
                       directory: downloadDirectory,
                     });
-                  } catch (error) {
-                    console.warn(`删除项目媒体目录失败`, error);
+                  } catch {
+                    console.warn(`删除项目媒体目录失败`);
                   }
-              })().catch(console.error),
+              })().catch(() => console.error(`Project cleanup failed`)),
               showToast2(`项目已删除`));
           }
         },
@@ -3603,7 +3728,7 @@ Suno 音乐生成`,
 		            },
   runConfigButlerErrorDiagnosis = use_runConfigButlerErrorDiagnosis({ activeStoredGlobalConfigId, apiConfigs, audioModelProtocolBindings, callConfigButlerModel, configButlerDocUrl, configButlerErrorAssistantInFlightRef, imageModelProtocolBindings, modelProtocolRegistry, setConfigButlerErrorAssistant, storedGlobalConfigs, textModelProtocolBindings, videoModelProtocolBindings }).runConfigButlerErrorDiagnosis,
   maybeTriggerConfigButlerErrorDiagnosis = use_maybeTriggerConfigButlerErrorDiagnosis({ configButlerErrorAssistant, configButlerErrorAssistantInFlightRef, runConfigButlerErrorDiagnosis }).maybeTriggerConfigButlerErrorDiagnosis,
-  runManualConfigButlerErrorQuery = use_runManualConfigButlerErrorQuery({ configButlerErrorAssistant, configButlerErrorAssistantMinimized, globalTasks, maybeTriggerConfigButlerErrorDiagnosis, setConfigButlerErrorAssistant, setConfigButlerErrorAssistantMinimized, showToast2 }).runManualConfigButlerErrorQuery,
+  runManualConfigButlerErrorQuery = use_runManualConfigButlerErrorQuery({ configButlerErrorAssistant, configButlerErrorAssistantMinimized, globalTasks: assistantTasksAvailable ? globalTasks : null, maybeTriggerConfigButlerErrorDiagnosis, setConfigButlerErrorAssistant, setConfigButlerErrorAssistantMinimized, showToast2 }).runManualConfigButlerErrorQuery,
   getConfigButlerRepairContext = use_getConfigButlerRepairContext({ audioModelProtocolBindings, configButlerErrorAssistant, imageModelProtocolBindings, modelProtocolRegistry, textModelProtocolBindings, videoModelProtocolBindings }).getConfigButlerRepairContext,
   openConfigButlerManualProblemFields = use_openConfigButlerManualProblemFields({ configButlerErrorAssistant, getConfigButlerRepairContext, setConfigButlerManualProblemPart, setConfigButlerManualProtocolName, setConfigButlerManualProtocolOpen, setConfigButlerManualProtocolText, showToast2 }).openConfigButlerManualProblemFields,
   applyConfigButlerProtocolRepair = use_applyConfigButlerProtocolRepair({ activeStoredGlobalConfigId, audioModelProtocolBindings, configButlerErrorAssistant, configButlerRepairHistory, imageModelProtocolBindings, modelProtocolRegistry, setActiveStoredGlobalConfigId, setAudioModelProtocolBindings, setConfigButlerErrorAssistant, setConfigButlerRepairHistory, setImageModelProtocolBindings, setModelProtocolRegistry, setStoredGlobalConfigs, setTextModelProtocolBindings, setVideoModelProtocolBindings, showToast2, storedGlobalConfigs, textModelProtocolBindings, videoModelProtocolBindings }).applyConfigButlerProtocolRepair,
@@ -3834,7 +3959,7 @@ Suno 音乐生成`,
 	                                  sourceSignature: strippedBinding.sourceSignature || `${PROJECT_ASSET_STORAGE_PREFIX}${existingRef}`,
 	                                });
 	                            }
-	                            console.warn(`Skipped oversized project media data URL during canvas save`, bindingKey, node.id);
+	                            console.warn(`Skipped oversized project media data URL during canvas save`);
 	                            continue;
 	                          }
 	                          if (options.forceRehomeExistingFiles) {
@@ -3876,8 +4001,8 @@ Suno 音乐生成`,
                                   missing: false,
                                 };
                                 continue;
-                              } catch (error) {
-                                console.warn(`Project media force archive skipped`, error);
+                              } catch {
+                                console.warn(`Project media force archive skipped`);
                               }
                             }
                           }
@@ -3973,8 +4098,8 @@ Suno 音乐生成`,
                                 originalName: binding.originalName || data.originalName || data.label || data.name || ``,
                                 missing: false,
                               });
-                          } catch (error) {
-                            console.warn(`Project media persist skipped`, error);
+                          } catch {
+                            console.warn(`Project media persist skipped`);
                             try {
                               await localforageModule.default.setItem(storageKey, payload.portableValue);
                             } catch {}
@@ -4124,14 +4249,14 @@ Suno 音乐生成`,
                           error: `Recovered after interrupted migration`,
                         });
                         recovered.push(session.projectId);
-                      } catch (error) {
-                        console.error(`Interrupted project migration recovery failed`, session.projectId, error);
+                      } catch {
+                        console.error(`Interrupted project migration recovery failed`);
                       }
                     }
                     return recovered;
                   }),
   scheduleInterruptedMigrationRecovery = setTimeout(() => {
-                    globalThis.recoverInterruptedProjectMigrations?.(``).catch(console.error);
+                    globalThis.recoverInterruptedProjectMigrations?.(``).catch(() => console.error(`Interrupted project migration recovery failed`));
                   }, 1500),
   buildProjectLocalforagePayload = use_buildProjectLocalforagePayload({ extractProjectAssetRefs, getProjectCanvasStorageKey }).buildProjectLocalforagePayload,
   EXPORT_INLINE_MEDIA_FIELDS = new Set([
@@ -4190,7 +4315,7 @@ Suno 音乐生成`,
                                       availableAgents: selectedAgents,
                                     });
                                 } catch (error) {
-                                  (console.error(error), showToast2(`导出失败`));
+                                  (console.error(`Backup export failed`), showToast2(backupExportFailureMessage(error, globalThis.wanjuanI18nRuntime?.getLanguage?.() || `zh-CN`)));
                                 }
                               },
   handleBackupImportFile = use_handleBackupImportFile({ applyExternalAssetBundleToBackupPayload, getAvailableBackupModules, getBackupSettingsSectionMap, normalizeBackupModules, setBackupDialogState, setBackupDialogTab, showToast2, projects }).handleBackupImportFile,
@@ -4198,12 +4323,17 @@ Suno 音乐生成`,
                                   if (!backupDialogState) return;
                                   try {
                                     if (backupDialogState.mode === `export`) {
-                                      await $t(backupDialogState.modules, {
-                                        settingsSections: backupDialogState.settingsSections,
-                                        projectIds: backupDialogState.projectIds,
-                                        agentIds: backupDialogState.agentIds,
-                                      });
-                                      setBackupDialogState(null);
+                                      if (backupExportBusyRef.current) return;
+                                      backupExportBusyRef.current = true;
+                                      try {
+                                        const exportResult = await $t(backupDialogState.modules, {
+                                          settingsSections: backupDialogState.settingsSections,
+                                          projectIds: backupDialogState.projectIds,
+                                          agentIds: backupDialogState.agentIds,
+                                          encrypted: backupDialogState.encrypted === true,
+                                        });
+                                        if (exportResult?.ok) setBackupDialogState(current => current === backupDialogState ? null : current);
+                                      } finally { backupExportBusyRef.current = false; }
                                       return;
                                     }
                                     let restoreResult = await restoreSelectedBackup(
@@ -4219,13 +4349,12 @@ Suno 音乐生成`,
                                       window.dispatchEvent(new CustomEvent(`wanjuan:backup-imported`, {
                                         detail: restoreResult
                                       })),
-                                      console.log(`[backup-import-report]`, restoreResult.report || {}),
                                       showToast2(
                                         `导入成功：${restoreResult.modules.map((moduleKey) => BACKUP_MODULE_LABELS[moduleKey]).join(`、`)}${restoreResult.report ? `，${formatBackupRestoreReport(restoreResult.report)}` : ``}，正在刷新显示`,
                                       ),
                                       setTimeout(() => window.location.reload(), 400));
                                   } catch (error) {
-                                    (console.error(error), showToast2(`导入失败`));
+                                    (console.error(`Backup import failed`), showToast2(backupImportFailureMessage(error, globalThis.wanjuanI18nRuntime?.getLanguage?.() || `zh-CN`)));
                                   }
                                 };
   let $t = use_$t({ BACKUP_MODULE_LABELS, buildBackupPayload, collectExternalUploadProjectAssetFiles, collectSelectedLocalforageBackup, compactBackupPortableAssets, getBackupChromeStorageKeys, readChromeStorageSnapshot, showToast2, projects }).$t;
@@ -4333,10 +4462,43 @@ Suno 音乐生成`,
           // 该容器被浏览器自动滚动 → 工具栏(画布压力表行)被推进顶部导航栏下方的错位 bug。
           style: { overflow: `clip` },
           children: [
+            jsx(ApplicationOperationApprovals,{projectId:activeProjectId,projects,language:appLanguage,onView:()=>setActiveView(`canvas`),onApplied:(projectId,nodeIds)=>{const c=assistantCanvasControllerRef.current;if(c?.projectId===projectId)c.focusPlan(nodeIds);}}),
+            jsx(AssistantOnboarding, {
+              workbench: activeView === `agents` && !assistantLegacyMode && typeof window.wanjuanDesktop?.assistantWorkspaceList === `function`,
+              onOpenRoles: () => setAssistantLegacyMode(true),
+              agentWorkspace: {agents:agentItems,conversations:agentConversations,theme:agentTheme,isLightTheme:isLightAgentTheme,environment:{agentModelOptions,apiConfigs,modelProtocolRegistry,searchAgentLongTermMemory,storeAgentLongTermMemory,textApiConfigId,textApiKey,textApiUrl,textModelApiBindings,textModelProtocolBindings,customPublicUploadConfig,qiniuConfig,seedanceUploadMode,tosConfig}},
+              ready: isReady && settingsHydratedRef.current,
+              tasksReady: isReady,
+              navigationReady: isReady,
+              settingsUnavailable: assistantSettingsUnavailable,
+              hasConfiguration: !!(configButlerApiKey || textApiKey || imageApiKey || videoApiKey || (apiConfigs || []).some((config) => config?.key)),
+              language: appLanguage,
+              themeMode: normalizeThemeMode(themeMode),
+              autoDownloadGeneratedResults,
+              onNavigationNotice: (message) => showToast2(message),
+              canNavigateLocal: true,
+              canSetPreference: true,
+              activeView,
+              activeSettingsTab,
+              projectId: activeProjectId,
+              projectName: projects.find((project) => project.id === activeProjectId)?.name || ``,
+              getCanvasNodePlacement: expectedProjectId => activeView === `canvas` ? assistantCanvasControllerRef.current?.placement(expectedProjectId) : null,
+              getCanvasPlanController: (expectedProjectId) => { const controller=assistantCanvasControllerRef.current;return expectedProjectId===activeProjectId&&controller?.projectId===expectedProjectId?controller.plans:null; },
+              onCanvasPlanApplied: (expectedProjectId,nodeIds) => { const controller=assistantCanvasControllerRef.current;if(expectedProjectId===activeProjectId&&controller?.projectId===expectedProjectId)controller.focusPlan(nodeIds); },
+              onOpenSetup: () => { setActiveSettingsTab(`api`); setActiveView(`settings`); setConfigButlerExpanded(true); setConfigButlerAgentExpanded(true); },
+              onOpenModels: () => { setActiveSettingsTab(`models`); setActiveView(`settings`); },
+              onOpenAgents: () => { setAssistantLegacyMode(false); setActiveView(`agents`); },
+              onOpenResources: () => setActiveView(`transit`),
+              onOpenCanvas: () => setActiveView(`canvas`),
+              onOpenWorkspace: () => window.dispatchEvent(new CustomEvent(`wanjuan:workspace-open`)),
+              onOpenAccount: () => { setActiveSettingsTab(`account`); setActiveView(`settings`); },
+              onOpenAppearance: () => { setActiveSettingsTab(`basic`); setActiveView(`settings`); },
+              onOpenButler: (url, useAssistant, hints) => { setConfigButlerUseAssistant(!!useAssistant); if (useAssistant || hints) setConfigButlerMode(`single`); setConfigButlerDocUrl(url); if (hints?.model && (hints.category === `image` || hints.category === `video`)) { setConfigButlerTargetModel(hints.model); setConfigButlerTargetCategory(hints.category); } setActiveSettingsTab(`api`); setActiveView(`settings`); setConfigButlerExpanded(true); },
+            }),
             jsx(WanJuanSettingsSectionC, { Copy, Download, FolderOpen, Maximize2, Star, Trash, activeView, chrome, copyResource, currentPage, filteredTransitResources, handleCleanInvalidResources, handleClearUnfavorited, handleRemoveTransitResource, isPluginEnv, resourceCleanupBusy, resourceFavoriteOnly, resourceSourceFilter, resourceTypeFilter, setCurrentPage, setResourceFavoriteOnly, setResourceSourceFilter, setResourceTypeFilter, setTransitGridCols, setWjResourceFullscreen, showToast2, toggleFavorite, transitGridCols, transitResourcePageSize, transitResourceTotalPages, transitResources, wanjuanUseBrokenResourceImage }),
-            jsx(WanJuanSettingsSectionD, { $e, Trash2, VtRenameProject, WanJuanCanvasShell, activeProjectId, activeView, addCustomNodeTemplate, addTransitResource, apiConfigs, arkTrustedAssetConfig, setArkTrustedAssetConfig, audioApiKey, audioApiUrl, audioModelApiBindings, audioModelProtocolBindings, audioModels, configButlerErrorAssistant, configButlerErrorAssistantMinimized, customPublicUploadConfig, deleteCustomNodeTemplate, edges, getUnreadSystemNotifications, globalTasks, handleDeleteProject, imageApiKey, imageApiUrl, imageCompatResolutions, imageModelApiBindings, imageModelProtocolBindings, imageModels, isOpen, layeredRunConcurrencyOptions, layeredRunMaxConcurrency, maxPollingDuration, modelProtocolRegistry, newProjectIds, openSystemNotificationPanel, pollingInterval, presetPrompts, projectGroupIds, projectGroupPanelOpen, projectGroupedSectionsAll, projectMenuOpen, projectStorageLabel, projectUngroupedAll, projects, qiniuConfig, renameProjectId, runManualConfigButlerErrorQuery, runStorageMigrationForProject, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, sendToPlugin, setActiveProjectId, setIsOpen, setNewProjectGroupId, setNewProjectIds, setProjectGroupPanelOpen, setProjectMenuOpen, settingsNotificationChecking, showToast2, textApiKey, textApiUrl, textModelApiBindings, textModelProtocolBindings, textModels, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangTextModels, tosConfig, transitResources, ttsMusicModel, updateGlobalTasks, videoApiKey, videoApiUrl, videoAspectRatios, videoDurations, videoModelApiBindings, videoModelProtocolBindings, videoModelRequestProfilesText, videoModels, videoResolutions, applyConfigButlerErrorAssistantFix, ConfirmRenameProject, applyConfigButlerManualProtocolFix, canManualRecoverImageTask, canManuallyRefreshGlobalTask, configButlerManualProblemPart, configButlerManualProtocolName, configButlerManualProtocolOpen, configButlerManualProtocolText, configButlerRepairHistory, configButlerRepairHistoryOpen, configErrorAssistantTheme, confirmProjectGroupRename, createProjectGroup, deleteProjectGroup, editingProjectGroupId, editingProjectGroupName, groupedProjectSections, handleCreateProject, handleManualRecoverImageTask, moveProjectToGroup, newProjectGroupId, newProjectName, openConfigButlerManualProblemFields, persistProjectGroups, projectGroupDraft, projectGroupList, projectGroupSearch, refreshGlobalTask, renameProjectGroup, renameProjectName, rollbackConfigButlerRepair, setConfigButlerErrorAssistant, setConfigButlerErrorAssistantMinimized, setConfigButlerManualProblemPart, setConfigButlerManualProtocolName, setConfigButlerManualProtocolOpen, setConfigButlerManualProtocolText, setConfigButlerRepairHistoryOpen, setEditingProjectGroupId, setEditingProjectGroupName, setNewProjectName, setProjectGroupDraft, setProjectGroupSearch, setRenameProjectId, setRenameProjectName, ungroupedProjectList }),
-            jsx(WanJuanSettingsSectionA, { Trash2, activeView, addAgentReferenceFile, agentAttachmentInputRef, agentAttachments, agentComposer, agentConfigOpen, agentConversations, agentMessagesScrollRef, agentSearch, agentTheme, clearSelectedAgentConversation, createAgent, deleteSelectedAgent, duplicateSelectedAgent, filteredAgentItems, handleAgentReferenceSelection, isLightAgentTheme, renderAgentAttachmentPill, selectedAgent, selectedAgentId, selectedAgentMessages, sendAgentMessage, setAgentAttachments, setAgentComposer, setAgentConfigOpen, setAgentSearch, setSelectedAgentId, showToast2, agentModelOptions, apiConfigs, importAgentKnowledgeFile, removeAgentKnowledgeFile, textApiConfigId, textModelApiBindings, updateSelectedAgent, appLanguage }),
-            jsx(WanJuanSettingsSectionB, { modelProtocolRegistry, activeSettingsTab, arkTrustedAssetConfig, activeStoredGlobalConfigId, activeView, allAdvancedModelSettingsExpanded, audioModelSettingsExpanded, configButlerBatchModalOpen, configButlerExpanded, globalConfigPresetsExpanded, imageModelSettingsExpanded, seedanceSettingsExpanded, setActiveSettingsTab, setAllAdvancedModelSettings, setAudioModelSettingsExpanded, setConfigButlerExpanded, setGlobalConfigPresetsExpanded, setImageModelSettingsExpanded, setSeedanceSettingsExpanded, setTextModelSettingsExpanded, setTtsMusicSettingsExpanded, setVideoModelSettingsExpanded, storedGlobalConfigs, textModelSettingsExpanded, tianjiSeedanceSettingsMode, ttsMusicSettingsExpanded, updateInfo, videoModelSettingsExpanded, $e, BACKUP_MODULE_LABELS, _e, apiConfigs, appLanguage, applyConfigButlerBatchResults, applyConfigButlerResult, applyLitterboxUploadPreset, applyPerformanceProfile, applyStoredGlobalConfig, applyTianjiSeedanceSettingsMode, audioModelApiBindings, audioModels, autoDownloadGeneratedResults, backupExportSelection, cleanStorageOptimization, configButlerAgentExpanded, configButlerApiKey, configButlerApiUrl, configButlerBatchActiveCategory, configButlerBatchItems, configButlerBatchLoading, configButlerDocUrl, configButlerLoading, configButlerMode, configButlerModel, configButlerProtocol, configButlerResultText, configButlerTargetApiConfigId, configButlerTargetCategory, configButlerTargetModel, currentLimits, customPublicUploadConfig, customUploadConfigExpanded, dailyUsageCount, deviceId, downloadDirectory, editSeedancePortrait, enableStorageOptimization, expanded, extensionToolInstalling, extensionToolStatus, handleAddPreset, handleBackupImportFile, handleRemovePreset, handleSeedancePortraitFile, handleServerVerify, imageCompatResolutions, imageModelApiBindings, imageModels, importExtensionToolPack, installExtensionTool, layeredRunConcurrencyOptions, layeredRunMaxConcurrency, manageStorageOptimizationTrash, maxPollingDuration, membershipCode, openBackupExportDialog, performanceProfile, pollingInterval, presetPrompts, projects, purgeStorageOptimizationTrash, qiniuConfig, qiniuJsonImportOpen, qiniuJsonImportText, qiniuUploadConfigExpanded, refreshExtensionToolStatus, refreshStorageOptimizationStatus, removeSeedancePortrait, resetJixinDefaultConfiguration, resetSeedancePortraitForm, restoreStorageOptimizationTrash, runConfigButler, runConfigButlerBatch, runNextStorageMigration, saveSeedancePortraitForm, saveStoredGlobalConfigApiDocUrl, scanStorageOptimization, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedancePortraitEditingId, seedancePortraitFileInputRef, seedancePortraitForm, seedancePortraitLibraryExpanded, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, setActiveStoredGlobalConfigId, setApiConfigs, setArkTrustedAssetConfig, setAppLanguage, setAudioModelApiBindings, setAudioModels, setAutoDownloadGeneratedResults, setBackupExportSelection, setConfigButlerAgentExpanded, setConfigButlerApiKey, setConfigButlerApiUrl, setConfigButlerBatchActiveCategory, setConfigButlerBatchItems, setConfigButlerBatchModalOpen, setConfigButlerDocUrl, setConfigButlerMode, setConfigButlerModel, setConfigButlerProtocol, setConfigButlerResultText, setConfigButlerTargetApiConfigId, setConfigButlerTargetCategory, setConfigButlerTargetModel, setCustomPublicUploadConfig, setCustomUploadConfigExpanded, setDownloadDirectory, setExpanded, setImageCompatResolutions, setImageModelApiBindings, setImageModels, setLayeredRunConcurrencyOptions, setLayeredRunMaxConcurrency, setMaxPollingDuration, setMembershipCode, setPollingInterval, setQiniuConfig, setQiniuJsonImportOpen, setQiniuJsonImportText, setQiniuUploadConfigExpanded, setSeedanceDurations, setSeedanceEnableWebSearch, setSeedanceGenerateAudio, setSeedanceModel, setSeedancePortraitForm, setSeedancePortraitLibraryExpanded, setSeedanceRatios, setSeedanceResolutions, setSeedanceUploadMode, setSeedanceWatermark, setShowQiniuSecretKey, setShowTosSecretKey, setStorageOptimizationLastResult, setStorageOptimizationPaused, setStoredGlobalConfigs, setTextModelApiBindings, setThemeMode, setTianjiSeedanceModel, setTongyiWanxiangDurations, setTongyiWanxiangEditModels, setTongyiWanxiangImageModels, setTongyiWanxiangRatios, setTongyiWanxiangReferenceImageModels, setTongyiWanxiangResolutions, setTongyiWanxiangSettingsExpanded, setTongyiWanxiangTextModels, setTosConfig, setTosUploadConfigExpanded, setTtsMusicModel, setVideoAspectRatios, setVideoDurations, setVideoModelApiBindings, setVideoModels, setVideoResolutions, showQiniuSecretKey, showStorageOptimizationDetails, showToast2, showTosSecretKey, storageOptimizationBusy, storageOptimizationEnabled, storageOptimizationLastResult, storageOptimizationPaused, storageOptimizationStatus, textModelApiBindings, textModels, themeMode, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangSettingsExpanded, tongyiWanxiangTextModels, tosConfig, tosUploadConfigExpanded, ttsMusicModel, updatePresetField, users, videoAspectRatios, videoDurations, videoModelApiBindings, videoModels, videoResolutions }),
+            jsx(WanJuanSettingsSectionD, { modelConfigurationReady, modelConfigurationUnavailable:assistantSettingsUnavailable, assistantCanvasControllerRef, $e, Trash2, VtRenameProject, WanJuanCanvasShell, activeProjectId, activeView, addCustomNodeTemplate, addTransitResource, apiConfigs, arkTrustedAssetConfig, setArkTrustedAssetConfig, audioApiKey, audioApiUrl, audioModelApiBindings, audioModelProtocolBindings, audioModels, configButlerErrorAssistant, configButlerErrorAssistantMinimized, customPublicUploadConfig, deleteCustomNodeTemplate, edges, getUnreadSystemNotifications, globalTasks, handleDeleteProject, imageApiKey, imageApiUrl, imageCompatResolutions, imageModelApiBindings, imageModelProtocolBindings, imageModels, isOpen, layeredRunConcurrencyOptions, layeredRunMaxConcurrency, maxPollingDuration, modelProtocolRegistry, newProjectIds, openSystemNotificationPanel, pollingInterval, presetPrompts, projectGroupIds, projectGroupPanelOpen, projectGroupedSectionsAll, projectMenuOpen, projectStorageLabel, projectUngroupedAll, projects, qiniuConfig, renameProjectId, runManualConfigButlerErrorQuery, runStorageMigrationForProject, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, sendToPlugin, setActiveProjectId, setIsOpen, setNewProjectGroupId, setNewProjectIds, setProjectGroupPanelOpen, setProjectMenuOpen, settingsNotificationChecking, showToast2, textApiKey, textApiUrl, textModelApiBindings, textModelProtocolBindings, textModels, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangTextModels, tosConfig, transitResources, ttsMusicModel, updateGlobalTasks, videoApiKey, videoApiUrl, videoAspectRatios, videoDurations, videoModelApiBindings, videoModelProtocolBindings, videoModelRequestProfilesText, videoModels, videoResolutions, applyConfigButlerErrorAssistantFix, ConfirmRenameProject, applyConfigButlerManualProtocolFix, canManualRecoverImageTask, canManuallyRefreshGlobalTask, configButlerManualProblemPart, configButlerManualProtocolName, configButlerManualProtocolOpen, configButlerManualProtocolText, configButlerRepairHistory, configButlerRepairHistoryOpen, configErrorAssistantTheme, confirmProjectGroupRename, createProjectGroup, deleteProjectGroup, editingProjectGroupId, editingProjectGroupName, groupedProjectSections, handleCreateProject, handleManualRecoverImageTask, moveProjectToGroup, newProjectGroupId, newProjectName, openConfigButlerManualProblemFields, persistProjectGroups, projectGroupDraft, projectGroupList, projectGroupSearch, refreshGlobalTask, renameProjectGroup, renameProjectName, rollbackConfigButlerRepair, setConfigButlerErrorAssistant, setConfigButlerErrorAssistantMinimized, setConfigButlerManualProblemPart, setConfigButlerManualProtocolName, setConfigButlerManualProtocolOpen, setConfigButlerManualProtocolText, setConfigButlerRepairHistoryOpen, setEditingProjectGroupId, setEditingProjectGroupName, setNewProjectName, setProjectGroupDraft, setProjectGroupSearch, setRenameProjectId, setRenameProjectName, ungroupedProjectList }),
+            jsx(WanJuanSettingsSectionA, { Trash2, activeView:activeView === `agents` && !assistantLegacyMode && typeof window.wanjuanDesktop?.assistantWorkspaceList === `function` ? `assistant-workbench` : activeView, onOpenAssistantWorkbench:() => setAssistantLegacyMode(false), addAgentReferenceFile, agentAttachmentInputRef, agentAttachments, agentComposer, agentConfigOpen, agentConversations, agentMessagesScrollRef, agentSearch, agentTheme, clearSelectedAgentConversation, createAgent, deleteSelectedAgent, duplicateSelectedAgent, filteredAgentItems, handleAgentReferenceSelection, isLightAgentTheme, renderAgentAttachmentPill, selectedAgent, selectedAgentId, selectedAgentMessages, sendAgentMessage, setAgentAttachments, setAgentComposer, setAgentConfigOpen, setAgentSearch, setSelectedAgentId, showToast2, agentModelOptions, apiConfigs, importAgentKnowledgeFile, removeAgentKnowledgeFile, textApiConfigId, textModelApiBindings, updateSelectedAgent, appLanguage }),
+            jsx(WanJuanSettingsSectionB, { modelProtocolRegistry, activeSettingsTab, arkTrustedAssetConfig, activeStoredGlobalConfigId, activeView, allAdvancedModelSettingsExpanded, audioModelSettingsExpanded, configButlerBatchModalOpen, configButlerExpanded, globalConfigPresetsExpanded, imageModelSettingsExpanded, seedanceSettingsExpanded, setActiveSettingsTab, setAllAdvancedModelSettings, setAudioModelSettingsExpanded, setConfigButlerExpanded, setGlobalConfigPresetsExpanded, setImageModelSettingsExpanded, setSeedanceSettingsExpanded, setTextModelSettingsExpanded, setTtsMusicSettingsExpanded, setVideoModelSettingsExpanded, storedGlobalConfigs, textModelSettingsExpanded, tianjiSeedanceSettingsMode, ttsMusicSettingsExpanded, updateInfo, videoModelSettingsExpanded, $e, BACKUP_MODULE_LABELS, _e, apiConfigs, appLanguage, applyConfigButlerBatchResults, applyConfigButlerResult, applyLitterboxUploadPreset, applyPerformanceProfile, applyStoredGlobalConfig, applyTianjiSeedanceSettingsMode, audioModelApiBindings, audioModels, autoDownloadGeneratedResults, backupExportSelection, cleanStorageOptimization, configButlerAgentExpanded, configButlerUseAssistant, setConfigButlerUseAssistant, configButlerApiKey, configButlerApiUrl, configButlerBatchActiveCategory, configButlerBatchItems, configButlerBatchLoading, configButlerDocUrl, configButlerLoading, configButlerResultStale, setConfigButlerResultStale, configButlerMode, configButlerModel, configButlerProtocol, configButlerResultText, configButlerTargetApiConfigId, configButlerTargetCategory, configButlerTargetModel, currentLimits, customPublicUploadConfig, customUploadConfigExpanded, dailyUsageCount, deviceId, downloadDirectory, editSeedancePortrait, enableStorageOptimization, expanded, extensionToolInstalling, extensionToolStatus, handleAddPreset, handleBackupImportFile, handleRemovePreset, handleSeedancePortraitFile, handleServerVerify, imageCompatResolutions, imageModelApiBindings, imageModels, importExtensionToolPack, installExtensionTool, layeredRunConcurrencyOptions, layeredRunMaxConcurrency, manageStorageOptimizationTrash, maxPollingDuration, membershipCode, openBackupExportDialog, performanceProfile, pollingInterval, presetPrompts, projects, purgeStorageOptimizationTrash, qiniuConfig, qiniuJsonImportOpen, qiniuJsonImportText, qiniuUploadConfigExpanded, refreshExtensionToolStatus, refreshStorageOptimizationStatus, removeSeedancePortrait, resetJixinDefaultConfiguration, resetSeedancePortraitForm, restoreStorageOptimizationTrash, runConfigButler, runConfigButlerBatch, runNextStorageMigration, saveSeedancePortraitForm, saveStoredGlobalConfigApiDocUrl, scanStorageOptimization, seedanceDurations, seedanceEnableWebSearch, seedanceGenerateAudio, seedanceModel, seedancePortraitEditingId, seedancePortraitFileInputRef, seedancePortraitForm, seedancePortraitLibraryExpanded, seedanceRatios, seedanceResolutions, seedanceUploadMode, seedanceVirtualPortraits, seedanceWatermark, setActiveStoredGlobalConfigId, setApiConfigs, setArkTrustedAssetConfig, setAppLanguage, setAudioModelApiBindings, setAudioModels, setAutoDownloadGeneratedResults, setBackupExportSelection, setConfigButlerAgentExpanded, setConfigButlerApiKey, setConfigButlerApiUrl, setConfigButlerBatchActiveCategory, setConfigButlerBatchItems, setConfigButlerBatchModalOpen, setConfigButlerDocUrl, setConfigButlerMode, setConfigButlerModel, setConfigButlerProtocol, setConfigButlerResultText, setConfigButlerTargetApiConfigId, setConfigButlerTargetCategory, setConfigButlerTargetModel, setCustomPublicUploadConfig, setCustomUploadConfigExpanded, setDownloadDirectory, setExpanded, setImageCompatResolutions, setImageModelApiBindings, setImageModels, setLayeredRunConcurrencyOptions, setLayeredRunMaxConcurrency, setMaxPollingDuration, setMembershipCode, setPollingInterval, setQiniuConfig, setQiniuJsonImportOpen, setQiniuJsonImportText, setQiniuUploadConfigExpanded, setSeedanceDurations, setSeedanceEnableWebSearch, setSeedanceGenerateAudio, setSeedanceModel, setSeedancePortraitForm, setSeedancePortraitLibraryExpanded, setSeedanceRatios, setSeedanceResolutions, setSeedanceUploadMode, setSeedanceWatermark, setShowQiniuSecretKey, setShowTosSecretKey, setStorageOptimizationLastResult, setStorageOptimizationPaused, setStoredGlobalConfigs, setTextModelApiBindings, setThemeMode, setTianjiSeedanceModel, setTongyiWanxiangDurations, setTongyiWanxiangEditModels, setTongyiWanxiangImageModels, setTongyiWanxiangRatios, setTongyiWanxiangReferenceImageModels, setTongyiWanxiangResolutions, setTongyiWanxiangSettingsExpanded, setTongyiWanxiangTextModels, setTosConfig, setTosUploadConfigExpanded, setTtsMusicModel, setVideoAspectRatios, setVideoDurations, setVideoModelApiBindings, setVideoModels, setVideoResolutions, showQiniuSecretKey, showStorageOptimizationDetails, showToast2, showTosSecretKey, storageOptimizationBusy, storageOptimizationEnabled, storageOptimizationLastResult, storageOptimizationPaused, storageOptimizationStatus, textModelApiBindings, textModels, themeMode, tianjiSeedanceModel, tongyiWanxiangDurations, tongyiWanxiangEditModels, tongyiWanxiangImageModels, tongyiWanxiangRatios, tongyiWanxiangReferenceImageModels, tongyiWanxiangResolutions, tongyiWanxiangSettingsExpanded, tongyiWanxiangTextModels, tosConfig, tosUploadConfigExpanded, ttsMusicModel, updatePresetField, users, videoAspectRatios, videoDurations, videoModelApiBindings, videoModels, videoResolutions }),
           ],
         }),
         backupDialogState &&

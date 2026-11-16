@@ -1,6 +1,7 @@
 // 职责：项目安全域 - 画布状态快照/自动备份/隔离/可疑保存检测与拦截提示，以及桌面存储清理。
 
 const { fs, os, path } = require("./runtime.cjs");
+const {isolatedCandidatePaths}=require('../shared/isolated-candidate-qa.cjs');
 const {
   STORAGE_KEY,
   BOOT_THEME_MIRROR_KEY,
@@ -49,6 +50,7 @@ function projectSafetyTimestampSegment(date = new Date()) {
 }
 
 function defaultProjectSafetyBackupRoot() {
+  const qa=isolatedCandidatePaths();if(qa)return qa.safetyBackup;
   return path.join(os.homedir(), "Downloads", "万卷灵境", "自动备份");
 }
 
@@ -64,6 +66,7 @@ function normalizeProjectSafetyInterval(value, fallback) {
 
 async function getProjectSafetyConfig() {
   const stored = await projectSafetyGetMeta("config").catch(() => null);
+  const qa=isolatedCandidatePaths();
   return {
     enabled: stored?.enabled !== false,
     currentIntervalMs: normalizeProjectSafetyInterval(
@@ -74,7 +77,7 @@ async function getProjectSafetyConfig() {
       stored?.allIntervalMs,
       PROJECT_SAFETY_DEFAULT_ALL_BACKUP_INTERVAL_MS
     ),
-    backupRoot: stored?.backupRoot || defaultProjectSafetyBackupRoot()
+    backupRoot: qa?.safetyBackup || stored?.backupRoot || defaultProjectSafetyBackupRoot()
   };
 }
 
@@ -93,7 +96,7 @@ async function setProjectSafetyConfig(patch = {}) {
     next.allIntervalMs,
     PROJECT_SAFETY_DEFAULT_ALL_BACKUP_INTERVAL_MS
   );
-  next.backupRoot = next.backupRoot || defaultProjectSafetyBackupRoot();
+  next.backupRoot = isolatedCandidatePaths()?.safetyBackup || next.backupRoot || defaultProjectSafetyBackupRoot();
   await projectSafetySetMeta("config", next);
   return next;
 }

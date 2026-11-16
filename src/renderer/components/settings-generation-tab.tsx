@@ -2,6 +2,7 @@
 import { jsx, jsxs } from "react/jsx-runtime";
 import { WANJUAN_PERFORMANCE_PROFILE_PRESETS, WanJuanPerformanceProfileList } from "../lib/performance-profile";
 import { Trash2 } from "lucide-react";
+import { invalidateAssistantPreferencePersistence } from "../lib/assistant-preferences";
 declare const chrome: any;
 
 export function WanJuanSettingsGenerationTab({
@@ -255,6 +256,7 @@ export function WanJuanSettingsGenerationTab({
 	                                            "aria-checked": autoDownloadGeneratedResults ? `true` : `false`,
 	                                            onClick: () => {
 	                                              let nextEnabled = !autoDownloadGeneratedResults;
+	                                              invalidateAssistantPreferencePersistence("autoDownload", document.documentElement);
 	                                              setAutoDownloadGeneratedResults(nextEnabled);
 	                                              try {
 	                                                window.dispatchEvent(new CustomEvent(`wanjuan:auto-download-setting-changed`, {

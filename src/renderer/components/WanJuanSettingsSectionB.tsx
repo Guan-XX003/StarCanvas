@@ -97,6 +97,7 @@ export function WanJuanSettingsSectionB(props: any) {
     backupExportSelection,
     cleanStorageOptimization,
     configButlerAgentExpanded,
+    configButlerUseAssistant,
     configButlerApiKey,
     configButlerApiUrl,
     configButlerBatchActiveCategory,
@@ -104,6 +105,7 @@ export function WanJuanSettingsSectionB(props: any) {
     configButlerBatchLoading,
     configButlerDocUrl,
     configButlerLoading,
+    configButlerResultStale,
     configButlerMode,
     configButlerModel,
     configButlerProtocol,
@@ -315,6 +317,7 @@ export function WanJuanSettingsSectionB(props: any) {
     }
   }, [activeSettingsTab, enterpriseSettingsManaged, setActiveSettingsTab]);
   return jsxs(`div`, {
+              "data-wanjuan-assistant-view": `settings`,
               className: `absolute inset-0 flex bg-[#121212] overflow-hidden wanjuan-settings-page ${activeView === `settings` ? `visible z-10` : `invisible -z-10`}`,
               children: [
                 jsxs(`div`, {
@@ -456,6 +459,7 @@ export function WanJuanSettingsSectionB(props: any) {
 		                jsx(`div`, {
 		                  className: `flex-1 overflow-y-auto p-6 relative pb-24 custom-scrollbar bg-[#121212] wanjuan-settings-content`,
 		                  children: jsxs(`div`, {
+		                    "data-wanjuan-assistant-settings-tab": activeSettingsTab,
 		                    className: `${activeSettingsTab === `oneStop` ? `max-w-none` : `max-w-4xl mx-auto`} flex flex-col gap-6 wanjuan-settings-content-inner`,
 		                    children: [
                       updateInfo?.hasUpdate &&
@@ -777,12 +781,17 @@ export function WanJuanSettingsSectionB(props: any) {
   applyConfigButlerResult,
   applyStoredGlobalConfig,
   configButlerAgentExpanded,
+  configButlerUseAssistant,
+  setConfigButlerUseAssistant: props.setConfigButlerUseAssistant,
+  appLanguage,
   configButlerApiKey,
   configButlerApiUrl,
   configButlerBatchItems,
   configButlerBatchLoading,
   configButlerDocUrl,
   configButlerLoading,
+  configButlerResultStale,
+  setConfigButlerResultStale: props.setConfigButlerResultStale,
   configButlerMode,
   configButlerModel,
   configButlerProtocol,

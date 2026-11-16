@@ -3,6 +3,7 @@
  */
 import { useCallback, useMemo } from "react";
 import { cloneBackupValue } from "../lib/backup";
+import { assertCanvasHasNoPlainExportCustomConfigs } from "../lib/custom-node-config-transform";
 
 interface UseSanitizeProjectCanvasStateForExportDeps {
   sanitizeProjectNodeDataForExport: any;
@@ -12,7 +13,8 @@ export function use_sanitizeProjectCanvasStateForExport(deps: UseSanitizeProject
   const {
     sanitizeProjectNodeDataForExport,
   } = deps;
-  const sanitizeProjectCanvasStateForExport = (exportCanvasState) => {
+  const sanitizeProjectCanvasStateForExport = (exportCanvasState, options: {allowLocalConfigReferences?: boolean} = {}) => {
+                    if (options.allowLocalConfigReferences !== true) assertCanvasHasNoPlainExportCustomConfigs(exportCanvasState);
                     let canvasState = cloneBackupValue(exportCanvasState || {});
                     return (
                       Array.isArray(canvasState.nodes) &&

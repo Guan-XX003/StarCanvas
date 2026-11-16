@@ -4,6 +4,7 @@ const path = require("path");
 const { fileURLToPath, pathToFileURL } = require("url");
 const { app } = require("../electron-refs.cjs");
 const { appendDesktopLog } = require("../logging.cjs");
+const {assertCandidateQaPath}=require('../../shared/isolated-candidate-qa.cjs');
 
 // Windows 保留设备名（不分大小写，带或不带扩展名都非法）：CON/PRN/AUX/NUL/COM1-9/LPT1-9
 const WIN_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
@@ -36,6 +37,7 @@ function defaultDownloadDirectory() {
 
 function resolveWritableDownloadDirectory(requestedDirectory) {
   const requested = requestedDirectory || defaultDownloadDirectory();
+  assertCandidateQaPath(requested);
   try {
     fs.mkdirSync(requested, { recursive: true });
     fs.accessSync(requested, fs.constants.W_OK);
@@ -55,6 +57,7 @@ function resolveWritableDownloadDirectory(requestedDirectory) {
 }
 
 function mediaLibraryRoot(directory) {
+  assertCandidateQaPath(directory || defaultDownloadDirectory());
   return path.join(directory || defaultDownloadDirectory(), "万卷画布媒体库");
 }
 

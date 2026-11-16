@@ -30,9 +30,9 @@ export function use_buildProjectLocalforageExportPayload(deps: UseBuildProjectLo
                         if (!projectId) continue;
                         let projectState =
                           projectId === exportOptions.currentProjectId && exportOptions.currentProjectState ?
-                          sanitizeProjectCanvasStateForExport(exportOptions.currentProjectState) :
+                          sanitizeProjectCanvasStateForExport(exportOptions.currentProjectState, {allowLocalConfigReferences:exportOptions.encrypted === true}) :
                           Object.prototype.hasOwnProperty.call(sourceState, getProjectCanvasStorageKey(projectId)) ?
-                          sanitizeProjectCanvasStateForExport(sourceState[getProjectCanvasStorageKey(projectId)]) :
+                          sanitizeProjectCanvasStateForExport(sourceState[getProjectCanvasStorageKey(projectId)], {allowLocalConfigReferences:exportOptions.encrypted === true}) :
                           null;
                         if (!projectState) continue;
                         projectState = await globalThis.prepareProjectMediaStateForPersistence(projectState, projectId, ``);

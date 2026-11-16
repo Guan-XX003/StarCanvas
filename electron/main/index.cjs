@@ -11,8 +11,13 @@
 const fs = require("fs");
 const path = require("path");
 
-const { app, BrowserWindow } = require("./electron-refs.cjs");
+const { app, BrowserWindow, session } = require("./electron-refs.cjs");
 const { TEST_BUILD_NAME, TEST_USER_DATA_DIR, TEST_USER_DATA_PATH } = require("./config.cjs");
+// Establish candidate roots before loading services that may inspect storage.
+// Invalid explicit QA must stop, never continue into a formal profile.
+let candidateQaPaths;
+try { candidateQaPaths=require('./candidate-qa-startup.cjs').installCandidateQaStartup(app); }
+catch { console.error('CANDIDATE_QA_STARTUP_REFUSED');app.exit(1);throw Error('CANDIDATE_QA_STARTUP_REFUSED'); }
 const { isBenignEpipeError, appendDesktopLog, sanitizeLogPayload, installDiagnosticConsole } = require("./logging.cjs");
 installDiagnosticConsole();
 const { setDesktopBaseUrl } = require("./runtime-state.cjs");
@@ -30,8 +35,8 @@ try {
   const stableUserDataPath = path.join(app.getPath("appData"), TEST_USER_DATA_DIR);
   const allowPackagedTestData = app.isPackaged && process.env.WANJUAN_ALLOW_PACKAGED_TEST_USER_DATA === "1";
   const isolatedUserDataPath = TEST_USER_DATA_PATH && (!app.isPackaged || allowPackagedTestData) ? TEST_USER_DATA_PATH : "";
-  app.setPath("userData", isolatedUserDataPath || stableUserDataPath);
-} catch {}
+  app.setPath("userData", candidateQaPaths?.profile || isolatedUserDataPath || stableUserDataPath);
+} catch { if(candidateQaPaths)throw Error('CANDIDATE_QA_STARTUP_REFUSED'); }
 
 // stdout/stderr 的 EPIPE 容错：管道提前关闭不应导致进程崩溃。
 for (const stream of [process.stdout, process.stderr]) {
@@ -99,7 +104,12 @@ app.on("second-instance", () => {
   win.focus();
 });
 
+// Register before windows/services. A cancelled quit must keep the local
+// static server and automation alive while acknowledged local saves finish.
+require('./desktop-close-coordinator.cjs').getDesktopCloseCoordinator();
+
 app.whenReady().then(async () => {
+  if(candidateQaPaths)await session.defaultSession.setProxy({mode:'direct'});
   installApplicationMenu();
   // file:// 请求白名单过滤：webSecurity 关闭期间阻断任意本地文件读取。
   installFileAccessFilter();
@@ -134,3 +144,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("will-quit", () => { stopAutomationServer().catch(() => {}); });
+// Do not hold app exit on an agent turn; stop it and best-effort remove only
+// its private temporary home. A crash or forced quit may leave that home.
+app.on("will-quit", () => { require('./assistant-service.cjs').shutdown().catch(() => {}); });

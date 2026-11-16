@@ -9,6 +9,9 @@ import { mediaUrlToDataUrl } from "../lib/reference-media";
 import { readAgentAttachmentFileAsDataUrl, releaseAgentAttachment, sanitizeAgentConversationText, selectKnowledgeChunksForQuery } from "../lib/agent";
 import { resolveModelApiBindingIdHelper, resolveModelProtocolBindingHelper } from "../lib/model-binding";
 import { serializeErrorPreview } from "../lib/log-utils";
+import { containsLikelyAssistantSecret } from "../lib/assistant-onboarding";
+import {readAssistantTextResponse} from '../lib/assistant-text-stream';
+import {fetchAssistantStream} from '../lib/assistant-stream-fetch';
 
 interface UseSendAgentMessageDeps {
   agentAttachments: any;
@@ -35,7 +38,7 @@ interface UseSendAgentMessageDeps {
   tosConfig: any;
 }
 
-export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
+export function createAgentMessageSender(deps: UseSendAgentMessageDeps, options: {conversationId?:string;signal?:AbortSignal;strict?:boolean;onWarning?:(code:string)=>void;onText?:(text:string)=>void} = {}) {
   const {
     agentAttachments,
     agentComposer,
@@ -60,7 +63,14 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
     seedanceUploadMode,
     tosConfig,
   } = deps;
+  const conversationId = options.conversationId || selectedAgent?.id;
+  const strict = options.strict === true;
+  const failure = code => Object.assign(new Error(code), {code});
+  const checkCancelled = () => {if (options.signal?.aborted) throw failure('ASSISTANT_CANCELLED');};
+  const memoryOptions = {sessionId:options.conversationId,signal:options.signal};
+  const httpFailure = status => failure(status === 401 || status === 403 ? 'ASSISTANT_PROVIDER_AUTH' : status === 402 ? 'ASSISTANT_PROVIDER_QUOTA' : status === 429 ? 'ASSISTANT_PROVIDER_RATE_LIMIT' : status >= 500 ? 'ASSISTANT_PROVIDER_SERVER' : 'ASSISTANT_PROVIDER_REQUEST');
   const sendAgentMessage = async () => {
+              checkCancelled();
               if (!selectedAgent || (!agentComposer.trim() && agentAttachments.length === 0))
                 return;
               let messageText = agentComposer.trim(),
@@ -201,10 +211,12 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
 	                    throw Error(`参考视频上传失败，未发送到模型：${error?.message || error}`);
 	                  }
 	                }),
-	                resolveDataUrl = async (attachment) =>
-	                  /^blob:/i.test(String(attachment?.url || ``)) && attachment?.file ?
-	                  await readAgentAttachmentFileAsDataUrl(attachment) :
-	                  await mediaUrlToDataUrl(attachment.url),
+	                resolveDataUrl = async (attachment) => {
+                      const value = attachment?.file && (strict || /^blob:/i.test(String(attachment?.url || ``))) ?
+                        await readAgentAttachmentFileAsDataUrl(attachment) : await mediaUrlToDataUrl(attachment.url);
+                      if(strict && (typeof value!=='string'||!/^data:(?:image|video)\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)))throw failure('ASSISTANT_MEDIA_UNAVAILABLE');
+                      return value;
+                    },
 	                resolveGeminiInlineVideoPart = (async (video) => {
 	                  let dataUrl = await resolveDataUrl(video),
 	                    dataUrlMatch = String(dataUrl || ``).match(/^data:([^;,]*)(;base64)?,(.*)$/s);
@@ -224,12 +236,13 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
 	                });
               (setAgentConversations((prevConversations) => ({
                   ...prevConversations,
-                  [selectedAgent.id]: [...(prevConversations[selectedAgent.id] || []), userMessage, assistantMessage],
+                  [conversationId]: [...(prevConversations[conversationId] || []), userMessage, assistantMessage],
                 })),
                 setAgentComposer(``),
                 setAgentAttachments(() => []));
               try {
                 let apiBindingId =
+                  (strict && selectedAgent.apiConfigId) ||
                   resolveModelApiBindingIdHelper(
                     textModelApiBindings,
                     modelName,
@@ -262,9 +275,14 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     ) || /gemini/i.test(String(modelName || ``)) ?
                     `gemini-generate-content` :
                     `openai-chat`);
-                if (!modelName) throw Error(`请先在智能体里绑定文本模型`);
-                if (!apiKey) throw Error(`请先在设置中配置文本大模型 API Key`);
-                let conversationHistory = (agentConversations[selectedAgent.id] || [])
+                if (strict && selectedAgent.apiConfigId && !apiBinding) throw failure('ASSISTANT_API_REQUIRED');
+                if (!modelName) throw strict ? failure('ASSISTANT_MODEL_REQUIRED') : Error(`请先在智能体里绑定文本模型`);
+                if (!apiKey) throw strict ? failure('ASSISTANT_ROLE_KEY_REQUIRED') : Error(`请先在设置中配置文本大模型 API Key`);
+                if (strict && !apiUrl) throw failure('ASSISTANT_API_REQUIRED');
+                if (strict && !['openai-chat','openai-responses','gemini-generate-content'].includes(requestType)) throw failure('ASSISTANT_PROTOCOL_UNSUPPORTED');
+                if (strict && selectedAttachments.some(item => item.type === 'video') && requestType !== 'gemini-generate-content') throw failure('ASSISTANT_VIDEO_UNSUPPORTED');
+                if (strict && selectedAttachments.some(item => item.type === 'document')) throw failure('ASSISTANT_DOCUMENT_UNSUPPORTED');
+                let conversationHistory = (agentConversations[conversationId] || [])
                   .filter((message) => message.role === `user` || message.role === `assistant`)
                   .concat([userMessage])
                   .slice(-12),
@@ -282,17 +300,19 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     `片段${index + 1}｜${chunk.fileName}\n${String(chunk.text || ``).trim()}`,
                   )
                   .join(`\n\n`),
-                  longTermMemory = await searchAgentLongTermMemory(selectedAgent, messageContent).catch((error) => (
-                    console.warn(`Mem0 memory search failed`, error),
-                    showToast2(error?.message || `Mem0 记忆检索失败`),
-                    ``
-                  )),
-                  parsedTemperature = Number.parseFloat(selectedAgent.temperature || `0.7`),
+                  longTermMemory = await searchAgentLongTermMemory(selectedAgent, messageContent, memoryOptions).catch((error) => {
+                    checkCancelled();
+                    if (strict) {options.onWarning?.('ASSISTANT_MEMORY_READ_FAILED');return '';}
+                    console.warn('Mem0 memory search failed');showToast2(error?.message || `Mem0 记忆检索失败`);return '';
+                  }),
+                  parsedTemperature = Number.parseFloat(selectedAgent.temperature ?? `0.7`),
                   temperature = Number.isFinite(parsedTemperature) ? parsedTemperature : 0.7,
                   fullSystemPrompt = `${systemPrompt || `你是一个智能体助手，请基于角色设定完成用户任务。`}${knowledgeText ? `\n\n已知知识库摘要：\n${knowledgeText}` : ``}${knowledgeChunksText ? `\n\n与当前问题相关的知识片段：\n${knowledgeChunksText}` : ``}${longTermMemory ? `\n\n长期记忆（由 Mem0 检索，仅作为上下文参考，不要生硬复述）：\n${longTermMemory}` : ``}`,
                   imageAttachments = selectedAttachments.filter((attachment) => attachment.type === `image`),
                   videoAttachments = selectedAttachments.filter((attachment) => attachment.type === `video`),
                   responseText = ``;
+                checkCancelled();
+                if (strict && (containsLikelyAssistantSecret(fullSystemPrompt) || conversationHistory.some(message => containsLikelyAssistantSecret(message.content)))) throw failure('ASSISTANT_SENSITIVE_INPUT');
                 if (requestType === `gemini-generate-content`) {
 	                  let parts = [],
 	                    conversationText = conversationHistory
@@ -313,14 +333,15 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     },
                     submitPath = String(protocolConfig?.submitPath || ``)
                     .trim()
-                    .replace(/\{model\}/gi, encodeURIComponent(selectedAgent.model))
+                    .replace(/\{model\}/gi, encodeURIComponent(modelName))
                     .replace(/\{apiKey\}/gi, encodeURIComponent(apiKey)),
                     endpointPath =
                     submitPath ||
-                    `/v1beta/models/${encodeURIComponent(selectedAgent.model)}:generateContent`,
+                    `/v1beta/models/${encodeURIComponent(modelName)}:generateContent`,
+                    streamEndpoint=options.onText&&/:generateContent(?:\?|$)/i.test(endpointPath)?endpointPath.replace(/:generateContent/i,':streamGenerateContent')+(endpointPath.includes('?')?'&':'?')+'alt=sse':endpointPath,
                     requestUrl = /^https?:\/\//i.test(endpointPath) ?
-                    endpointPath :
-                    `${baseUrl}${endpointPath.startsWith(`/`) ? `` : `/`}${endpointPath}`,
+                    streamEndpoint :
+                    `${strict && endpointPath.startsWith('/v1beta/') ? baseUrl.replace(/\/(?:v1|v1beta)$/i,'') : baseUrl}${streamEndpoint.startsWith(`/`) ? `` : `/`}${streamEndpoint}`,
                     headers = {
                       "Content-Type": String(protocolConfig?.contentType || `application/json`).trim() ||
                         `application/json`,
@@ -329,6 +350,7 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     try {
                       let dataUrl = await resolveDataUrl(image),
                         imageDataMatch = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+                      if(strict&&!imageDataMatch)throw failure('ASSISTANT_MEDIA_UNAVAILABLE');
                       imageDataMatch &&
                         parts.push({
                           inlineData: {
@@ -337,6 +359,7 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                           }
                         });
                     } catch (error) {
+                      if (strict) throw failure('ASSISTANT_MEDIA_UNAVAILABLE');
                       console.warn(`Failed to process agent image for Gemini`, image, error);
                     }
 	                  for (let video of videoAttachments)
@@ -352,12 +375,17 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     !isVectorEngineHost ?
                     (headers[`x-goog-api-key`] = apiKey) :
                     (headers.Authorization = `Bearer ${apiKey}`);
-                  let response = await fetch(requestUrl, {
+                  checkCancelled();
+                  let response = await (options.onText?fetchAssistantStream:fetch)(requestUrl, {
+                    signal: options.signal,
+                    starcanvasStream: !!options.onText,
+                    starcanvasNoRetry: strict,
                     method: `POST`,
                     headers: headers,
                     body: JSON.stringify(requestBody),
                   });
                   if (!response.ok) {
+                    if (strict) {await response.body?.cancel?.().catch(()=>{});throw httpFailure(response.status);}
                     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
                     try {
                       let errorBody = await response.json();
@@ -368,12 +396,13 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     } catch {}
                     throw Error(errorMessage);
                   }
-                  let responseData = await response.json();
+                  if(options.onText)responseText=await readAssistantTextResponse(response,'gemini',{signal:options.signal,onText:options.onText});
+                  else {let responseData = await response.json();
                   responseText =
                     responseData?.candidates?.[0]?.content?.parts
                     ?.map((part) => part.text || ``)
                     .join(``)
-                    .trim() || ``;
+                    .trim() || ``;}
                 } else if (requestType === `openai-responses`) {
 	                  let messages = conversationHistory
 	                    .slice(0, -1)
@@ -397,6 +426,7 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                           image_url: imageUrl
                         });
                     } catch (error) {
+                      if (strict) throw failure('ASSISTANT_MEDIA_UNAVAILABLE');
                       console.warn(`Failed to process agent image for Responses`, image, error);
                     }
                   for (let video of videoAttachments)
@@ -410,15 +440,20 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     } catch (error) {
                       throw Error(`参考视频处理失败，未发送到模型：${error?.message || error}`);
                     }
-                  let requestUrl = `${baseUrl}/v1/responses`,
-                    response = await fetch(requestUrl, {
+                  checkCancelled();
+                  let requestUrl = `${baseUrl.replace(/\/v1$/i, '')}/v1/responses`,
+                    response = await (options.onText?fetchAssistantStream:fetch)(requestUrl, {
+                      signal: options.signal,
+                      starcanvasStream: !!options.onText,
+                      starcanvasNoRetry: strict,
                       method: `POST`,
                       headers: {
                         Authorization: `Bearer ${apiKey}`,
                         "Content-Type": `application/json`,
                       },
                       body: JSON.stringify({
-                        model: selectedAgent.model,
+                        model: modelName,
+                        ...(options.onText?{stream:true}:{}),
                         input: [{
                             role: `system`,
                             content: fullSystemPrompt
@@ -433,6 +468,7 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                       }),
                     });
                   if (!response.ok) {
+                    if (strict) {await response.body?.cancel?.().catch(()=>{});throw httpFailure(response.status);}
                     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
                     try {
                       let errorBody = await response.json();
@@ -443,7 +479,8 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     } catch {}
                     throw Error(errorMessage);
                   }
-                  let responseData = await response.json();
+                  if(options.onText)responseText=await readAssistantTextResponse(response,'openai-responses',{signal:options.signal,onText:options.onText});
+                  else {let responseData = await response.json();
                   responseText =
                     String(responseData?.output_text || ``).trim() ||
                     responseData?.output
@@ -451,9 +488,9 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     ?.map((part) => part?.text || ``)
                     ?.join(``)
                     ?.trim() ||
-                    ``;
+                    ``;}
                 } else {
-                  let requestUrl = `${baseUrl}/v1/chat/completions`,
+                  let requestUrl = `${baseUrl.replace(/\/v1$/i, '')}/v1/chat/completions`,
                     messages = [{
                         role: `system`,
                         content: fullSystemPrompt
@@ -481,6 +518,7 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                           }
                         });
                     } catch (error) {
+                      if (strict) throw failure('ASSISTANT_MEDIA_UNAVAILABLE');
                       console.warn(`Failed to process agent image for Chat`, image, error);
                     }
 	                  for (let video of videoAttachments)
@@ -497,19 +535,25 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     role: `user`,
                     content: contentParts
                   });
-                  let response = await fetch(requestUrl, {
+                  checkCancelled();
+                  let response = await (options.onText?fetchAssistantStream:fetch)(requestUrl, {
+                    signal: options.signal,
+                    starcanvasStream: !!options.onText,
+                    starcanvasNoRetry: strict,
                     method: `POST`,
                     headers: {
                       Authorization: `Bearer ${apiKey}`,
                       "Content-Type": `application/json`,
                     },
                     body: JSON.stringify({
-                      model: selectedAgent.model,
+                      model: modelName,
+                      ...(options.onText?{stream:true}:{}),
                       messages: messages,
                       temperature: temperature,
                     }),
                   });
                   if (!response.ok) {
+                    if (strict) {await response.body?.cancel?.().catch(()=>{});throw httpFailure(response.status);}
                     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
                     try {
                       let errorBody = await response.json();
@@ -520,19 +564,21 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     } catch {}
                     throw Error(errorMessage);
                   }
-                  let responseData = await response.json();
+                  if(options.onText)responseText=await readAssistantTextResponse(response,'openai-chat',{signal:options.signal,onText:options.onText});
+                  else {let responseData = await response.json();
                   responseText =
                     Array.isArray(responseData?.choices?.[0]?.message?.content) ?
                     responseData.choices[0].message.content
                     .map((message) => message?.text || message?.content || ``)
                     .join(``)
                     .trim() :
-                    String(responseData?.choices?.[0]?.message?.content || ``).trim();
+                    String(responseData?.choices?.[0]?.message?.content || ``).trim();}
                 }
                 if (!String(responseText || ``).trim()) throw Error(`模型没有返回有效内容`);
+                checkCancelled();
                 setAgentConversations((prevConversations) => ({
                   ...prevConversations,
-                  [selectedAgent.id]: (prevConversations[selectedAgent.id] || []).map((item) =>
+                  [conversationId]: (prevConversations[conversationId] || []).map((item) =>
                     item.id === assistantMessageId ? {
                       ...item,
                       content: responseText,
@@ -540,17 +586,21 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
                     } : item,
                   ),
                 }));
-                storeAgentLongTermMemory(selectedAgent, messageContent, responseText).catch((error) =>
-                  (console.warn(`Mem0 memory store failed`, error),
-                    showToast2(error?.message || `Mem0 记忆写入失败`)),
-                );
+                if (strict) await storeAgentLongTermMemory(selectedAgent,messageContent,responseText,memoryOptions).catch(() => {checkCancelled();options.onWarning?.('ASSISTANT_MEMORY_WRITE_FAILED');});
+                else storeAgentLongTermMemory(selectedAgent,messageContent,responseText).catch(error => {console.warn('Mem0 memory store failed');showToast2(error?.message || `Mem0 记忆写入失败`);});
+                checkCancelled();
+                return responseText;
               } catch (error) {
+                if (strict) {
+                  if (options.signal?.aborted) throw failure('ASSISTANT_CANCELLED');
+                  throw failure(/^ASSISTANT_[A-Z_]+$/.test(error?.code || '') ? error.code : 'ASSISTANT_PROVIDER_REQUEST');
+                }
                 let agentErrorMessage = error?.message || `智能体回复失败`;
                 (console.error(error),
                   showToast2(agentErrorMessage),
                   setAgentConversations((item) => ({
                     ...item,
-                    [selectedAgent.id]: (item[selectedAgent.id] || []).map((conversationEntry) =>
+                    [conversationId]: (item[conversationId] || []).map((conversationEntry) =>
                       conversationEntry.id === assistantMessageId ?
                       {
                         ...conversationEntry,
@@ -565,4 +615,10 @@ export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
               }
             };
   return { sendAgentMessage };
+}
+
+// Both legacy role chat and the encrypted workspace use the same request
+// builder. The workspace supplies session ownership and strict cancellation.
+export function use_sendAgentMessage(deps: UseSendAgentMessageDeps) {
+  return createAgentMessageSender(deps);
 }

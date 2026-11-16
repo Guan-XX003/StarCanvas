@@ -1,0 +1,24 @@
+# Restricted composition for the official sdk-minimal runtime.
+# This is not an OS security sandbox. Any change requires a new pinned hash,
+# effective-composition inspection and testing against the bundled runtime.
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: sandbox-policy
+  config:
+    mode: read-only
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: llm-retry
+  disabled: true
+# Conversation history is kept in memory for the current process only. The
+# default JSONL persistence would leave private prompts behind after a crash.
+- id: sessions
+  disabled: true
