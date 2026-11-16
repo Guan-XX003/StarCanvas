@@ -57,8 +57,14 @@ test("launch and build entrypoints all retain the runtime guard", () => {
   for (const name of ["start", "start:dev", "debug", "build", "build:win", "build:win:x64", "build:win:x86", "build:win:ia32"]) {
     assert.equal(pkg.scripts[`pre${name}`], "node scripts/verify-electron-runtime.cjs", name);
   }
-  for (const name of ["start-dev.cjs", "start-candidate-isolated.cjs"]) {
-    const source = fs.readFileSync(path.join(__dirname, name), "utf8");
-    assert.ok(source.indexOf("verifyElectronRuntime(projectRoot)") < source.indexOf("fs.mkdirSync"));
-  }
+  const dev = fs.readFileSync(path.join(__dirname, "start-dev.cjs"), "utf8");
+  assert.ok(dev.indexOf("verifyElectronRuntime(projectRoot)") < dev.indexOf("fs.mkdirSync"));
+  // Packaged candidates must not load source Electron. The source branch now
+  // delegates its pre-profile runtime gate to the shared launch-plan owner.
+  const launcher = fs.readFileSync(path.join(__dirname, "start-candidate-isolated.cjs"), "utf8");
+  assert.ok(launcher.indexOf("createCandidateLaunchPlan()") < launcher.indexOf("spawn(plan.command"));
+  const plan = fs.readFileSync(path.join(__dirname, "candidate-launch-plan.cjs"), "utf8");
+  const guard = plan.indexOf("verifySourceRuntime(root)");
+  assert.ok(guard >= 0 && guard < plan.indexOf("command = sourceElectron()"));
+  assert.ok(guard < plan.indexOf("fs.mkdirSync(profile"));
 });
