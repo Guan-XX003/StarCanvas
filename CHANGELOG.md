@@ -2,6 +2,7 @@
 
 ## 1.4.9 - 2026-11-16
 
+- Updated Electron to 42.11.16 for the compromised eMudhra certificate mitigation, and Vite to 8.1.6 for development-server fixes.
 - Added a draggable, resizable main assistant with multiple conversations, reusable roles, search, archives, attachments and streaming responses.
 - Unified the built-in assistant, CLI and 14-tool stdio MCP server behind the same App-confirmed operation service. Canvas edits, reference imports, generation and result export require explicit approval; fee-bearing generation is not silently retried.
 - Added structured canvas planning, undo, task tracking, reference-media workflows and safe result saving through the normal canvas request and polling paths.
