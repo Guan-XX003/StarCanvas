@@ -1,6 +1,12 @@
 # StarCanvas CLI / MCP 自动化
 
-## 1.4.9：App、CLI 与 MCP 共用授权底座
+## 1.5.0：独立桌面助手与匹配 CLI / MCP
+
+1.5.0 新增可弹出、置顶和收回画布的桌面助手。它与画布共用会话及操作授权，
+不是第二个画布实例。CLI/MCP 仍通过原来的 App 操作服务和 14 个工具工作，
+本次没有新增绕过确认、直接执行或自动重试生成的权限。
+
+### App、CLI 与 MCP 共用授权底座
 
 本版本包含多会话主智能助手、角色工作台、受控画布操作，以及配套 CLI/MCP。
 已在 macOS arm64 与 Windows x64 隔离安装版验证升级、凭据保存、素材与创作流程。
@@ -301,7 +307,7 @@ macOS 与 Windows 安装版已验证 CLI/MCP 连接、画布确认、角色和�
 
 ## 独立下载
 
-当前版本：`1.4.9`。配套归档：[starcanvas-cli-1.4.9.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/starcanvas-cli-1.4.9.zip)。
+当前版本：`1.5.0`。配套归档：[starcanvas-cli-1.5.0.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.5.0/starcanvas-cli-1.5.0.zip)。
 
 CLI/MCP 可以单独解压，不需要放在 App 安装目录内，但调用时仍需要桌面应用正在
 运行。请使用与 App 同版本的工具包，不要混用旧版客户端。

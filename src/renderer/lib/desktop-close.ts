@@ -45,20 +45,35 @@ function copy(){
  return lang==='en-US'?{saving:'Saving local changes…',blocked:'Could not confirm all local changes were saved. The window stays open; check storage and try closing again.',continue:'Keep working'}:lang==='zh-TW'?{saving:'正在儲存本機變更…',blocked:'無法確認本機變更已完整儲存，視窗已保留。請檢查儲存狀態後再關閉。',continue:'繼續使用'}:{saving:'正在保存本地更改…',blocked:'无法确认本地更改已完整保存，窗口已保留。请检查存储状态后再关闭。',continue:'继续使用'};
 }
 let registry:ReturnType<typeof createDesktopCloseRegistry>;
+const presentationDocuments=new Set<Document>();
+export function registerDesktopCloseDocument(doc:Document){presentationDocuments.add(doc);return()=>{presentationDocuments.delete(doc);};}
+export function freezeDesktopCloseDocuments(documents:Document[]){
+ const roots=[...new Set(documents)].map(doc=>({root:doc.getElementById('root'),focused:doc.activeElement as HTMLElement,oldInert:doc.getElementById('root')?.inert}));
+ for(const item of roots)if(item.root)item.root.inert=true;
+ return()=>{for(const {root,oldInert,focused} of roots){if(root)root.inert=!!oldInert;if(focused?.isConnected)focused.focus?.();}};
+}
 export function registerDesktopCloseParticipant(name:'canvas'|'assistant'|'settings',prepare:Prepare){
  if(typeof document==='undefined')return()=>{};
  if(!registry){
-  let banner:HTMLElement|null=null;
-  const panel=()=>{banner?.remove();const element=document.createElement('div');element.dataset.wanjuanI18nSkip='';element.style.cssText='position:fixed;z-index:2147483646;left:50%;bottom:28px;transform:translateX(-50%);width:min(420px,calc(100% - 32px));box-sizing:border-box;padding:18px;border-radius:18px;background:var(--wj-surface,#23262d);color:var(--wj-text,#eee);border:1px solid var(--wj-control-border,#555);box-shadow:0 12px 42px #0004;font:13px/1.6 system-ui,sans-serif';document.body.append(element);banner=element;return element;};
+  let banners:HTMLElement[]=[];
+  const panels=()=>{
+   banners.forEach(element=>element.remove());banners=[];
+   for(const doc of new Set([document,...presentationDocuments])){
+    if(doc.defaultView?.closed||!doc.body)continue;
+    const element=doc.createElement('div');element.dataset.wanjuanI18nSkip='';element.style.cssText='position:fixed;z-index:2147483646;left:50%;bottom:28px;transform:translateX(-50%);width:min(420px,calc(100% - 32px));box-sizing:border-box;padding:18px;border-radius:18px;background:var(--wj-surface,#23262d);color:var(--wj-text,#eee);border:1px solid var(--wj-control-border,#555);box-shadow:0 12px 42px #0004;font:13px/1.6 system-ui,sans-serif';doc.body.append(element);banners.push(element);
+   }
+   return banners;
+  };
   registry=createDesktopCloseRegistry(()=>{
-   const root=document.getElementById('root'),oldInert=root?.inert,focused=document.activeElement as HTMLElement;
-   if(root)root.inert=true;
-   const element=panel();element.setAttribute('role','status');element.textContent=copy().saving;
+   const restoreDocuments=freezeDesktopCloseDocuments([document,...presentationDocuments]);
+   const elements=panels();for(const element of elements){element.setAttribute('role','status');element.textContent=copy().saving;}
    const block=document.createElement('div');block.style.cssText='position:fixed;inset:0;z-index:2147483645;cursor:progress';document.body.append(block);
-   let thawed=false;return()=>{if(thawed)return;thawed=true;block.remove();element.remove();if(root)root.inert=!!oldInert;if(focused?.isConnected)focused.focus?.();};
+   let thawed=false;return()=>{if(thawed)return;thawed=true;block.remove();elements.forEach(element=>element.remove());restoreDocuments();};
   },()=>{
-   const text=copy(),element=panel();element.setAttribute('role','alert');element.append(document.createTextNode(text.blocked));
-   const button=document.createElement('button');button.textContent=text.continue;button.style.cssText='display:block;margin-top:12px;border-radius:12px;padding:6px 12px;border:1px solid var(--wj-control-border,#555);background:var(--wj-control-bg,#333);color:inherit;font:inherit';button.onclick=()=>element.remove();element.append(button);
+   const text=copy();for(const element of panels()){
+    const doc=element.ownerDocument;element.setAttribute('role','alert');element.append(doc.createTextNode(text.blocked));
+    const button=doc.createElement('button');button.textContent=text.continue;button.style.cssText='display:block;margin-top:12px;border-radius:12px;padding:6px 12px;border:1px solid var(--wj-control-border,#555);background:var(--wj-control-bg,#333);color:inherit;font:inherit';button.onclick=()=>element.remove();element.append(button);
+   }
   });
   Object.defineProperty(globalThis,'__wanjuanDesktopClose',{value:Object.freeze({version:1,prepare:registry.prepare,release:registry.release}),writable:false,configurable:false});
  }

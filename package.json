@@ -1,6 +1,6 @@
 {
   "name": "wanjuan-lingjing",
-  "version": "1.4.9",
+  "version": "1.5.0",
   "private": true,
   "description": "StarCanvas - macOS AI 创作画布桌面应用",
   "author": "",
@@ -15,6 +15,7 @@
   "scripts": {
     "verify:electron-runtime": "node scripts/verify-electron-runtime.cjs",
     "test:electron-runtime": "node --test scripts/test-electron-runtime.cjs",
+    "test:assistant:desktop": "node --test scripts/test-assistant-desktop-window.cjs scripts/test-desktop-close.cjs",
     "test:assistant:workspace": "node --test scripts/test-assistant-attachment-ui.cjs scripts/test-assistant-history.cjs scripts/test-assistant-workspace.cjs scripts/test-assistant-workspace-ipc.cjs scripts/test-assistant-workspace-client.cjs scripts/test-assistant-role-engine.cjs scripts/test-assistant-workspace-media.cjs scripts/test-assistant-workspace-backup.cjs scripts/test-assistant-workspace-ui-contract.cjs",
     "test:assistant:canvas-plans": "node --test scripts/test-canvas-operation-plan.cjs scripts/test-canvas-plan-runtime.cjs scripts/test-assistant-canvas-planner.cjs scripts/test-canvas-generation-preflight.cjs scripts/test-project-switcher-refresh.cjs scripts/test-canvas-load-fit.cjs",
     "test:assistant:creative": "node --test scripts/test-canvas-plan-generation.cjs scripts/test-assistant-canvas-planner.cjs scripts/test-assistant-generation-ui.cjs scripts/test-assistant-generation-history.cjs scripts/test-canvas-model-hydration.cjs",
@@ -151,7 +152,7 @@
   "build": {
     "appId": "com.wanjuan.lingjing",
     "productName": "StarCanvas",
-    "artifactName": "StarCanvas-1.4.9-${arch}.${ext}",
+    "artifactName": "StarCanvas-1.5.0-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -193,8 +194,8 @@
       ],
       "extraResources": [{"from":"tool-runtime/deepseek-harness/darwin-${arch}","to":"assistant-harness/darwin-${arch}"}],
       "extendInfo": {
-        "CFBundleShortVersionString": "1.4.9",
-        "CFBundleVersion": "1.4.9"
+        "CFBundleShortVersionString": "1.5.0",
+        "CFBundleVersion": "1.5.0"
       }
     },
     "win": {

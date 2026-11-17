@@ -76,9 +76,9 @@ export function WanJuanCompareVersions(left: any, right: any) {
 
 export function WanJuanGetAppVersion() {
   try {
-    return chrome?.runtime?.getManifest?.()?.version || `1.4.9`;
+    return chrome?.runtime?.getManifest?.()?.version || `1.5.0`;
   } catch {
-    return `1.4.9`;
+    return `1.5.0`;
   }
 }
 

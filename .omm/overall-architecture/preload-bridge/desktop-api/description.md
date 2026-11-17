@@ -16,3 +16,8 @@ request callback until that invoke ends. It retains proxy payload normalization,
 main trusted-frame checks and the existing per-request abort entry. Normal
 proxyFetch stays buffered. The renderer constructs its own bounded Response
 using the shared stream adapter; no arbitrary IPC subscription is exposed.
+
+assistantWindowControl exposes only state/ready/pin/unpin/focus/focus-main and a
+no-content closed notification. Main checks the exact registered main-frame
+sender, not merely the local origin. The desktop assistant shell itself has no
+wanjuanDesktop bridge; all actions still run in the existing renderer owner.

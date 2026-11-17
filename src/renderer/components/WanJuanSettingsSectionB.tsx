@@ -280,6 +280,7 @@ export function WanJuanSettingsSectionB(props: any) {
     activeSettingsTab,
     activeStoredGlobalConfigId,
     activeView,
+    onReturnToAssistant,
     allAdvancedModelSettingsExpanded,
     audioModelSettingsExpanded,
     configButlerBatchModalOpen,
@@ -462,6 +463,7 @@ export function WanJuanSettingsSectionB(props: any) {
 		                    "data-wanjuan-assistant-settings-tab": activeSettingsTab,
 		                    className: `${activeSettingsTab === `oneStop` ? `max-w-none` : `max-w-4xl mx-auto`} flex flex-col gap-6 wanjuan-settings-content-inner`,
 		                    children: [
+                      onReturnToAssistant && jsx(`button`, {type:`button`,className:`wj-assistant-settings-back`,onClick:onReturnToAssistant,children:appLanguage===`en-US`?`Back to assistant`:appLanguage===`zh-TW`?`返回助手`:`返回助手`}),
                       updateInfo?.hasUpdate &&
                       jsxs(`div`, {
                         className: `bg-gradient-to-r from-blue-900/30 to-indigo-900/30 p-4 rounded-xl border border-blue-500/30 mb-4 flex justify-between items-center shadow-lg`,

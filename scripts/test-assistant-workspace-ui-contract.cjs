@@ -2,7 +2,9 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},fileName:file}).outputText,file);
 const {jsx}=require('react/jsx-runtime'),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
 const panelPath=path.resolve(__dirname,'../src/renderer/components/agent-config-panel.tsx'),compiled=new Module(panelPath,module);compiled.filename=panelPath;compiled.paths=module.paths;
-const normalRequire=compiled.require.bind(compiled);compiled.require=name=>name==='react'?{...React,useSyncExternalStore:(_subscribe,_read,ssr)=>ssr()}:normalRequire(name);
+// Static contract inspection does not mount the dialog. Native QA exercises
+// its focus/Escape lifecycle; refs/effects here are deliberately inert.
+const normalRequire=compiled.require.bind(compiled);compiled.require=name=>name==='react'?{...React,useSyncExternalStore:(_subscribe,_read,ssr)=>ssr(),useRef:value=>({current:value}),useEffect:()=>{}}:normalRequire(name);
 compiled._compile(ts.transpileModule(fs.readFileSync(panelPath,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},fileName:panelPath}).outputText,panelPath);
 const {WanJuanAgentConfigPanel}=compiled.exports;
 const {assistantWorkspaceTaskLabel}=require('../src/renderer/lib/assistant-workspace-task-copy.ts');

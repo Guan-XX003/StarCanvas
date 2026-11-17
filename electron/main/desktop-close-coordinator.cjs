@@ -65,6 +65,9 @@ function createDesktopCloseCoordinator({app,getBaseUrl,report=()=>{},timeoutMs=1
   const record={win,pending:null,permit:false,preparedId:''};windows.set(win.id,record);
   win.on('close',event=>{
    if(record.permit){record.permit=false;return;}
+   if(!quitIntent&&!record.pending&&!record.closing&&win.__wanjuanKeepAliveForAssistant?.()){
+    event.preventDefault();win.hide();return;
+   }
    event.preventDefault();void requestWindow(record);
   });
   win.webContents.on('will-prevent-unload',()=>{

@@ -137,3 +137,41 @@ check uses the canvas owner's existing non-mutating factory/capability/API
 presence probes and reports only counts plus default presence flags, never
 network/balance validation. Examples append bounded editable request text to
 the owning draft and do not create nodes, share content or call a model.
+
+The November 17 assistant interface shares Chat / Configure API / Diagnose
+navigation between the floating panel and full workbench. Role selection and
+session overflow menus replace permanent editing toolbars. The existing
+workspace client remains the sole encrypted role/session owner; view switches
+retain session drafts and chat scroll, with bounded history/search still
+available contextually. All interface surfaces use the same semantic theme
+tokens and 12/14/16/20 typography scale across seven themes and three locales.
+
+assistant-service-setup validates local image/video/Jimeng/music/text fields,
+then presents a separate explicit review. onPrepareService delegates to the
+normal app settings owner to append an independent provider and new model
+bindings, retaining existing manual channels, same-name bindings and protocols.
+The next settings step still confirms the actual request protocol; field checks
+and configuration submission do not prove connection, balance or generation.
+Jimeng continues through its dedicated settings, not a guessed generic video
+request. Initial DeepSeek account/key connection opens this setup; it remains
+skippable. Settings handoffs provide an explicit return to the assistant.
+
+assistant-diagnosis uses the existing scoped task reader and only its allowlisted
+metadata. A selected local snapshot is volatile and owner-scoped; analysis fills
+the original editable chat draft after a fresh exact-task read, never sends or
+retries automatically. Ambiguous task IDs are excluded from selectable rows.
+
+useAssistantAvatar stores a non-secret device-local appearance preference only:
+PNG/JPEG/WebP with a 512 KiB input bound, raster decode, 128px PNG re-encoding and
+no arbitrary URL/path/SVG. The launcher, header and replies use the same local
+image. It is not uploaded, placed in model context, or stored in project files.
+
+useAssistantDesktopWindow moves only this existing assistant presentation into
+a real native desktop window via createPortal. Its session controller, encrypted
+repository, streamed turns, drafts, API settings owner and canvas authority stay
+in the original renderer. A child stylesheet/theme observer follows the owner's
+semantic tokens and language without mounting the App again. Desktop mode uses
+compact chat, native move/resize, optional pin, show-main and return-to-canvas.
+Role editor focus handling uses the element's ownerDocument in either surface.
+The launcher/workbench placeholder focuses the same window rather than opening
+another. Closing a presentation neither cancels nor replays a model request.

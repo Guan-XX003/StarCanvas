@@ -69,6 +69,9 @@ function createMainWindow(baseUrl) {
     }
   });
   setAutomationWindow(win);
+  const assistantWindow=require('./assistant-window.cjs').installAssistantWindowShell(win,baseUrl,{
+    openExternal:url=>{if(isSafeExternalUrl(url))shell.openExternal(url).catch(()=>{});}
+  });
   require('./desktop-close-coordinator.cjs').getDesktopCloseCoordinator().registerWindow(win);
   win.once("closed", () => setAutomationWindow(null));
 
@@ -762,7 +765,10 @@ function createMainWindow(baseUrl) {
   });
 
   // Safer default: open external links in system browser
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler((details) => {
+    const {url}=details;
+    const assistant=assistantWindow.decision(details);
+    if(assistant.action==='allow'||url===new URL('/assistant-window.html',baseUrl).href)return assistant;
     if (isSafeExternalUrl(url)) shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });

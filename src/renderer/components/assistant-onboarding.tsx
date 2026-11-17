@@ -1,4 +1,7 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {createPortal} from 'react-dom';
+import {useAssistantDesktopWindow} from '../hooks/useAssistantDesktopWindow';
+import {assistantDesktopCopy} from '../lib/assistant-desktop-copy';
 import {AssistantCanvasPlanPanel} from './assistant-canvas-plan-panel';
 import {AssistantGenerationTaskCard} from './assistant-generation-task-card';
 import {AssistantModelQuote} from './assistant-model-quote';
@@ -7,6 +10,11 @@ import {AssistantArchivePreview} from './assistant-archive-preview';
 import {AssistantAttachments,AssistantAttachmentStatus} from './assistant-attachments';
 import {AssistantMediaPreview} from './assistant-media-preview';
 import {AssistantGettingStarted} from './assistant-getting-started';
+import {AssistantServiceSetup} from './assistant-service-setup';
+import {AssistantDiagnosis} from './assistant-diagnosis';
+import {useAssistantAvatar} from '../hooks/useAssistantAvatar';
+import {assistantInterfaceCopy} from '../lib/assistant-interface-copy';
+import type {AssistantServiceDraft} from '../lib/assistant-interface';
 import {appendAssistantExample} from '../lib/assistant-getting-started';
 import {assistantHistoryCopy,assistantSessionMatches} from '../lib/assistant-history';
 import {useAssistantHistory} from '../hooks/useAssistantHistory';
@@ -17,8 +25,8 @@ import {createAssistantTaskReader,assistantTaskReadFailure} from '../lib/assista
 import {assistantPreferenceOperationReceipt,assistantNavigationOperationReceipt} from '../lib/assistant-local-action-copy';
 import {applicationOperationCopy} from '../lib/application-operation-copy';
 import {assistantCanvasCopy,assistantCanvasError,assistantCanvasPostCommitNotice} from '../lib/assistant-canvas-copy';
-import { ArrowRight, BookOpenText, ExternalLink, KeyRound, Link2, MessageSquare, Paperclip, RotateCcw, Send, Settings2, ShieldCheck, Sparkles, Wrench, X } from "lucide-react";
-import { assistantChatFailureMessage, assistantMessageOrigin, assistantMessageOriginLabel, assistantLastOperationReceipt, assistantNavigationUnconfirmedNotice, assistantNavigationRejectedNotice, assistantNodeSubmissionNotice, assistantNodeUncertainNotice, assistantPreferenceUncertainNotice, buildAssistantButlerHandoff, buildAssistantFailureSummary, buildAssistantLocalDiagnosis, buildAssistantTypedDiagnosis, buildAssistantSelectedTaskResponse, clampAssistantLauncherPosition, readAssistantLauncherPosition, writeAssistantLauncherPosition, clearAssistantProposals, consumeAssistantNavigationProposal, containsLikelyAssistantSecret, isAssistantDiagnosticDraft, isValidAssistantNodeContent, isValidAssistantPreferenceProposal, markAssistantSessionBoundary, parseAssistantReply, shouldOfferAssistantOnboarding, type AssistantAction, type AssistantCanvasAction, type AssistantMessage, type AssistantNavigationAction, type AssistantPreferenceProposal } from "../lib/assistant-onboarding";
+import { BookOpenText, ExternalLink, Link2, MessageSquare, Paperclip, Send, Settings2, ShieldCheck, Sparkles, Wrench, X, MoreHorizontal, Plus, Maximize2, Minimize2, Users, ChevronLeft } from "lucide-react";
+import { assistantChatFailureMessage, assistantMessageOrigin, assistantMessageOriginLabel, assistantLastOperationReceipt, assistantNavigationUnconfirmedNotice, assistantNavigationRejectedNotice, assistantNodeSubmissionNotice, assistantNodeUncertainNotice, assistantPreferenceUncertainNotice, buildAssistantFailureSummary, buildAssistantLocalDiagnosis, buildAssistantTypedDiagnosis, buildAssistantSelectedTaskResponse, clampAssistantLauncherPosition, readAssistantLauncherPosition, writeAssistantLauncherPosition, clearAssistantProposals, consumeAssistantNavigationProposal, containsLikelyAssistantSecret, isAssistantDiagnosticDraft, isValidAssistantNodeContent, isValidAssistantPreferenceProposal, markAssistantSessionBoundary, parseAssistantReply, shouldOfferAssistantOnboarding, type AssistantAction, type AssistantCanvasAction, type AssistantMessage, type AssistantNavigationAction, type AssistantPreferenceProposal } from "../lib/assistant-onboarding";
 import { assistantPreferenceLabel, assistantPreferenceVisuallyApplied, formatAssistantAppearanceState, formatAssistantAutoDownloadState, parseAssistantPreferenceIntent, type AssistantTheme, type AssistantLanguage } from "../lib/assistant-preferences";
 import { subscribeAssistantTaskInspection } from "../lib/assistant-task-inspection";
 import { useAssistantWorkspace } from "../hooks/useAssistantWorkspace";
@@ -41,11 +49,6 @@ const connectionCopy = {
   "zh-CN": {check:"检查连接", checking:"正在检查…", hint:"仅查询 DeepSeek 官方模型列表，不发送对话或启动生成；结果不能证明余额充足。", ready:"官方模型列表可访问，包含主智能体所需模型；余额和实际对话尚未验证。", missing:"已访问模型列表，但未发现主智能体所需模型。", auth:"官方接口拒绝了凭据或访问权限，请检查 Key 和账号权限。", rate:"官方接口暂时限流，请稍后手动重试。", other:"无法完成连接检查，请检查网络或稍后重试。"},
   "zh-TW": {check:"檢查連線", checking:"正在檢查…", hint:"僅查詢 DeepSeek 官方模型清單，不傳送對話或開始產生；結果不能證明餘額充足。", ready:"可存取官方模型清單，包含主智慧助手所需模型；餘額和實際對話尚未驗證。", missing:"已存取模型清單，但未發現主智慧助手所需模型。", auth:"官方介面拒絕憑證或存取權限，請檢查 Key 和帳號權限。", rate:"官方介面暫時限流，請稍後手動重試。", other:"無法完成連線檢查，請檢查網路或稍後重試。"},
   "en-US": {check:"Check connection", checking:"Checking…", hint:"Only the official DeepSeek model list is requested; no chat or generation is sent. This does not check your balance.", ready:"The official model list is reachable and includes the assistant model. Balance and actual chat remain unverified.", missing:"The model list is reachable but does not include the assistant model.", auth:"The official API rejected the credential or access. Check your key and account permissions.", rate:"The official API is rate-limiting requests. Try again later.", other:"The connection check failed. Check your network or try again later."},
-};
-const handoffCopy = {
-  "zh-CN": {model:"模型 ID（可选）", category:"模型类型（可选）", choose:"请选择类型", image:"图片", video:"视频", pair:"填写模型 ID 时请选择图片或视频；不填则保留配置管家原有选择。", invalid:"模型 ID 格式无效，请勿填写密钥或换行。", hint:"仅预填，下一步还需选择对应的 API 地址与 Key，并确认分析结果。"},
-  "zh-TW": {model:"模型 ID（選填）", category:"模型類型（選填）", choose:"請選擇類型", image:"圖片", video:"影片", pair:"填寫模型 ID 時請選擇圖片或影片；不填則保留設定管家原有選擇。", invalid:"模型 ID 格式無效，請勿填入金鑰或換行。", hint:"只會預填，下一步仍需選擇對應的 API 地址與 Key，並確認分析結果。"},
-  "en-US": {model:"Model ID (optional)", category:"Model type (optional)", choose:"Choose a type", image:"Image", video:"Video", pair:"Choose Image or Video when entering a model ID; leave both blank to keep the current selection.", invalid:"Invalid model ID. Do not enter a key or a line break.", hint:"Prefill only. Next, select the matching API address and key and review the analysis."},
 };
 
 const copy = {
@@ -84,30 +87,50 @@ const copy = {
   },
 };
 
-export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady = ready, settingsUnavailable = false, hasConfiguration, language, themeMode, autoDownloadGeneratedResults, canSetPreference, canNavigateLocal, onNavigationNotice, activeView, activeSettingsTab, projectId, projectName, getCanvasNodePlacement, onOpenSetup, onOpenModels, onOpenAgents, onOpenResources, onOpenCanvas, onOpenWorkspace, onOpenAccount, onOpenAppearance, onOpenButler, workbench = false, onOpenRoles, agentWorkspace, getCanvasPlanController, onCanvasPlanApplied }: {
+export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady = ready, settingsUnavailable = false, hasConfiguration, language, themeMode, autoDownloadGeneratedResults, canSetPreference, canNavigateLocal, onNavigationNotice, activeView, activeSettingsTab, projectId, projectName, getCanvasNodePlacement, onOpenSetup, onOpenModels, onOpenAgents, onOpenResources, onOpenCanvas, onOpenWorkspace, onOpenAccount, onOpenAppearance, onPrepareService, workbench: workbenchRequested = false, onOpenRoles, agentWorkspace, getCanvasPlanController, onCanvasPlanApplied }: {
   ready: boolean; tasksReady?: boolean; navigationReady?: boolean; settingsUnavailable?: boolean; hasConfiguration: boolean; language: string; activeView: string; activeSettingsTab: string; projectId: string; projectName: string;
   themeMode?: string; autoDownloadGeneratedResults?: boolean; canSetPreference?: boolean;
   canNavigateLocal?: boolean; onNavigationNotice?: (message:string) => void;
   getCanvasNodePlacement?: (projectId:string)=>{x:number;y:number}|null;
-  onOpenSetup: () => void; onOpenModels: () => void; onOpenAgents: () => void; onOpenResources: () => void; onOpenCanvas: () => void; onOpenWorkspace: () => void; onOpenAccount: () => void; onOpenAppearance: () => void; onOpenButler: (url: string, useAssistant: boolean, hints?: {model:string; category:"image"|"video"}) => void;
+  onOpenSetup: () => void; onOpenModels: () => void; onOpenAgents: () => void; onOpenResources: () => void; onOpenCanvas: () => void; onOpenWorkspace: () => void; onOpenAccount: () => void; onOpenAppearance: () => void;
+  onPrepareService?:(input:AssistantServiceDraft,useAssistant:boolean)=>Promise<void>;
   workbench?:boolean; onOpenRoles?:()=>void;
   agentWorkspace?:{agents:any[];conversations:any;environment:any;theme:any;isLightTheme:boolean};
   getCanvasPlanController?:(projectId:string)=>any;onCanvasPlanApplied?:(projectId:string,nodeIds:string[])=>void;
 }) {
   const t = copy[language as keyof typeof copy] || copy["zh-CN"];
   const connectionText = connectionCopy[language as keyof typeof connectionCopy] || connectionCopy["zh-CN"];
-  const handoffText = handoffCopy[language as keyof typeof handoffCopy] || handoffCopy["zh-CN"];
   const accountText = accountCopy[language as keyof typeof accountCopy] || accountCopy["zh-CN"];
+  const ui=assistantInterfaceCopy(language),avatar=useAssistantAvatar(robotImage);
+  const desktop=useAssistantDesktopWindow(),desktopCopy=assistantDesktopCopy(language);
+  const workbench=workbenchRequested&&!desktop.host;
+  useEffect(()=>{if(desktop.host&&workbenchRequested)void desktop.focus();},[workbenchRequested,desktop.host]);
+  const avatarInput=useRef<HTMLInputElement>(null);
   const [welcome, setWelcome] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const workspace = useAssistantWorkspace(ready && (drawer || workbench), projectId);
-  const chatVisible = drawer || workbench;
+  const workspace = useAssistantWorkspace(ready && (drawer || workbench || !!desktop.host), projectId);
+  const chatVisible = drawer || workbench || !!desktop.host;
   const chatView = workspace.view;
   const canvasPlan=chatView.canvasPlan,canvasCopy=assistantCanvasCopy(language);
   const displayedCanvasPlan=canvasPlan.projectId&&canvasPlan.projectId!==projectId&&canvasPlan.phase!=='idle'?{...canvasPlan,phase:'expired',code:'PLAN_STALE'}:canvasPlan;
   const canvasPlanner=createAssistantCanvasPlanner(workspace.controller,id=>getCanvasPlanController?.(id)||null);
   const localActions=createAssistantLocalActionClient(workspace.controller),localCopy=applicationOperationCopy(language),taskReader=createAssistantTaskReader(workspace.controller),taskRead=chatView.taskRead;
-  const [panel, setPanel] = useState<"chat" | "settings" | "model">("chat");
+  type Panel='chat'|'settings'|'model'|'diagnosis'|'roles';
+  const [panel,setPanelState]=useState<Panel>('chat');
+  const [showContext,setShowContext]=useState(false),[showHistory,setShowHistory]=useState(false);
+  const [diagnosisSnapshot,setDiagnosisSnapshot]=useState<{owner:string;tasks:any[];selected:string}|null>(null);
+  const menuRef=useRef<HTMLDetailsElement>(null);
+  useEffect(()=>{
+    const doc=desktop.host?.ownerDocument||document;
+    const close=(event:PointerEvent)=>{const menu=menuRef.current;if(menu?.open&&event.target&&!menu.contains(event.target as Node))menu.open=false;};
+    doc.addEventListener('pointerdown',close,true);return()=>doc.removeEventListener('pointerdown',close,true);
+  },[desktop.host]);
+  const chatScroll=useRef<{owner:string;top:number}|null>(null);
+  function setPanel(next:Panel){
+    if(panel==='chat'&&conversationRef.current)chatScroll.current={owner:workspace.id,top:conversationRef.current.scrollTop};
+    if(next!=='settings'){setKey('');setKeyEntry(false);}setPanelState(next);if(menuRef.current)menuRef.current.open=false;
+  }
+  useLayoutEffect(()=>{if(panel==='chat'&&chatScroll.current?.owner===workspace.id&&conversationRef.current)conversationRef.current.scrollTop=chatScroll.current.top;},[panel,workspace.id,desktop.host]);
   const [sessionName, setSessionName] = useState<string|null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [sessionFilter,setSessionFilter]=useState('');
@@ -151,10 +174,6 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
   const conversationRef = useRef<HTMLDivElement>(null);
   const followConversation = useRef(true);
   const pointerDrag = useRef<{id:number; mode:"move"|"resize"; startX:number; startY:number; rect:{x:number;y:number;width:number;height:number}} | null>(null);
-  const [docUrl, setDocUrl] = useState("");
-  const [guideModel, setGuideModel] = useState("");
-  const [guideCategory, setGuideCategory] = useState("");
-  const [error, setError] = useState("");
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [statusError, setStatusError] = useState(false);
   const [statusRevision, setStatusRevision] = useState(0);
@@ -370,7 +389,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
     catch(error:any){return assistantTaskReadFailure(error?.code,language);}
   }
 
-  useEffect(()=>{followConversation.current=true;},[workspace.id,panel,drawer]);
+  useEffect(()=>{followConversation.current=true;},[workspace.id,drawer]);
   useLayoutEffect(()=>{
     if(!workbench)return;
     for(const selector of ['.wj-assistant-role-item[aria-pressed="true"]','.wj-assistant-session-item[aria-current="true"]']){
@@ -379,7 +398,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
       if(item.top<box.top)list.scrollTop+=item.top-box.top;else if(item.bottom>box.bottom)list.scrollTop+=item.bottom-box.bottom;
     }
   },[workbench,workspace.id,workspace.role?.descriptor.id,workspace.snapshot.catalogRevision,filteredSessions]);
-  useEffect(() => { if (followConversation.current&&conversationRef.current) conversationRef.current.scrollTop = conversationRef.current.scrollHeight; }, [messages, sending, panel, drawer, workspace.id, canvasPlan.phase, canvasPlan.generation?.phase,chatView.stream.text]);
+  useEffect(() => { if (followConversation.current&&conversationRef.current) conversationRef.current.scrollTop = conversationRef.current.scrollHeight; }, [messages, sending, drawer, workspace.id, canvasPlan.phase, canvasPlan.generation?.phase,chatView.stream.text]);
   useLayoutEffect(() => { localActionSubmitted.current = false; }, [message]);
 
   useLayoutEffect(() => {
@@ -448,7 +467,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
   }
 
   useEffect(() => {
-    if (!drawer || welcome || !drawerRef.current?.parentElement) return;
+    if (!drawer || desktop.host || welcome || !drawerRef.current?.parentElement) return;
     const parent = drawerRef.current.parentElement;
     const constrain = () => {
       const w = parent.clientWidth, h = parent.clientHeight;
@@ -463,10 +482,11 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
     constrain();
     const observer = new ResizeObserver(constrain); observer.observe(parent);
     return () => observer.disconnect();
-  }, [drawer, welcome]);
+  }, [drawer, welcome, desktop.host]);
 
   function startPointer(event: React.PointerEvent<HTMLElement>, mode: "move" | "resize") {
-    if (event.button !== 0 || !geometry || (mode === "move" && (event.target as HTMLElement).closest("button"))) return;
+    if(desktop.host)return;
+    if (event.button !== 0 || !geometry || (mode === "move" && (event.target as HTMLElement).closest("button,input,select,textarea,a,summary,details,[role=button]"))) return;
     event.preventDefault(); event.stopPropagation();
     pointerDrag.current = {id:event.pointerId, mode, startX:event.clientX, startY:event.clientY, rect:geometry};
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -533,7 +553,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
         if (result?.ok && result.value && typeof result.value.configured === "boolean" && typeof result.value.installed === "boolean") { setStatus(result.value); setStatusError(false); }
         else { setStatus(null); setStatusError(true); }
       }).catch(() => { if (attempt === authAttempt.current) { setStatus(null); setStatusError(true); } });
-      dismiss(); setDrawer(true); setPanel("chat"); setKeyEntry(false); setMessages(previous => previous.length ? markAssistantSessionBoundary(previous, boundaryNotice) : previous); proposalFence.current = false; setRequiresReset(false); setChatError(""); setAuthPhase("idle");
+      dismiss(); setDrawer(true); setPanel("model"); setKeyEntry(false); setMessages(previous => previous.length ? markAssistantSessionBoundary(previous, boundaryNotice) : previous); proposalFence.current = false; setRequiresReset(false); setChatError(""); setAuthPhase("idle");
     } else if (authPhase === "failed" || authPhase === "expired") {
       setChatError(authPhase === "expired" ? accountText.expired : accountText.failed); setAuthPhase("idle");
     } else if (authPhase === "cancelled") setAuthPhase("idle");
@@ -541,7 +561,8 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
 
   useEffect(() => {
     if (!welcome) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const doc=dialogRef.current?.ownerDocument||document;
+    const previous = doc.activeElement as HTMLElement|null;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); if (authPhase === "idle") dismiss(); }
@@ -549,18 +570,18 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
       const controls = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), [tabindex="0"]'));
       if (!controls.length) return;
       const first = controls[0], last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && (doc.activeElement === first || doc.activeElement === dialogRef.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && doc.activeElement === last) { event.preventDefault(); first.focus(); }
     };
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("keydown", onKey); previous?.focus(); };
-  }, [welcome, authPhase]);
+    doc.addEventListener("keydown", onKey);
+    return () => { doc.removeEventListener("keydown", onKey); previous?.focus(); };
+  }, [welcome, authPhase,desktop.host]);
 
   function dismiss() {
     try { localStorage.setItem(SEEN_KEY, "1"); } catch { /* Continue without persistence. */ }
     setWelcome(false);
   }
-  function openSetup() { dismiss(); setKey(""); setDrawer(false); onOpenSetup(); }
+  function openSetup() { dismiss(); setKey(""); setDrawer(false); onOpenSetup();if(desktop.host)void desktop.focusMain(); }
   function openKeySetup() { dismiss(); setDrawer(true); setPanel("settings"); setKeyEntry(true); }
   async function refreshStatus() {
     try {
@@ -613,6 +634,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
   }
   async function saveKey() {
     if (!key.trim() || busy || accountPending) return;
+    const firstConnection=!status?.configured;
     invalidateActionProposals();
     setBusy(true); setChatError(""); setConnectionNotice("");
     const value = key; setKey("");
@@ -621,7 +643,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
       const result = await window.wanjuanDesktop?.assistantSetKey?.(value);
       if (!result?.ok) { failureCode = result?.code || ""; throw new Error(); }
       await refreshStatus();
-      setKeyEntry(false); setPanel("chat"); setMessages(previous => workspace.active ? clearAssistantProposals(previous) : []); proposalFence.current = false; setRequiresReset(false);
+      setKeyEntry(false); setPanel(firstConnection?"model":"chat"); setMessages(previous => workspace.active ? clearAssistantProposals(previous) : []); proposalFence.current = false; setRequiresReset(false);
     } catch {
       if (failureCode !== "ASSISTANT_INVALID_KEY") {
         proposalFence.current = true; setRequiresReset(true); setStatus(null); setStatusError(true);
@@ -978,6 +1000,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
         failure:code=>({text:code==='OPERATION_NAVIGATION_REFUSED'?assistantNavigationRejectedNotice(language):assistantNavigationUnconfirmedNotice(language),executionStatus:code==='OPERATION_NAVIGATION_REFUSED'?'rejected':'unconfirmed'}),
       });
       onNavigationNotice?.(assistantNavigationOperationReceipt(destination,language));
+      if(desktop.host)void desktop.focusMain();
     } catch {
       if(!['failed','uncertain'].includes(workspace.controller.viewFor(workspace.id).localAction.phase))setChatError(assistantNavigationUnconfirmedNotice(language));
     }
@@ -1047,38 +1070,48 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
       }else{consumedActions.current.delete(item);setChatNotice(assistantCanvasError(error?.code||"PLAN_PREPARE_FAILED",language));}
     }
   }
-  function continueToButler() {
-    if (!status || statusError) return;
-    const handoff = buildAssistantButlerHandoff(docUrl, guideModel, guideCategory);
-    if (!handoff.ok) { setError(handoff.field === "url" ? t.invalid : handoff.field === "model" ? handoffText.invalid : handoffText.pair); return; }
-    setError(""); setKey(""); setDrawer(false);
-    onOpenButler(handoff.url, !!status?.configured && !!status?.installed,
-      handoff.model && handoff.category ? {model:handoff.model, category:handoff.category} : undefined);
-  }
 
-  return <>
-    {!chatVisible && !welcome && <button ref={launcherRef} type="button" className="wj-assistant-launch" style={launcherPosition ? {left:launcherPosition.x,top:launcherPosition.y,right:"auto",bottom:"auto"} : undefined} onPointerDown={startLauncherDrag} onPointerMove={moveLauncher} onPointerUp={endLauncherDrag} onPointerCancel={cancelLauncherDrag} onLostPointerCapture={cancelLauncherDrag} onKeyDown={moveLauncherWithKeyboard} onClick={openLauncher} aria-label={t.open} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" title={language === "en-US" ? "Click to open; drag or use arrow keys to move" : language === "zh-TW" ? "點擊開啟；拖曳或使用方向鍵移動" : "点击打开；拖动或使用方向键移动"}><img src={robotImage} alt="" draggable={false} /></button>}
-    {chatVisible && !welcome && <aside ref={drawerRef} className={`wj-assistant-drawer${workbench ? " wj-assistant-workbench" : ""}`} data-wanjuan-assistant-view={workbench ? "agents" : undefined} aria-label={workbench ? sessionCopy.title : t.drawer} style={!workbench && geometry ? {left:geometry.x, top:geometry.y, width:geometry.width, height:geometry.height} : undefined} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+  const surface=<>
+    {!chatVisible && !welcome && <button ref={launcherRef} type="button" className="wj-assistant-launch" style={launcherPosition ? {left:launcherPosition.x,top:launcherPosition.y,right:"auto",bottom:"auto"} : undefined} onPointerDown={startLauncherDrag} onPointerMove={moveLauncher} onPointerUp={endLauncherDrag} onPointerCancel={cancelLauncherDrag} onLostPointerCapture={cancelLauncherDrag} onKeyDown={moveLauncherWithKeyboard} onClick={openLauncher} aria-label={t.open} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" title={language === "en-US" ? "Click to open; drag or use arrow keys to move" : language === "zh-TW" ? "點擊開啟；拖曳或使用方向鍵移動" : "点击打开；拖动或使用方向键移动"}><img src={avatar.src} alt="" draggable={false} /></button>}
+    {chatVisible && !welcome && <aside ref={drawerRef} className={`wj-assistant-drawer${workbench ? " wj-assistant-workbench" : ""}${desktop.host?' wj-assistant-desktop':''}`} data-wanjuan-assistant-view={workbench ? "agents" : undefined} aria-label={workbench ? sessionCopy.title : t.drawer} style={!workbench && !desktop.host && geometry ? {left:geometry.x, top:geometry.y, width:geometry.width, height:geometry.height} : undefined} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
       <header className="wj-assistant-drawer-head" tabIndex={0} aria-label={workbench ? sessionCopy.title : moveLabel} onKeyDown={event => { if (workbench || event.target !== event.currentTarget) return; const dx = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0; const dy = event.key === "ArrowDown" ? 16 : event.key === "ArrowUp" ? -16 : 0; if (!dx && !dy) return; event.preventDefault(); const parent = drawerRef.current?.parentElement; if (parent) setGeometry(previous => previous ? {...previous, x:Math.max(12, Math.min(previous.x + dx, parent.clientWidth - previous.width - 12)), y:Math.max(12, Math.min(previous.y + dy, parent.clientHeight - previous.height - 12))} : previous); }} onPointerDown={event => {if (!workbench) startPointer(event, "move");}} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer}>
-        <div className="wj-assistant-heading"><span className="wj-assistant-icon"><img src={robotImage} alt="" /></span><strong>{workbench ? sessionCopy.title : customRole ? workspace.role.descriptor.name : t.drawer}</strong></div>
-        {workspace.active && <button type="button" className="wj-assistant-header-action" onClick={() => {if (workbench) {setDrawer(true);onOpenCanvas();} else onOpenAgents();}}>{workbench ? sessionCopy.float : sessionCopy.expand}</button>}
-        <button type="button" className="wj-assistant-header-action" onClick={() => customRole ? setRoleEditor(structuredClone(workspace.role)) : setPanel(panel === "chat" ? "settings" : "chat")} aria-label={customRole ? (language==='en-US'?'Role settings':language==='zh-TW'?'角色設定':'角色设置') : panel === "chat" ? settingsLabel : chatLabel}><Settings2 size={15} />{customRole ? (language==='en-US'?'Role settings':language==='zh-TW'?'角色設定':'角色设置') : panel === "chat" ? settingsLabel : chatLabel}</button>
-        <button type="button" className="wj-assistant-icon-button" aria-label={t.close} onClick={() => {setKey("");setDrawer(false);if (workbench) onOpenCanvas();}}><X size={17} /></button>
+        <div className="wj-assistant-heading">
+          <button type="button" className="wj-assistant-avatar-button" onClick={()=>setPanel('settings')} aria-label={ui.avatar}><img src={avatar.src} alt=""/></button>
+          {workbench?<strong data-wanjuan-i18n-skip>{activeDescriptor?.name||t.drawer}</strong>:workspace.active?<select className="wj-assistant-header-session" aria-label={sessionCopy.sessions} value={workspace.id} disabled={switchBlocked} onChange={event=>void sessionAction(()=>workspace.controller.select(event.target.value))}>{workspace.snapshot.catalog.sessions.filter((item:any)=>!item.archived).map((item:any)=><option key={item.id} value={item.id}>{item.name||sessionCopy.untitled}</option>)}</select>:<strong>{t.drawer}</strong>}
+        </div>
+        {workbench&&<nav className="wj-assistant-mode-tabs" aria-label={sessionCopy.title}>{(['chat','model','diagnosis'] as const).map(value=><button type="button" key={value} aria-pressed={panel===value} onClick={()=>setPanel(value)}>{value==='chat'?ui.chat:value==='model'?ui.api:ui.diagnose}</button>)}</nav>}
+        {!desktop.host&&workspace.active && <button type="button" className="wj-assistant-icon-button" aria-label={workbench?sessionCopy.float:sessionCopy.expand} title={workbench?sessionCopy.float:sessionCopy.expand} onClick={() => {if (workbench) {setDrawer(true);onOpenCanvas();} else onOpenAgents();}}>{workbench?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button>}
+        {desktop.available&&<button type="button" className="wj-assistant-icon-button" data-assistant-desktop-toggle aria-label={desktop.host?desktopCopy.dock:desktopCopy.open} title={desktop.host?desktopCopy.dock:desktopCopy.open} disabled={desktop.opening} onClick={()=>{if(desktop.host){setDrawer(true);onOpenCanvas();desktop.dock();}else{setDrawer(true);desktop.open();}}}>{desktop.host?<Minimize2 size={17}/>:<ExternalLink size={17}/>}</button>}
+        <details ref={menuRef} className="wj-assistant-overflow" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary className="wj-assistant-icon-button" aria-label={ui.more} title={ui.more}><MoreHorizontal size={19}/></summary><div className="wj-assistant-menu">
+          <button type="button" disabled={switchBlocked} onClick={()=>{setSessionName(activeDescriptor?.name||'');if(menuRef.current)menuRef.current.open=false;}}>{sessionCopy.rename}</button>
+          <button type="button" disabled={switchBlocked||sending} onClick={()=>{if(menuRef.current)menuRef.current.open=false;void sessionAction(()=>workspace.controller.change(workspace.id,{archived:true}));}}>{sessionCopy.archive}</button>
+          <button type="button" disabled={switchBlocked} onClick={()=>{if(menuRef.current)menuRef.current.open=false;void sessionAction(()=>workspace.controller.create(projectId));}}>{sessionCopy.fresh}</button>
+          {customRole&&agentWorkspace&&<button type="button" disabled={switchBlocked} onClick={()=>{setRoleEditor(structuredClone(workspace.role));setRoleSaveError('');if(menuRef.current)menuRef.current.open=false;}}>{language==='en-US'?'Edit role':language==='zh-TW'?'編輯角色':'编辑角色'}</button>}
+          <button type="button" onClick={()=>{setPanel('chat');setShowHistory(value=>!value);}}>{ui.history}</button>
+          <button type="button" onClick={()=>{setShowContext(value=>!value);if(menuRef.current)menuRef.current.open=false;}}>{ui.context}</button>
+          <button type="button" onClick={()=>setPanel('roles')}>{ui.roles}</button>
+          <button type="button" onClick={()=>setPanel('settings')}>{ui.settings}</button>
+          {desktop.host&&<button type="button" aria-pressed={desktop.pinned} onClick={()=>{if(menuRef.current)menuRef.current.open=false;void desktop.togglePin();}}>{desktop.pinned?desktopCopy.unpin:desktopCopy.pin}</button>}
+          {desktop.host&&<button type="button" onClick={()=>{if(menuRef.current)menuRef.current.open=false;void desktop.focusMain();}}>{language==='en-US'?'Show main window':language==='zh-TW'?'顯示主視窗':'显示主窗口'}</button>}
+        </div></details>
+        <button type="button" className="wj-assistant-icon-button" aria-label={t.close} onClick={() => {setKey("");setDrawer(false);if (workbench||desktop.host)onOpenCanvas();if(desktop.host)desktop.dock();}}><X size={17} /></button>
       </header>
+      {!workbench&&<nav className="wj-assistant-mode-tabs wj-assistant-float-tabs" aria-label={t.drawer}>{(['chat','model','diagnosis'] as const).map(value=><button type="button" key={value} aria-pressed={panel===value} onClick={()=>setPanel(value)}>{value==='chat'?ui.chat:value==='model'?ui.api:ui.diagnose}</button>)}</nav>}
+      {desktop.failed&&<p className="wj-assistant-error" role="alert">{desktopCopy.failure}</p>}
       <div className="wj-assistant-workspace-layout">
       {workbench && <nav className="wj-assistant-session-sidebar" aria-label={sessionCopy.sessions}>
-        <div className="wj-assistant-role-list" aria-label={language==='en-US'?'Roles':language==='zh-TW'?'角色':'角色'}>
-          {workspace.snapshot.catalog.roles.filter((role:any)=>!role.archived).map((role:any)=><button type="button" className="wj-assistant-role-item" key={role.id} data-wanjuan-assistant-role-id={role.id} aria-pressed={role.id===workspace.role?.descriptor.id} disabled={switchBlocked} onClick={()=>void openRole(role.id)} data-wanjuan-i18n-skip>{role.name}{role.imported&&<small className="wj-assistant-import-badge">{language==='en-US'?'Imported copy':language==='zh-TW'?'匯入副本':'导入副本'}</small>}</button>)}
-          {agentWorkspace && <button type="button" className="wj-assistant-text-button" disabled={switchBlocked} onClick={()=>void newRole()}>＋ {language==='en-US'?'New role':language==='zh-TW'?'新角色':'新角色'}</button>}
-        </div>
-        <button type="button" className="wj-assistant-secondary" disabled={switchBlocked} onClick={() => void sessionAction(() => workspace.controller.create(projectId))}>＋ {sessionCopy.fresh}</button>
+        <div className="wj-assistant-sidebar-brand"><img src={avatar.src} alt=""/><strong>StarCanvas</strong></div>
+        <button type="button" className="wj-assistant-primary" disabled={switchBlocked} onClick={() => void sessionAction(() => workspace.controller.create(projectId))}><Plus size={17}/>{sessionCopy.fresh}</button>
         <input type="search" className="wj-assistant-session-filter" aria-label={historyCopy.sessions} placeholder={historyCopy.sessions} value={sessionFilter} maxLength={120} onChange={event=>setSessionFilter(event.target.value)}/>
+        <select className="wj-assistant-role-select" aria-label={ui.role} value={workspace.role?.descriptor.id||''} disabled={switchBlocked} onChange={event=>void openRole(event.target.value)}>{workspace.snapshot.catalog.roles.filter((role:any)=>!role.archived).map((role:any)=><option key={role.id} value={role.id}>{role.name}</option>)}</select>
+        <h2 className="wj-assistant-sidebar-label">{ui.sessions}</h2>
         <div className="wj-assistant-session-list" aria-busy={sessionFilter!==deferredSessionFilter}>{filteredSessions.map((item:any) => <div className="wj-assistant-session-row" key={item.id}>
           <button type="button" className="wj-assistant-session-item" data-wanjuan-assistant-session-id={item.id} aria-current={!item.archived&&item.id === workspace.id ? "true" : undefined} disabled={switchBlocked} onClick={event => {if(item.archived){archiveOpener.current=event.currentTarget;setArchivePreview({id:item.id,name:item.name||sessionCopy.untitled,roleId:item.roleId});}else void sessionAction(() => workspace.controller.select(item.id));}}><span data-wanjuan-i18n-skip>{item.name || sessionCopy.untitled}</span>{workspace.controller.viewFor(item.id).sending && <span className="wj-assistant-session-status">{assistantWorkspaceTaskLabel(workspace.controller.viewFor(item.id).taskStatusUnavailable?'unavailable':workspace.controller.viewFor(item.id).record?.value.task.status==='queued'?'queued':'running',language)}</span>}</button>
           {item.archived && <button type="button" className="wj-assistant-text-button" disabled={switchBlocked} onClick={() => void sessionAction(async() => {await workspace.controller.change(item.id,{archived:false});setShowArchived(false);setSessionFilter('');await workspace.controller.select(item.id);})}>{sessionCopy.restore}</button>}
         </div>)}{!filteredSessions.length&&<p className="wj-assistant-hint" role="status">{showArchived?historyCopy.archivedEmpty:historyCopy.empty}</p>}</div>
         <label className="wj-assistant-archive-toggle"><input type="checkbox" checked={showArchived} onChange={event => setShowArchived(event.target.checked)} />{sessionCopy.archived}</label>
-        <button type="button" className="wj-assistant-text-button" onClick={() => {setDrawer(false);onOpenRoles?.();}}>{sessionCopy.roles}</button>
+        <button type="button" className="wj-assistant-sidebar-action" onClick={()=>setPanel('roles')}><Users size={17}/>{ui.roles}</button>
+        <button type="button" className="wj-assistant-sidebar-action" onClick={()=>setPanel('settings')}><Settings2 size={17}/>{ui.settings}</button>
         <details className="wj-assistant-backup-controls"><summary>{backupCopy.title}</summary>
           <p className="wj-assistant-hint">{backupCopy.hint}</p>
           <button type="button" className="wj-assistant-text-button" disabled={!workspace.active||backupBusy} onClick={()=>void exportWorkspaceBackup('all')}>{backupCopy.all}</button>
@@ -1092,9 +1125,15 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
         {legacyImportError&&<div role="alert"><p className="wj-assistant-hint">{language==='en-US'?'Some earlier roles could not be imported. Originals remain available.':language==='zh-TW'?'部分先前角色無法匯入，原資料仍保留。':'部分原角色未能导入，原资料仍然保留。'}</p><button type="button" className="wj-assistant-text-button" disabled={legacyImporting} onClick={()=>void retryLegacyImport()}>{sessionCopy.retry}</button></div>}
       </nav>}
       <div className={`wj-assistant-drawer-body${!keyEntry && panel === "chat" ? " wj-assistant-drawer-body-chat" : ""}`}>
+      {panel==='settings'&&<section className="wj-assistant-settings-heading wj-assistant-page" data-wanjuan-i18n-skip>
+        <button type="button" className="wj-assistant-text-button" onClick={()=>setPanel('chat')}><ChevronLeft size={15}/>{ui.back}</button>
+        <header className="wj-assistant-page-title"><h2>{ui.settings}</h2><p>{ui.settingsHint}</p></header>
+        <section className="wj-assistant-avatar-settings" aria-label={ui.avatar}><img src={avatar.src} alt=""/><div><h3>{ui.avatar}</h3><p>{ui.avatarHint}</p><div><button type="button" className="wj-assistant-secondary" disabled={avatar.busy} onClick={()=>avatarInput.current?.click()}>{avatar.busy?ui.avatarLoading:ui.avatarChange}</button><button type="button" className="wj-assistant-text-button" disabled={!avatar.custom||avatar.busy} onClick={avatar.reset}>{ui.avatarReset}</button></div></div><input ref={avatarInput} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={ui.avatarChange} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(file)void avatar.change(file);}}/></section>
+        {avatar.error&&<p className="wj-assistant-error" role="alert">{ui.avatarError}</p>}
+      </section>}
       <div className="wj-assistant-scroll-content">
         {workspace.available && !workspace.active && <div role={workspace.snapshot.phase === "failed" ? "alert" : "status"}><p className="wj-assistant-hint">{workspace.snapshot.phase === "failed" ? sessionCopy.failure : sessionCopy.loading}</p>{workspace.snapshot.phase === "failed" && <button type="button" className="wj-assistant-secondary" onClick={() => void workspace.controller.initialize(projectId)}>{sessionCopy.retry}</button>}</div>}
-        {workspace.active && <div className="wj-assistant-session-toolbar">
+        {workspace.active && showContext && <div className="wj-assistant-session-toolbar">
           {!workbench && <select aria-label={sessionCopy.sessions} value={workspace.id} disabled={switchBlocked} onChange={event => void sessionAction(() => workspace.controller.select(event.target.value))}>{workspace.snapshot.catalog.sessions.filter((item:any) => !item.archived).map((item:any) => <option key={item.id} value={item.id}>{workspace.snapshot.catalog.roles.find((role:any)=>role.id===item.roleId)?.name} · {item.name || sessionCopy.untitled}</option>)}</select>}
           {workbench && <strong data-wanjuan-i18n-skip>{activeDescriptor?.name || sessionCopy.untitled}</strong>}
           <button type="button" className="wj-assistant-text-button" disabled={switchBlocked} onClick={() => setSessionName(activeDescriptor?.name || "")}>{sessionCopy.rename}</button>
@@ -1102,7 +1141,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
           <button type="button" className="wj-assistant-text-button" disabled={switchBlocked || sending} onClick={() => void sessionAction(() => workspace.controller.change(workspace.id,{archived:true}))}>{sessionCopy.archive}</button>
           {!workbench && <button type="button" className="wj-assistant-text-button" disabled={switchBlocked} onClick={() => void sessionAction(() => workspace.controller.create(projectId))}>＋</button>}
         </div>}
-        {workspace.active&&<details className="wj-assistant-project-binding"><summary>{projectCopy.title}: <span data-wanjuan-i18n-skip>{boundProject?(boundProject===projectId?(projectName||projectCopy.title):projectCopy.other):projectCopy.none}</span></summary><p className="wj-assistant-hint">{projectCopy.note}</p><button type="button" className="wj-assistant-text-button" disabled={switchBlocked||busy||!projectId||boundProject===projectId} onClick={()=>void sessionAction(()=>workspace.controller.bindProject(workspace.id,projectId))}>{projectCopy.bind}</button><button type="button" className="wj-assistant-text-button" disabled={switchBlocked||busy||!boundProject} onClick={()=>void sessionAction(()=>workspace.controller.bindProject(workspace.id,''))}>{projectCopy.clear}</button></details>}
+        {workspace.active&&showContext&&<details className="wj-assistant-project-binding"><summary>{projectCopy.title}: <span data-wanjuan-i18n-skip>{boundProject?(boundProject===projectId?(projectName||projectCopy.title):projectCopy.other):projectCopy.none}</span></summary><p className="wj-assistant-hint">{projectCopy.note}</p><button type="button" className="wj-assistant-text-button" disabled={switchBlocked||busy||!projectId||boundProject===projectId} onClick={()=>void sessionAction(()=>workspace.controller.bindProject(workspace.id,projectId))}>{projectCopy.bind}</button><button type="button" className="wj-assistant-text-button" disabled={switchBlocked||busy||!boundProject} onClick={()=>void sessionAction(()=>workspace.controller.bindProject(workspace.id,''))}>{projectCopy.clear}</button></details>}
         {sessionName !== null && <form className="wj-assistant-session-rename" onSubmit={event => {event.preventDefault();void sessionAction(() => workspace.controller.change(workspace.id,{name:sessionName}));}}><input aria-label={sessionCopy.rename} value={sessionName} maxLength={120} onChange={event => setSessionName(event.target.value)} autoFocus/><button type="submit" className="wj-assistant-text-button">{sessionCopy.save}</button><button type="button" className="wj-assistant-text-button" onClick={() => setSessionName(null)}>{sessionCopy.cancel}</button></form>}
         {!customRole && status && !status.installed && <p className="wj-assistant-hint">{t.runtimeMissing}</p>}
         {!customRole && !status && (statusError ? <div role="alert"><p className="wj-assistant-error">{accountText.statusError}</p><button type="button" className="wj-assistant-secondary" onClick={() => { setStatusError(false); setStatusRevision(previous => previous + 1); }}>{accountText.retry}</button></div> : <p className="wj-assistant-hint" role="status">{accountText.statusLoading}</p>)}
@@ -1118,13 +1157,13 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
           <p className="wj-assistant-hint"><ShieldCheck size={15} />{t.keyHint}</p>
         </div>}
         {!keyEntry && panel === "chat" && <>
-          {workspace.active&&<AssistantGettingStarted language={language} projectId={projectId} customRole={customRole} assistantStatus={!status?'loading':status.configured?'configured':'missing'} getSummary={()=>getCanvasPlanController?.(projectId)?.configurationSummary()} disabled={switchBlocked||busy||!!pendingPreference||!!pendingNavigation||canvasPlan.phase!=='idle'} onAssistant={()=>{if(customRole)setRoleEditor(structuredClone(workspace.role));else setPanel('settings');}} onApi={()=>{setDrawer(false);onOpenSetup();}} onModels={()=>{setDrawer(false);onOpenModels();}} onExample={text=>{if(!workspace.controller.operationScope(workspace.id)?.selected)return;const next=appendAssistantExample(workspace.controller.viewFor(workspace.id).draft,text);if(next===null){setChatNotice(language==='en-US'?'The draft is full. Shorten it before appending an example.':language==='zh-TW'?'草稿已滿，請先縮短內容再加入範例。':'草稿已满，请先缩短内容再添加示例。');return;}inputRevision.current++;diagnosticDraft.current=false;setMessage(next);}}/>}
+          {workspace.active&&showContext&&<AssistantGettingStarted language={language} projectId={projectId} customRole={customRole} assistantStatus={!status?'loading':status.configured?'configured':'missing'} getSummary={()=>getCanvasPlanController?.(projectId)?.configurationSummary()} disabled={switchBlocked||busy||!!pendingPreference||!!pendingNavigation||canvasPlan.phase!=='idle'} onAssistant={()=>{if(customRole)setRoleEditor(structuredClone(workspace.role));else setPanel('settings');}} onApi={()=>{setDrawer(false);onOpenSetup();}} onModels={()=>{setDrawer(false);onOpenModels();}} onExample={text=>{if(!workspace.controller.operationScope(workspace.id)?.selected)return;const next=appendAssistantExample(workspace.controller.viewFor(workspace.id).draft,text);if(next===null){setChatNotice(language==='en-US'?'The draft is full. Shorten it before appending an example.':language==='zh-TW'?'草稿已滿，請先縮短內容再加入範例。':'草稿已满，请先缩短内容再添加示例。');return;}inputRevision.current++;diagnosticDraft.current=false;setMessage(next);}}/>}
           {!customRole && (!status || !status.configured) && <div className="wj-assistant-setup wj-assistant-chat-setup-hint"><p className="wj-assistant-hint">{language === "en-US" ? "Local settings, navigation and task status are available without a model. Connect the assistant for general chat." : language === "zh-TW" ? "本機設定、頁面導覽與任務狀態不需連接模型；一般對話需要連接智慧助手。" : "本地设置、页面导航与任务状态无需连接模型；普通对话需要连接智能助手。"}</p>{status && <button type="button" className="wj-assistant-text-button" onClick={() => setPanel("settings")}>{language === "en-US" ? "Connect assistant" : language === "zh-TW" ? "連接智慧助手" : "连接智能助手"}</button>}</div>}
-          {!!messages.length&&<AssistantHistoryControls history={history} language={language}/>}
+          {!!messages.length&&(showHistory||history.range.older||history.range.newer)&&<AssistantHistoryControls history={history} language={language}/>}
           <div ref={conversationRef} className="wj-assistant-conversation" role="log" aria-live="polite" onScroll={event=>{const el=event.currentTarget;followConversation.current=!history.range.newer&&el.scrollHeight-el.clientHeight-el.scrollTop<48;}}>
-          {!messages.length && <div className="wj-assistant-reply"><img src={robotImage} alt="" /><p className="wj-assistant-message">{customRole ? (workspace.role.configuration.description || (language==='en-US'?'Start a conversation with this role.':language==='zh-TW'?'與這個角色開始對話。':'与这个角色开始对话。')) : <>{t.hello}{"\n"}{language === "en-US" ? "Try: set the theme to graphite." : language === "zh-TW" ? "也可以輸入：把主題切換成石墨灰。" : "也可以输入：把主题切换成石墨灰。"}</>}</p></div>}
+          {!messages.length && <div className="wj-assistant-empty-chat"><img src={avatar.src} alt=""/><h2>{customRole?workspace.role.descriptor.name:ui.welcome}</h2><p>{customRole?(workspace.role.configuration.description||ui.roleHint):ui.welcomeHint}</p><div><button type="button" className="wj-assistant-secondary" onClick={()=>setPanel('model')}><Link2 size={16}/>{ui.api}</button><button type="button" className="wj-assistant-secondary" onClick={()=>setPanel('diagnosis')}><Wrench size={16}/>{ui.diagnose}</button></div></div>}
           {messages.slice(history.range.start,history.range.end).map((item,offset) => {const index=history.range.start+offset;return <div key={index} tabIndex={-1} data-assistant-history-index={index} data-assistant-history-match={history.match===index?'true':undefined}>
-            {item.role === "assistant" ? <><p className="wj-assistant-origin" role="note" data-wanjuan-assistant-origin={assistantMessageOrigin(item)}>{assistantMessageOriginLabel(assistantMessageOrigin(item), language)}</p><div className="wj-assistant-reply"><img src={robotImage} alt="" />{assistantMessageOrigin(item) === "model" ? <AssistantModelQuote text={item.text} language={language} incomplete={item.incomplete}/> : <p className="wj-assistant-message" data-wanjuan-i18n-skip>{item.proposalExpired ? (language === "en-US" ? "This earlier suggestion is no longer available." : language === "zh-TW" ? "此先前建議已失效。" : "此先前建议已失效。") : item.text}</p>}</div></> : <p data-wanjuan-i18n-skip className={item.role === "notice" ? "wj-assistant-hint" : "wj-assistant-message wj-assistant-user"}>{item.text}</p>}
+            {item.role === "assistant" ? <><p className="wj-assistant-origin" role="note" data-wanjuan-assistant-origin={assistantMessageOrigin(item)}>{assistantMessageOriginLabel(assistantMessageOrigin(item), language)}</p><div className="wj-assistant-reply"><img src={avatar.src} alt="" />{assistantMessageOrigin(item) === "model" ? <AssistantModelQuote text={item.text} language={language} incomplete={item.incomplete}/> : <p className="wj-assistant-message" data-wanjuan-i18n-skip>{item.proposalExpired ? (language === "en-US" ? "This earlier suggestion is no longer available." : language === "zh-TW" ? "此先前建議已失效。" : "此先前建议已失效。") : item.text}</p>}</div></> : <p data-wanjuan-i18n-skip className={item.role === "notice" ? "wj-assistant-hint" : "wj-assistant-message wj-assistant-user"}>{item.text}</p>}
             {item.generationTask&&item.role==='assistant'&&!item.modelReply&&item.executionStatus==='confirmed'&&<AssistantGenerationTaskCard key={item.generationTask.submissionId} ownerId={workspace.id} projectId={item.generationTask.projectId} nodeId={item.generationTask.nodeId} taskReference={item.generationTask} activeProjectId={projectId} getScope={()=>workspace.controller.operationScope(workspace.id)} language={language} onDiagnose={id=>void addFailureSummary(id)} onView={nodeId=>{setDrawer(false);onOpenCanvas();onCanvasPlanApplied?.(item.generationTask!.projectId,[nodeId]);}}/>}
             {!!item.attachments?.length&&<AssistantAttachments items={item.attachments} language={language} onPreview={openMediaPreview} attachedIds={attachments.map((item:any)=>item.id)} disabled={!customRole||busy||workspace.view.importingMedia||attachments.length>=6} onAgain={customRole?(attachment=>{if(!attachments.some((item:any)=>item.id===attachment.id))void replaceWorkspaceMedia([...attachments,attachment]);}):undefined}/>}
             {item.preference && <button type="button" className="wj-assistant-secondary" disabled={!canSetPreference || !ready || proposalBlocked} onClick={() => confirmPreference(index, item.preference!)}>{item.preference.kind === "autoDownload" ? (language === "en-US" ? `Confirm: turn ${item.preference.value ? "on" : "off"} automatic result downloads` : language === "zh-TW" ? `確認${item.preference.value ? "開啟" : "關閉"}生成結果自動下載` : `确认${item.preference.value ? "开启" : "关闭"}生成结果自动下载`) : <>{language === "en-US" ? `Confirm ${item.preference.kind === "theme" ? "theme" : "language"}: ` : language === "zh-TW" ? `確認切換${item.preference.kind === "theme" ? "主題" : "語言"}：` : `确认切换${item.preference.kind === "theme" ? "主题" : "语言"}：`}{assistantPreferenceLabel(item.preference.kind, item.preference.value, language)}</>}</button>}
@@ -1140,7 +1179,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
               <button type="button" className="wj-assistant-secondary" disabled={proposalBlocked} onClick={() => createSuggestedNode(index, item.action as AssistantCanvasAction, item.actionProjectId)}>{actionLabel(item.action, item.draft !== undefined)}</button>
             </> : <button type="button" className="wj-assistant-secondary" disabled={!canNavigateLocal || proposalBlocked} onClick={() => openSuggestedAction(item.action as AssistantNavigationAction, index)}>{actionLabel(item.action)}</button>)}
           </div>;})}
-          {chatView.stream.active&&chatView.stream.text&&<div className="wj-assistant-reply"><img src={robotImage} alt=""/><AssistantModelQuote text={chatView.stream.text} language={language} streaming/></div>}
+          {chatView.stream.active&&chatView.stream.text&&<div className="wj-assistant-reply"><img src={avatar.src} alt=""/><AssistantModelQuote text={chatView.stream.text} language={language} streaming/></div>}
           {workspace.active&&!sending&&workspace.view.record?.value.task.status==='interrupted'&&<p role="status" className="wj-assistant-hint">{assistantWorkspaceTaskLabel('interrupted',language)}</p>}
           {sending && !cancelledTurnWaiting && <><p className="wj-assistant-hint" role="status">{workspace.active?assistantWorkspaceTaskLabel(workspace.view.taskStatusUnavailable?'unavailable':workspace.view.record?.value.task.status==='queued'?'queued':'running',language):t.chatWorking}</p><button type="button" className="wj-assistant-secondary" disabled={cancelling} onClick={stopMessage}>{cancelling ? t.chatStopping : t.chatStop}</button></>}
           {taskRead.working&&<p className="wj-assistant-hint" role="status">{language==='en-US'?'Reading local task records…':language==='zh-TW'?'正在讀取本機任務紀錄…':'正在读取本地任务记录…'}</p>}
@@ -1173,9 +1212,7 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
           <div className="wj-assistant-composer-actions">
             {getCanvasPlanController&&<button type="button" className="wj-assistant-plan-toggle wj-assistant-text-button" aria-pressed={canvasPlan.phase==='scope'} disabled={taskRead.working||!workspace.active||busy||cancelling||accountPending||workspace.snapshot.switching||canvasPlan.working||!!canvasPlan.pendingOperation} onClick={beginCanvasPlan}><Sparkles size={14}/>{canvasCopy.title}</button>}
             {customRole&&<button type="button" className="wj-assistant-icon-button" aria-label={mediaCopy.add} title={mediaCopy.hint} disabled={!workspace.active||workspace.snapshot.switching||busy||workspace.view.importingMedia||attachments.length>=6} onClick={()=>mediaInputRef.current?.click()}><Paperclip size={16}/></button>}
-            <button type="button" className="wj-assistant-icon-button" aria-label={customRole ? (language==='en-US'?'Role settings':language==='zh-TW'?'角色設定':'角色设置') : t.configureModel} onClick={() => customRole ? setRoleEditor(structuredClone(workspace.role)) : setPanel("model")}><Link2 size={16}/></button>
-            <button type="button" className="wj-assistant-icon-button" aria-label={t.diagnose} title={`${t.diagnose} — ${t.diagnoseHint}`} disabled={taskRead.working || busy || cancelling} onClick={()=>void addFailureSummary()}><Wrench size={16}/></button>
-            <button type="button" className="wj-assistant-icon-button" aria-label={newChatLabel} title={newChatLabel} disabled={taskRead.working || !!taskInspection || busy || cancelling || accountPending || !!pendingPreference || !!pendingNavigation || (!customRole && (!status?.configured || !status?.installed))} onClick={startNewChat}><RotateCcw size={16}/></button>
+            <button type="button" className="wj-assistant-model-picker wj-assistant-text-button" onClick={()=>customRole?setRoleEditor(structuredClone(workspace.role)):setPanel('settings')} data-wanjuan-i18n-skip>{customRole?workspace.role.configuration.model||workspace.role.descriptor.name:'DeepSeek'}</button>
             <button type="button" className="wj-assistant-send" aria-label={canvasPlan.phase==='scope'?canvasCopy.request:t.chatSend} title={canvasPlan.phase==='scope'?canvasCopy.request:t.chatSend} disabled={taskRead.working||canvasPlan.working||!!canvasPlan.pendingOperation||!!taskInspection || workspace.view.importingMedia || (busy && !cancelledTurnWaiting) || cancelling || accountPending || !!pendingPreference || !!pendingNavigation || (!message.trim()&&!(customRole&&attachments.length))} onClick={sendChatOrPlan}><Send size={17}/></button>
           </div>
           {customRole&&<details className="wj-assistant-hint wj-assistant-media-help"><summary>{language==='en-US'?'Attachment limits and model support':language==='zh-TW'?'附件限制與模型支援':'附件限制与模型支持'}</summary>{mediaCopy.hint}</details>}
@@ -1194,23 +1231,15 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
         </div>}
         {authPhase !== "idle" && <><p className="wj-assistant-hint" role="status">{authPhase === "committing" ? accountText.committing : accountText.waiting}</p><button type="button" className="wj-assistant-text-button" disabled={authPhase === "committing"} onClick={cancelAccount}>{accountText.cancel}</button></>}
         {chatError && <p className="wj-assistant-error" role="alert">{chatError.startsWith("ASSISTANT_WORKSPACE_") ? (chatError.endsWith("LOADING") ? sessionCopy.loading : sessionCopy.conflict) : chatError}</p>}
-        {panel === "model" && <div className="wj-assistant-setup"><p className="wj-assistant-hint">{t.configureModel}</p>
-        <p className="wj-assistant-message">{t.hello}</p><p className="wj-assistant-message">{t.ask}</p>
-        <label htmlFor="wj-assistant-doc">{t.docs}</label><input id="wj-assistant-doc" type="url" value={docUrl} placeholder={t.placeholder} onChange={(event) => { setDocUrl(event.target.value); setError(""); }} />
-        <label htmlFor="wj-assistant-model">{handoffText.model}</label><input id="wj-assistant-model" type="text" maxLength={256} autoComplete="off" value={guideModel} onChange={event => { setGuideModel(event.target.value); setError(""); }} />
-        <label htmlFor="wj-assistant-category">{handoffText.category}</label><select id="wj-assistant-category" value={guideCategory} onChange={event => { setGuideCategory(event.target.value); setError(""); }}><option value="">{handoffText.choose}</option><option value="image">{handoffText.image}</option><option value="video">{handoffText.video}</option></select>
-        {error && <p className="wj-assistant-error" role="alert">{error}</p>}
-        <button type="button" className="wj-assistant-primary" disabled={!status || statusError} onClick={continueToButler}><Link2 size={16} />{status?.configured && status?.installed ? t.continueAssistant : t.continue}<ArrowRight size={16} /></button>
-        <button type="button" className="wj-assistant-secondary" onClick={openSetup}><KeyRound size={16} />{t.configure}</button>
-        <p className="wj-assistant-hint">{handoffText.hint}</p><p className="wj-assistant-hint"><ShieldCheck size={15} />{t.hint}</p><p className="wj-assistant-hint">{t.details}</p>
-        {status?.configured && status?.installed && <p className="wj-assistant-hint">{t.assistantDocsHint}</p>}
-        </div>}
+        <div hidden={panel!=='model'}><AssistantServiceSetup language={language} connected={!!status?.configured} disabled={!ready||settingsUnavailable||!onPrepareService} onBack={()=>setPanel('chat')} onManual={openSetup} onContinue={async input=>{if(!onPrepareService)throw new Error('ASSISTANT_SERVICE_UNAVAILABLE');await onPrepareService(input,!!status?.configured&&!!status?.installed);setDrawer(false);if(desktop.host){desktop.dock();setPanel('chat');}}}/></div>
+        {panel==='diagnosis'&&<AssistantDiagnosis language={language} owner={workspace.id} disabled={!tasksReady||!workspace.active||busy||cancelling} initial={diagnosisSnapshot?.owner===workspace.id?diagnosisSnapshot:undefined} onSnapshot={value=>setDiagnosisSnapshot({owner:workspace.id,...value})} read={()=>taskReader.read(workspace.id,{includeDiagnostics:true})} onBack={()=>setPanel('chat')} onApi={openSetup} onAnalyze={id=>{setPanel('chat');void addFailureSummary(id);}}/>}
+        {panel==='roles'&&<section className="wj-assistant-page" data-wanjuan-i18n-skip><button type="button" className="wj-assistant-text-button" onClick={()=>setPanel('chat')}><ChevronLeft size={15}/>{ui.back}</button><header className="wj-assistant-page-title"><h2>{ui.roles}</h2><p>{ui.roleHint}</p></header><div className="wj-assistant-managed-roles">{workspace.snapshot.catalog.roles.filter((role:any)=>!role.archived).map((role:any)=><div key={role.id}><button type="button" className="wj-assistant-role-item" data-wanjuan-assistant-role-id={role.id} aria-pressed={role.id===workspace.role?.descriptor.id} disabled={switchBlocked} onClick={()=>void openRole(role.id).then(()=>setPanel('chat'))}>{role.name}</button>{role.id===workspace.role?.descriptor.id&&role.engine==='custom'&&<button type="button" className="wj-assistant-secondary" disabled={switchBlocked} onClick={()=>{setRoleEditor(structuredClone(workspace.role));setRoleSaveError('');}}>{language==='en-US'?'Edit role':language==='zh-TW'?'編輯角色':'编辑角色'}</button>}</div>)}</div><footer className="wj-assistant-page-actions">{agentWorkspace&&<button type="button" className="wj-assistant-primary" disabled={switchBlocked} onClick={()=>void newRole()}><Plus size={16}/>{ui.newRole}</button>}<button type="button" className="wj-assistant-secondary" onClick={()=>{setDrawer(false);onOpenRoles?.();}}>{sessionCopy.roles}</button></footer></section>}
         {panel === "settings" && <button type="button" className="wj-assistant-text-button" onClick={() => { setDrawer(false); setWelcome(true); }}>{t.viewGuide}</button>}
       </div>
       </div>
       {workbench&&showArchived&&archivePreview&&archivePreview.roleId===workspace.role?.descriptor.id&&<AssistantArchivePreview id={archivePreview.id} name={archivePreview.name} language={language} onClose={closeArchive}/>}
       {chatVisible&&panel==='chat'&&mediaPreview?.ownerId===workspace.id&&<AssistantMediaPreview ownerId={mediaPreview.ownerId} attachment={mediaPreview.attachment} language={language} onClose={closeMediaPreview}/>}
-      <button type="button" className="wj-assistant-resize" aria-label={resizeLabel} title={resizeLabel} onPointerDown={event => startPointer(event, "resize")} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer} onKeyDown={event => { const dx = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0; const dy = event.key === "ArrowDown" ? 16 : event.key === "ArrowUp" ? -16 : 0; if (!dx && !dy) return; event.preventDefault(); const parent = drawerRef.current?.parentElement; if (parent) setGeometry(previous => previous ? {...previous, width:Math.max(Math.min(320, parent.clientWidth - previous.x - 12), Math.min(previous.width + dx, parent.clientWidth - previous.x - 12)), height:Math.max(Math.min(280, parent.clientHeight - previous.y - 12), Math.min(previous.height + dy, parent.clientHeight - previous.y - 12))} : previous); }} />
+      {!desktop.host&&<button type="button" className="wj-assistant-resize" aria-label={resizeLabel} title={resizeLabel} onPointerDown={event => startPointer(event, "resize")} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer} onKeyDown={event => { const dx = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0; const dy = event.key === "ArrowDown" ? 16 : event.key === "ArrowUp" ? -16 : 0; if (!dx && !dy) return; event.preventDefault(); const parent = drawerRef.current?.parentElement; if (parent) setGeometry(previous => previous ? {...previous, width:Math.max(Math.min(320, parent.clientWidth - previous.x - 12), Math.min(previous.width + dx, parent.clientWidth - previous.x - 12)), height:Math.max(Math.min(280, parent.clientHeight - previous.y - 12), Math.min(previous.height + dy, parent.clientHeight - previous.y - 12))} : previous); }} />}
     </aside>}
     {pendingBackup&&<div className="wj-assistant-backup-backdrop"><section className="wj-assistant-backup-dialog" role="dialog" aria-modal="true" aria-label={backupCopy.confirm}>
       <h2>{backupCopy.confirm}</h2><p>{backupCopy.counts(pendingBackup.roles.length,pendingBackup.sessions.length,pendingBackup.media.length)}</p><p>{backupCopy.confirmHint}</p>
@@ -1241,4 +1270,9 @@ export function AssistantOnboarding({ ready, tasksReady = ready, navigationReady
       <div className="wj-welcome-notes"><p><ExternalLink size={15} />{t.browser}</p><p><BookOpenText size={15} />{t.cost}</p></div>
     </div></div>}
   </>;
+  return <>{desktop.host?<>
+    {workbenchRequested&&<div className="wj-assistant-desktop-placeholder"><p>{desktopCopy.active}</p><button type="button" className="wj-assistant-secondary" onClick={()=>void desktop.focus()}>{desktopCopy.focus}</button><button type="button" className="wj-assistant-text-button" onClick={()=>{setDrawer(true);onOpenCanvas();desktop.dock();}}>{desktopCopy.dock}</button></div>}
+    {!workbenchRequested&&<button type="button" className="wj-assistant-launch" aria-label={desktopCopy.focus} onClick={()=>void desktop.focus()}><img src={avatar.src} alt=""/></button>}
+    {createPortal(surface,desktop.host)}
+  </>:surface}</>;
 }

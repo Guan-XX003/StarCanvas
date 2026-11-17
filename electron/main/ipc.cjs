@@ -175,6 +175,7 @@ function accountErrorResult(error) {
 
 function registerDesktopIpc() {
   if (!ipcMain || !dialog) return;
+  ipcMain.handle('wanjuan:assistant-window-control',(event,command)=>require('./assistant-window.cjs').controlAssistantWindow(event,command));
   require('./application-operation-ipc.cjs').registerApplicationOperationIpc({ipcMain,rejectUntrustedIpc,getService:()=>require('./application-operation-host.cjs').getApplicationOperationService()});
   let customConfigService;
   require('./custom-node-config-ipc.cjs').registerCustomNodeConfigIpc({ipcMain,rejectUntrustedIpc,getService:() => customConfigService ||= require('./custom-node-config-service.cjs').createSystemCustomNodeConfigService()});

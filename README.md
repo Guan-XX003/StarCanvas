@@ -6,7 +6,7 @@
 
 **面向 AI 创作流程的桌面画布应用**
 
-[![版本](https://img.shields.io/badge/版本-1.4.9-blue.svg)](https://github.com/Guan-XX003/StarCanvas/releases)
+[![版本](https://img.shields.io/badge/版本-1.5.0-blue.svg)](https://github.com/Guan-XX003/StarCanvas/releases)
 [![平台](https://img.shields.io/badge/平台-macOS%20|%20Windows-lightgrey.svg)](#安装)
 [![许可](https://img.shields.io/badge/许可-PolyForm%20Noncommercial-orange.svg)](LICENSE)
 
@@ -103,10 +103,10 @@ StarCanvas是一款强大的本地桌面 AI 创作工作台，专为现代 AI �
 
 | 平台 | 架构 | 下载 |
 |------|------|------|
-| macOS | Apple Silicon (arm64) | [StarCanvas-1.4.9-arm64.dmg](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/StarCanvas-1.4.9-arm64.dmg) |
-| Windows | x64 | [StarCanvas-1.4.9-x64.exe](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/StarCanvas-1.4.9-x64.exe) |
+| macOS | Apple Silicon (arm64) | [StarCanvas-1.5.0-arm64.dmg](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.5.0/StarCanvas-1.5.0-arm64.dmg) |
+| Windows | x64 | [StarCanvas-1.5.0-x64.exe](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.5.0/StarCanvas-1.5.0-x64.exe) |
 
-CLI / MCP 独立下载：[starcanvas-cli-1.4.9.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.4.9/starcanvas-cli-1.4.9.zip)
+CLI / MCP 独立下载：[starcanvas-cli-1.5.0.zip](https://github.com/Guan-XX003/StarCanvas/releases/download/v1.5.0/starcanvas-cli-1.5.0.zip)
 
 CLI 主命令为 `starcanvas`，MCP 服务为 `starcanvas-mcp`；旧 `wanjuan` 名称暂时保留为兼容别名。
 

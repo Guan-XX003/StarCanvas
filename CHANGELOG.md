@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0 - 2026-11-17
+
+- Added a native desktop assistant window with free movement/resizing, optional always-on-top, show-main and return-to-canvas controls. Existing conversations and drafts remain owned by the same encrypted workspace.
+- Simplified assistant chat/workbench navigation into Chat, Configure API and Diagnose, with contextual role/session actions and consistent rounded controls, typography and theme surfaces.
+- Added local assistant avatar customization and a five-category image/video/Jimeng/music/text API setup guide after DeepSeek connection. Explicit review preserves existing manual channels and request protocols; local checks do not imply connectivity or generation support.
+- Added exact-task safe diagnosis summaries for review in the chat draft, without automatic sends or retries.
+- Kept native desktop-window close separate from App quit; normal quit saves local owners and freezes both presentation surfaces. No second canvas/controller or plaintext conversation store is introduced.
+- Synchronized bundled and standalone CLI/MCP versions to 1.5.0; the existing 14-tool approval model is unchanged.
+- Personal-project distribution remains macOS ad-hoc signed/not notarized and Windows without Authenticode signing.
+
 ## 1.4.9 - 2026-11-16
 
 - Updated Electron to 42.11.16 for the compromised eMudhra certificate mitigation, and Vite to 8.1.6 for development-server fixes.

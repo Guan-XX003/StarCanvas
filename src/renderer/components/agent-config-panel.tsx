@@ -3,7 +3,7 @@
  * 自 WanJuanAppRoot 抽出为子组件，props 传入依赖，行为不变。
  */
 import { jsx, jsxs } from "react/jsx-runtime";
-import {useSyncExternalStore} from 'react';
+import {useEffect,useRef,useSyncExternalStore} from 'react';
 import { agentIconOptions, getAgentIconKey, renderAgentIconGlyph } from "../lib/agent";
 import {roleEditorText,roleKnowledgeCount,roleKnowledgeTime} from '../lib/assistant-role-editor-copy';
 declare const chrome: any;
@@ -32,6 +32,26 @@ export function WanJuanAgentConfigPanel({
   const currentLanguage=useSyncExternalStore(subscribeLanguage,readLanguage,()=> 'zh-CN');
   const locale=language||currentLanguage,tr=(text:string)=>roleEditorText(text,locale);
   const modelOptions=[...new Set([...(agentModelOptions||[]),...(selectedAgent?.model?[selectedAgent.model]:[])])];
+  const dialog=useRef<HTMLDivElement>(null),actions=useRef({onCancel,setAgentConfigOpen,saving});
+  actions.current={onCancel,setAgentConfigOpen,saving};
+  useEffect(()=>{
+    const doc=dialog.current?.ownerDocument||document;
+    const previous=doc.activeElement as HTMLElement|null;
+    dialog.current?.focus({preventScroll:true});
+    const key=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(!actions.current.saving){if(actions.current.onCancel)actions.current.onCancel();else actions.current.setAgentConfigOpen(false);}return;}
+      if(event.key!=='Tab'||!dialog.current)return;
+      const controls=[...dialog.current.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),summary,[tabindex="0"]')].filter(element=>element.getClientRects().length>0);
+      const first=controls[0],last=controls.at(-1);if(!first){event.preventDefault();return;}
+      if(event.shiftKey&&(doc.activeElement===first||doc.activeElement===dialog.current)){event.preventDefault();last?.focus();}
+      else if(!event.shiftKey&&(doc.activeElement===last||doc.activeElement===dialog.current)){event.preventDefault();first.focus();}
+    };
+    doc.addEventListener('keydown',key,true);return()=>{doc.removeEventListener('keydown',key,true);if(previous?.isConnected)previous.focus({preventScroll:true});};
+  },[]);
+  const memoryScopeField=stagedSave && jsxs(`label`,{className:`block`,children:[
+                              jsx(`span`,{className:`text-xs block mb-2`,children:tr(`记忆范围（仅开启长期记忆时使用）`)}),
+                              jsxs(`select`,{value:selectedAgent.memoryScope||`session`,onChange:event=>updateSelectedAgent({memoryScope:event.target.value}),className:`w-full rounded-xl px-3 py-2 text-sm`,style:{background:agentTheme.inputBg,color:agentTheme.inputText,border:`1px solid ${agentTheme.inputBorder}`},children:[jsx(`option`,{value:`session`,children:tr(`仅当前会话（默认）`)}),jsx(`option`,{value:`role`,children:tr(`此角色的全部会话（明确共享）`)})]}),
+                            ]});
   return jsx(`div`, {
                   'data-wanjuan-i18n-skip':true,
                   className: `fixed inset-0 flex items-center justify-center`,
@@ -41,7 +61,7 @@ export function WanJuanAgentConfigPanel({
                   },
                   children: selectedAgent &&
                     jsxs(`div`, {
-                      role:'dialog','aria-modal':true,'aria-label':tr(stagedSave?'角色设置':'智能体配置'),
+                      role:'dialog','aria-modal':true,'aria-label':tr(stagedSave?'角色设置':'智能体配置'),ref:dialog,tabIndex:-1,
                       className: `wj-assistant-role-editor flex flex-col overflow-hidden shadow-[0_28px_80px_rgba(0,0,0,0.48),0_10px_30px_rgba(0,0,0,0.34)]`,
                       style: {
                         width: `min(70vw, 1120px)`,
@@ -125,10 +145,6 @@ export function WanJuanAgentConfigPanel({
                           },
                           children: [
                             saveError && jsx(`p`,{role:`alert`,className:`wj-assistant-error`,children:saveError}),
-                            stagedSave && jsxs(`label`,{className:`block`,children:[
-                              jsx(`span`,{className:`text-xs block mb-2`,children:tr(`记忆范围（仅开启长期记忆时使用）`)}),
-                              jsxs(`select`,{value:selectedAgent.memoryScope||`session`,onChange:event=>updateSelectedAgent({memoryScope:event.target.value}),className:`w-full rounded-xl px-3 py-2 text-sm`,style:{background:agentTheme.inputBg,color:agentTheme.inputText,border:`1px solid ${agentTheme.inputBorder}`},children:[jsx(`option`,{value:`session`,children:tr(`仅当前会话（默认）`)}),jsx(`option`,{value:`role`,children:tr(`此角色的全部会话（明确共享）`)})]}),
-                            ]}),
                             jsx(`div`, {
                               className: `text-center text-[11px] leading-5 px-6`,
                               style: {
@@ -223,6 +239,7 @@ export function WanJuanAgentConfigPanel({
                                         return jsxs(
                                           `button`, {
                                             type: `button`,
+                                            'aria-pressed':iconKey,
                                             onClick: () =>
                                               updateSelectedAgent({
                                                 icon: iconOption.key,
@@ -274,7 +291,8 @@ export function WanJuanAgentConfigPanel({
                                 }),
                               ],
                             }),
-                            jsxs(`div`, {
+                            jsxs(`details`, {
+                              open:!!selectedAgent.memoryEnabled,
                               className: `rounded-2xl p-4 space-y-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]`,
                               style: {
                                 border: `1px solid ${agentTheme.modalBorder}`,
@@ -284,6 +302,8 @@ export function WanJuanAgentConfigPanel({
                                 boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.12)`,
                               },
                               children: [
+                                jsx(`summary`,{className:`wj-assistant-memory-summary`,children:tr(`长期记忆 · Mem0`)}),
+                                memoryScopeField,
                                 jsxs(`div`, {
                                   className: `flex items-center justify-between gap-3`,
                                   children: [

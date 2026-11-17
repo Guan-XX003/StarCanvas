@@ -339,7 +339,7 @@ export function WanJuanSettingsBasicTab({
                                       children: [
                                         jsx(`span`, {
                                           className: `text-sm font-semibold text-gray-100`,
-	                                          children: `1.4.9`,
+	                                          children: `1.5.0`,
 	                                        }),
 	                                        jsxs(`div`, {
 	                                          className: `flex items-center gap-2 ml-auto`,

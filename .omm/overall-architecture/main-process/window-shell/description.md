@@ -62,3 +62,16 @@ Electron entitlement preset is unchanged. afterSign additionally verifies the
 entire App with codesign --verify --deep --strict, after the fixed helper and
 Harness identity checks. This proves resource sealing, not Apple notarization,
 Gatekeeper distribution trust or native login acceptance.
+
+assistant-window.cjs now owns one optional native desktop assistant window per
+main renderer. Only the exact same-origin /assistant-window.html and fixed frame
+name are permitted. That script-free shell has an inert preload, no desktop
+bridge, no Node integration and no webviews; it cannot navigate after loading.
+The existing main renderer renders its assistant via a React DOM portal, so no
+second conversation/controller/canvas owner or credential copy is introduced.
+Native controls are allowlisted and require that registered main window's exact
+main frame/index document. Main background throttling is temporarily disabled
+while its desktop presentation exists. Normal main-window close hides that
+live owner; actual App quit still waits for its original local-save registry,
+which freezes both presentation documents. Closing the last desktop presentation
+restores a hidden owner; owner navigation, crash or destruction removes it.

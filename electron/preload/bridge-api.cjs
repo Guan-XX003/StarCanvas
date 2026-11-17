@@ -90,6 +90,11 @@ exposeGlobal("wanjuanDesktop", {
     return ()=>ipcRenderer.removeListener('wanjuan:application-operations-changed',listener);
   },
   assistantStatus: async () => ipcRenderer.invoke('wanjuan:assistant-status'),
+  assistantWindowControl: command => ipcRenderer.invoke('wanjuan:assistant-window-control',command),
+  onAssistantWindowClosed: callback => {
+    const listener=()=>callback();ipcRenderer.on('wanjuan:assistant-window-closed',listener);
+    return ()=>ipcRenderer.removeListener('wanjuan:assistant-window-closed',listener);
+  },
   assistantAccountStart: async () => ipcRenderer.invoke('wanjuan:assistant-account-start'),
   assistantAccountStatus: async () => ipcRenderer.invoke('wanjuan:assistant-account-status'),
   assistantAccountCancel: async () => ipcRenderer.invoke('wanjuan:assistant-account-cancel'),

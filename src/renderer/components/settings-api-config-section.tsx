@@ -1,6 +1,6 @@
 /** 设置-API 配置分区（api 标签页主体）。自 WanJuanAppRoot 抽出，props 传入，行为不变。 */
 import { jsx, jsxs } from "react/jsx-runtime";
-import { Trash2 } from "lucide-react";
+import { Trash2, KeyRound } from "lucide-react";
 declare const chrome: any;
 
 export function WanJuanSettingsApiConfigSection({
@@ -11,7 +11,7 @@ export function WanJuanSettingsApiConfigSection({
   const updateApiConfig = (id, patch) => setApiConfigs((current) =>
     current.map((item) => item.id === id ? { ...item, ...patch } : item));
   return jsxs(`div`, {
-                            className: `group bg-[#1a1a1a] rounded-xl overflow-hidden transition-all duration-300 shadow-sm border border-[#222] wanjuan-settings-card`,
+                            className: `group rounded-xl overflow-hidden wanjuan-settings-card wj-assistant-api-settings`,
                             children: [
                               jsxs(`div`, {
                                 className: `flex justify-between items-center p-4 select-none border-b border-[#222]`,
@@ -22,10 +22,7 @@ export function WanJuanSettingsApiConfigSection({
                                       jsxs(`h2`, {
                                         className: `font-bold text-gray-200 text-sm flex items-center gap-2 wanjuan-settings-card-title`,
                                         children: [
-                                          jsx(`span`, {
-                                            className: `wanjuan-skeuo-icon wanjuan-skeuo-icon-api`,
-                                            children: `🔐`,
-                                          }),
+                                          jsx(KeyRound, {size:18,"aria-hidden":true}),
                                           ` 统一 API 配置`,
                                         ],
                                       }),
@@ -50,7 +47,7 @@ export function WanJuanSettingsApiConfigSection({
                                   apiConfigs.map((config, index) =>
                                     jsxs(
                                       `div`, {
-                                        className: `flex items-center gap-3 bg-[#222] rounded-lg p-2 relative group/item border border-transparent hover:border-[#333] transition-colors`,
+                                        className: `wj-assistant-api-settings-row flex items-center gap-3 rounded-lg p-3 relative group/item`,
                                         children: [
                                           jsx(`div`, {
                                             className: `w-1/4`,
@@ -91,10 +88,6 @@ export function WanJuanSettingsApiConfigSection({
                                                 onChange: (event) => {
                                                   updateApiConfig(config.id, { key: event.target.value });
                                                 },
-                                                onFocus: (event) =>
-                                                  (event.target.type = `text`),
-                                                onBlur: (event) =>
-                                                  (event.target.type = `password`),
                                               },
                                             ),
                                           }),

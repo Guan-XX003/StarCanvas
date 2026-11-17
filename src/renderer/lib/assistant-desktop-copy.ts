@@ -1,0 +1,3 @@
+export function assistantDesktopCopy(language:string){
+  return language==='en-US'?{open:'Open in desktop window',dock:'Return to canvas',pin:'Keep on top',unpin:'Stop keeping on top',focus:'Show assistant window',pending:'Opening window…',failure:'Could not open or update the assistant window. Your conversation remains here.',active:'Assistant is open in a desktop window.'}:language==='zh-TW'?{open:'彈出為桌面視窗',dock:'收回畫布',pin:'視窗置頂',unpin:'取消置頂',focus:'顯示助手視窗',pending:'正在開啟視窗…',failure:'無法開啟或更新助手視窗，對話仍保留在此處。',active:'助手已在獨立桌面視窗中開啟。'}:{open:'弹出为桌面窗口',dock:'收回画布',pin:'窗口置顶',unpin:'取消置顶',focus:'显示助手窗口',pending:'正在打开窗口…',failure:'无法打开或更新助手窗口，对话仍保留在这里。',active:'助手已在独立桌面窗口中打开。'};
+}

@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {createDesktopCloseCoordinator}=require('../electron/main/desktop-close-coordinator.cjs');
 const oldTs=require.extensions['.ts'],oldLoad=Module._load;
 require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},fileName:f}).outputText,f);
-const {createDesktopCloseRegistry}=require('../src/renderer/lib/desktop-close.ts');
+const {createDesktopCloseRegistry,freezeDesktopCloseDocuments}=require('../src/renderer/lib/desktop-close.ts');
 let registered;
 Module._load=function(name,parent,...args){
  if(parent?.filename.endsWith('useSaveCanvasState.ts')){
@@ -62,6 +62,12 @@ test('App quit and repeated close intents share the same local save, and do not 
  f.win.close();f.win.close();f.app.quit();f.app.quit();await tick();assert.equal(ca,1);assert.equal(cb,1);assert(!f.app.exited);
  a.release();await tick();assert(!f.app.exited);b.release();await until(()=>f.app.exited);assert.equal(f.calls,1);
 });
+test('closing a main window with an independent assistant hides its owner, but real quit still waits for saves',async t=>{
+ const slow=gate(),f=fixture(t,{prepare:async()=>{await slow.promise;return {ok:true};}});let hidden=0;
+ f.win.__wanjuanKeepAliveForAssistant=()=>true;f.win.hide=()=>hidden++;
+ f.win.close();await tick();assert.equal(hidden,1);assert(!f.win.destroyed);assert.equal(f.calls,0);
+ f.app.quit();await tick();assert.equal(f.calls,1);assert(!f.app.exited);slow.release();await until(()=>f.app.exited);
+});
 test('a failed local save retains the window, restores input and reports only a fixed code',async t=>{
  let fail=true;const f=fixture(t,{prepare:async()=>{if(fail)throw Error('PRIVATE_SYNTHETIC_CONTENT');return {ok:true};}});
  f.app.quit();await until(()=>f.reports.length>0);assert(!f.app.exited);assert(!f.win.destroyed);assert.equal(f.thawed,1);assert(!JSON.stringify([f.reports,f.notices]).includes('PRIVATE_'));
@@ -112,4 +118,10 @@ test('cancelled quit cannot stop the static server; coordinator is installed bef
  const root=path.join(__dirname,'..');const server=fs.readFileSync(path.join(root,'electron/main/net/static-server.cjs'),'utf8');assert(server.includes('app.on("will-quit", () => server.close())'));assert(!server.includes('app.on("before-quit", () => server.close())'));
  const main=fs.readFileSync(path.join(root,'electron/main/index.cjs'),'utf8');assert(main.indexOf("getDesktopCloseCoordinator();")<main.indexOf('app.whenReady()'));
  const window=fs.readFileSync(path.join(root,'electron/main/window.cjs'),'utf8');assert(window.includes('registerWindow(win)'));
+});
+test('quit freezes both portal and owner inputs, then restores each previous state on failure',()=>{
+ const main={inert:false},child={inert:true};let focus=0;
+ const doc=root=>({getElementById:id=>id==='root'?root:null,activeElement:{isConnected:true,focus:()=>focus++}});
+ const a=doc(main),b=doc(child),restore=freezeDesktopCloseDocuments([a,b,b]);assert(main.inert);assert(child.inert);
+ restore();assert.equal(main.inert,false);assert.equal(child.inert,true);assert.equal(focus,2);
 });
